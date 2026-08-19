@@ -42,6 +42,14 @@ cd backend && uv run python manage.py seed_e2e_users
 | super-admin-app | `localhost:4202` | platform staff |
 | validator-app | `localhost:4203` | client staff (same JWT audience as client-admin-app) |
 
+**API documentation**: `GET /api/v1/docs/` (Swagger UI, browsable —
+fully styled via CDN-hosted assets, confirmed working on the deployed
+backend) and `GET /api/v1/schema/` (raw OpenAPI schema). Useful for
+exploring exact request/response shapes for any endpoint referenced
+below without reading the Django source — e.g. locally,
+`localhost:8000/api/v1/docs/`; on the Vercel deployment,
+`https://<your-backend-project>.vercel.app/api/v1/docs/`.
+
 **Seeded accounts** (all passwords `e2e-test-password-123`):
 
 | Short name | Email | What it's for |

@@ -145,6 +145,7 @@ def initiate_payment(*, booking: Booking, passenger: User, idempotency_key: str)
                 amount=booking.total_amount,
                 currency=booking.currency,
                 reference=reference,
+                callback_url=f"{settings.CUSTOMER_APP_URL}/my-bookings",
             )
             intent = PaymentIntent.objects.create(
                 client=booking.client,

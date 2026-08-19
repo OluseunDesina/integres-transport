@@ -300,15 +300,21 @@ Create 4 Vercel projects, one per app, all rooted at `frontend`, per
 `CORS_ALLOWED_ORIGINS`/`CLIENT_ADMIN_APP_URL` on the backend project
 (§3) and redeploy it.
 
-### 4.7 Known, accepted gap for this deploy: unstyled API docs
+### 4.7 API docs — Swagger UI, already fully working
 
-No `whitenoise`/static-file serving is configured — Vercel's Python
-builder has no generic build-script hook the way its Node builder does
-to run `collectstatic`, and this deployment exists to demo the API and
-the 4 frontends, not the Django admin. `GET /api/v1/docs/` (Swagger UI)
-and the DRF browsable API will load and function but render unstyled
-(no CSS). Named, not solved — same posture every other out-of-scope gap
-in this codebase gets (§7).
+`GET /api/v1/docs/` is live at
+`https://<your-backend-project>.vercel.app/api/v1/docs/`, and the raw
+OpenAPI schema at `.../api/v1/schema/`. An earlier draft of this plan
+assumed these would render unstyled on Vercel (reasoning about
+`whitenoise`/`collectstatic` that turned out not to apply) — **checked
+live and that assumption was wrong**, corrected here rather than left
+stale: drf-spectacular's `SpectacularSwaggerView` loads Swagger UI's own
+CSS/JS from a CDN (`cdn.jsdelivr.net/npm/swagger-ui-dist`) by default,
+not local Django static files — confirmed by inspecting the served
+HTML's `<link>`/`<script>` tags. No static-file serving was ever needed
+for this. (Separately, this project's `REST_FRAMEWORK` setting only
+registers `JSONRenderer` — there's no DRF browsable-API HTML view to
+worry about either way.)
 
 ## 5. Migration plan (ongoing, after the first deploy)
 
@@ -374,8 +380,6 @@ actually works before calling it done:
 
 ## 7. Known gaps not resolved by this plan (named, not solved)
 
-- **Unstyled API docs / no static-file serving** (§4.7) — accepted for
-  this demo environment.
 - **Supabase's exact `CREATEROLE` privilege** (§4.1) — the plan's SQL is
   the right SQL, sourced from this repo's own CI provisioning step, but
   whether Supabase's default project role can execute it wasn't

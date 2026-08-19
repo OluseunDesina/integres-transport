@@ -214,4 +214,13 @@ export class ScheduleForm implements OnInit {
     }
     return 'This field is required.';
   }
+
+  // A Business with no Routes yet renders the Route <select> with zero
+  // <option>s — nothing to pick, so Validators.required always fails.
+  // Without this, that reads exactly like a broken dropdown ("I selected
+  // one and it still says required") rather than what it actually is:
+  // there's genuinely nothing to select yet.
+  protected noRoutesAvailable(): boolean {
+    return !!this.form.controls.business.value && this.routeOptionsList().length === 0;
+  }
 }

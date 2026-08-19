@@ -4,6 +4,7 @@ see docs/specs/5-payments-wallet-ledger.md."""
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 
 from apps.booking.models import Booking
 from apps.booking.tests.factories import BookingFactory
@@ -88,6 +89,27 @@ def test_initiate_payment_success_creates_a_pending_intent_and_refreshes_seat_ho
     assert reservation.held_until > original_held_until
     entry = AuditLog.objects.get(action="payment.initiated")
     assert entry.target_id == str(intent.id)
+
+
+def test_initiate_payment_sends_paystack_a_callback_url_pointed_at_customer_app() -> None:
+    """Without a callback_url, Paystack has nothing to redirect the
+    browser back to after checkout — this is the concrete fix for the
+    "payment page doesn't redirect" bug, not just an incidental field."""
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+        PaystackAccountFactory(client=client, business=business)
+    booking, _reservation = booking_with_a_held_seat(client, business)
+
+    with (
+        patch(
+            "apps.payments.services.initialize_transaction", return_value=dict(_FAKE_INIT_DATA)
+        ) as mock_init,
+        tenant_context(str(client.id)),
+    ):
+        initiate_payment(booking=booking, passenger=booking.passenger, idempotency_key="k1")
+
+    assert mock_init.call_args.kwargs["callback_url"] == f"{settings.CUSTOMER_APP_URL}/my-bookings"
 
 
 def test_initiate_payment_rejects_a_second_pending_payment_for_the_same_booking() -> None:

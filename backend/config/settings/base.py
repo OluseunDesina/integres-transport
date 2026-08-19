@@ -242,6 +242,10 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 # per-environment value (and eventually per-WhiteLabelConfig domain,
 # once Slice 5 lands subdomain resolution).
 CLIENT_ADMIN_APP_URL = config("CLIENT_ADMIN_APP_URL", default="http://localhost:4201")
+# Same reasoning as CLIENT_ADMIN_APP_URL above — used as Paystack's
+# checkout callback_url so a passenger actually lands back in the app
+# after paying, instead of Paystack's own generic confirmation page.
+CUSTOMER_APP_URL = config("CUSTOMER_APP_URL", default="http://localhost:4200")
 
 # --- Paystack (Phase 5 Slice 2, docs/specs/5-payments-wallet-ledger.md) ---
 # No defaults — mirrors SECRET_KEY's own precedent for a secret that must

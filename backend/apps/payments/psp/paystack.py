@@ -38,13 +38,19 @@ def _to_minor_units(amount: Decimal) -> int:
 
 
 def initialize_transaction(
-    *, email: str, amount: Decimal, currency: str, reference: str
+    *, email: str, amount: Decimal, currency: str, reference: str, callback_url: str
 ) -> dict[str, Any]:
     """`POST /transaction/initialize`. `amount` is major-unit `Decimal`
     (matching every other money field in this codebase) — the kobo
     conversion happens inside this function, not pushed onto the
     caller. Returns the response's `data` dict
-    (`{authorization_url, access_code, reference}`)."""
+    (`{authorization_url, access_code, reference}`).
+
+    `callback_url` is required, not optional — without it Paystack
+    falls back to the merchant dashboard's own configured callback URL
+    (or its own generic confirmation page if that's unset either),
+    never this app's, so the browser never returns to a real screen
+    after checkout."""
     try:
         response = requests.post(
             f"{_BASE_URL}/transaction/initialize",
@@ -54,6 +60,7 @@ def initialize_transaction(
                 "amount": _to_minor_units(amount),
                 "currency": currency,
                 "reference": reference,
+                "callback_url": callback_url,
             },
             timeout=_REQUEST_TIMEOUT_SECONDS,
         )

@@ -89,6 +89,16 @@ describe('ScheduleForm', () => {
       );
     });
 
+    it('shows a hint to create a Route first when the chosen Business has none yet', async () => {
+      apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
+      fixture.componentInstance['form'].controls.business.setValue('biz-1');
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(fixture.componentInstance['noRoutesAvailable']()).toBe(true);
+      expect(fixture.nativeElement.textContent).toContain('has no Routes yet');
+    });
+
     it('toggling a day updates the selected days', () => {
       expect(fixture.componentInstance['isDaySelected'](1)).toBe(false);
       fixture.componentInstance['toggleDay'](1);

@@ -28,6 +28,13 @@
         [invalid]="!!fieldError('route')"
         [errorMessage]="fieldError('route')"
       />
+      @if (noRoutesAvailable()) {
+        <p class="-mt-2 text-sm text-slate-500">
+          This Business has no Routes yet.
+          <a routerLink="/routes/new" class="font-medium text-slate-900 underline">Create one first</a
+          >, then come back here.
+        </p>
+      }
 
       <fieldset class="flex flex-col gap-2">
         <legend class="text-sm font-medium text-slate-700">Days of week</legend>
