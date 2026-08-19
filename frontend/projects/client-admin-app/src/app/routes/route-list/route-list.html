@@ -1,0 +1,56 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Routes</h1>
+    <ui-button *appHasPermission="'network.manage'" (pressed)="goToNewRoute()">New route</ui-button>
+  </div>
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No routes yet"
+      description="Add your first route, then order its stops."
+    >
+      <ui-button *appHasPermission="'network.manage'" (pressed)="goToNewRoute()">New route</ui-button>
+    </ui-empty-state>
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Name</th>
+          <th class="px-4 py-2">Code</th>
+          <th class="px-4 py-2">Business</th>
+          <th class="px-4 py-2">Stops</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (route of store.items(); track route.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">{{ route.name }}</td>
+            <td class="px-4 py-2">{{ route.code || '—' }}</td>
+            <td class="px-4 py-2">{{ businessNames().get(route.business) ?? route.business }}</td>
+            <td class="px-4 py-2">{{ route.stops.length }}</td>
+            <td class="px-4 py-2">
+              @if (route.is_active) {
+                <ui-status-pill tone="positive" label="Active" />
+              } @else {
+                <ui-status-pill tone="neutral" label="Inactive" />
+              }
+            </td>
+            <td class="px-4 py-2 text-right">
+              <a
+                *appHasPermission="'network.manage'"
+                [routerLink]="['/routes', route.id, 'edit']"
+                class="text-sm font-medium text-slate-700 hover:text-slate-900"
+                >Edit</a
+              >
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>

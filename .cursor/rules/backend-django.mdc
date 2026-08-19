@@ -1,0 +1,69 @@
+---
+description: Django/DRF conventions and tenancy/RLS traps for the Integra backend
+globs: backend/**/*.py
+alwaysApply: false
+---
+
+# Backend conventions
+
+Fat services / thin views. `Decimal` for money, UTC for all datetimes, type hints
+throughout (`mypy` in CI), `ruff` for lint+format. Models in
+`apps/<name>/models.py`, business logic in a service layer, tests alongside.
+
+## Tenancy and RLS
+
+- Tenant-owned models inherit `apps.core.models.BaseModel` and are queried only
+  through the default `objects` manager. `Model.all_objects` is for deliberate,
+  explicit cross-client access.
+- Every concrete `BaseModel` subclass's migration must also apply
+  `apps.core.migration_operations.EnableRowLevelSecurity(model_name)`. RLS is a
+  second, DB-level layer; `all_objects` bypasses only the ORM filter, not it.
+- Code touching `BaseModel` rows outside an HTTP request (management command,
+  Celery task) must call `apps.core.rls.set_rls_session_vars(client_id,
+  is_platform_staff)` inside an open transaction first, or every query is
+  silently empty and every write is rejected. For system code with no
+  authenticated platform-staff request, use `apps.core.rls.platform_staff_bypass()`.
+- Connect to Postgres as `integra_app`, never `integra` (bootstrap superuser
+  bypasses RLS unconditionally).
+
+## Two evaluation-time traps with `TenantScopedManager`
+
+Both evaluate once at import time, before any request has set a tenancy context,
+and freeze to an empty queryset forever.
+
+```python
+# BAD — class attribute, evaluated at import
+class BusinessListView(ListAPIView):
+    queryset = Business.objects.all()
+
+# GOOD — method, evaluated per request
+class BusinessListView(ListAPIView):
+    def get_queryset(self):
+        return Business.objects.all()
+```
+
+```python
+# BAD — declared serializer fields are collected at class-body execution
+class RoleSerializer(serializers.ModelSerializer):
+    role = serializers.PrimaryKeyRelatedField(queryset=Role.objects.all())
+
+# GOOD — resolve the FK inside validate_<field>()
+class RoleSerializer(serializers.ModelSerializer):
+    def validate_role(self, value):
+        return Role.objects.get(pk=value)
+```
+
+`.all_objects` is contextvar-free and safe as a class attribute.
+
+## Permissions
+
+Gate endpoints with `apps.core.permissions.HasPermission(codename)` against
+DB-backed RBAC, not coarse role checks.
+
+## Commands
+
+`uv run pytest`, `uv run ruff check .`, `uv run mypy .`. Regenerate the OpenAPI
+spec with `uv run python manage.py spectacular --file openapi.yaml --validate`
+whenever the API surface changes; `./scripts/check_openapi_drift.sh` fails on a
+stale spec. If a full `pytest` run fails many unrelated tests in a
+permission/tenancy-shaped way, run `pytest --create-db` once before chasing it.

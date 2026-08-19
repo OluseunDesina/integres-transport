@@ -1,0 +1,63 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Drivers</h1>
+    <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewDriver()">New driver</ui-button>
+  </div>
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state title="No drivers yet" description="Add your first driver.">
+      <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewDriver()">New driver</ui-button>
+    </ui-empty-state>
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Name</th>
+          <th class="px-4 py-2">License</th>
+          <th class="px-4 py-2">Business</th>
+          <th class="px-4 py-2">Compliance</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (driver of store.items(); track driver.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">{{ driver.name }}</td>
+            <td class="px-4 py-2">{{ driver.license_number }}</td>
+            <td class="px-4 py-2">{{ businessNames().get(driver.business) ?? driver.business }}</td>
+            <td class="px-4 py-2">
+              @if (driver.compliance_warnings.length > 0) {
+                <ui-status-pill
+                  tone="negative"
+                  [label]="driver.compliance_warnings.length + ' warning(s)'"
+                  [title]="driver.compliance_warnings.join('; ')"
+                />
+              } @else {
+                <ui-status-pill tone="positive" label="Compliant" />
+              }
+            </td>
+            <td class="px-4 py-2">
+              @if (driver.is_active) {
+                <ui-status-pill tone="positive" label="Active" />
+              } @else {
+                <ui-status-pill tone="neutral" label="Inactive" />
+              }
+            </td>
+            <td class="px-4 py-2 text-right">
+              <a
+                *appHasPermission="'fleet.manage'"
+                [routerLink]="['/drivers', driver.id, 'edit']"
+                class="text-sm font-medium text-slate-700 hover:text-slate-900"
+                >Edit</a
+              >
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>

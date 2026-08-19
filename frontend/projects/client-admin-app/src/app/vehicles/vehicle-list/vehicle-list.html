@@ -1,0 +1,64 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Vehicles</h1>
+    <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewVehicle()">New vehicle</ui-button>
+  </div>
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No vehicles yet"
+      description="Add a vehicle type first, then register your vehicles against it."
+    >
+      <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewVehicle()">New vehicle</ui-button>
+    </ui-empty-state>
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Registration</th>
+          <th class="px-4 py-2">Business</th>
+          <th class="px-4 py-2">Compliance</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (vehicle of store.items(); track vehicle.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">{{ vehicle.registration_number }}</td>
+            <td class="px-4 py-2">{{ businessNames().get(vehicle.business) ?? vehicle.business }}</td>
+            <td class="px-4 py-2">
+              @if (vehicle.compliance_warnings.length > 0) {
+                <ui-status-pill
+                  tone="negative"
+                  [label]="vehicle.compliance_warnings.length + ' warning(s)'"
+                  [title]="vehicle.compliance_warnings.join('; ')"
+                />
+              } @else {
+                <ui-status-pill tone="positive" label="Compliant" />
+              }
+            </td>
+            <td class="px-4 py-2">
+              @if (vehicle.is_active) {
+                <ui-status-pill tone="positive" label="Active" />
+              } @else {
+                <ui-status-pill tone="neutral" label="Inactive" />
+              }
+            </td>
+            <td class="px-4 py-2 text-right">
+              <a
+                *appHasPermission="'fleet.manage'"
+                [routerLink]="['/vehicles', vehicle.id, 'edit']"
+                class="text-sm font-medium text-slate-700 hover:text-slate-900"
+                >Edit</a
+              >
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>

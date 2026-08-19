@@ -1,0 +1,55 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Staff</h1>
+    <ui-button *appHasPermission="'staff.invite'" (pressed)="goToInvite()">Invite staff</ui-button>
+  </div>
+
+  @if (errorMessage(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state title="No staff yet" description="Invite your first team member to get started.">
+      <ui-button *appHasPermission="'staff.invite'" (pressed)="goToInvite()">Invite staff</ui-button>
+    </ui-empty-state>
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Email</th>
+          <th class="px-4 py-2">Role</th>
+          <th class="px-4 py-2">Active</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (member of store.items(); track member.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">{{ member.email }}</td>
+            <td class="px-4 py-2 [&_label]:sr-only">
+              <ui-select
+                label="Role"
+                [options]="roleOptions()"
+                [ngModel]="member.role.id"
+                [ngModelOptions]="{ standalone: true }"
+                (ngModelChange)="onRoleChange(member, $event)"
+              />
+            </td>
+            <td class="px-4 py-2">
+              <input
+                type="checkbox"
+                [attr.aria-label]="'Active — ' + member.email"
+                [ngModel]="member.is_active"
+                [ngModelOptions]="{ standalone: true }"
+                (ngModelChange)="onActiveChange(member, $event)"
+                class="h-4 w-4"
+              />
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>

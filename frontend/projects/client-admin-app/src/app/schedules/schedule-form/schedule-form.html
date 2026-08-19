@@ -1,0 +1,87 @@
+<div class="mx-auto max-w-lg">
+  @if (notFound()) {
+    <p class="text-sm text-slate-500">
+      That schedule couldn't be found.
+      <a routerLink="/schedules" class="font-medium text-slate-900 underline">Back to schedules</a>
+    </p>
+  } @else {
+    <h1 class="mb-6 text-lg font-semibold text-slate-900">
+      {{ editing() ? 'Edit schedule' : 'New schedule' }}
+    </h1>
+
+    @if (errorMessage(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-select
+        label="Business"
+        [options]="businessOptionsList()"
+        formControlName="business"
+        [invalid]="!!fieldError('business')"
+        [errorMessage]="fieldError('business')"
+      />
+      <ui-select
+        label="Route"
+        [options]="routeOptionsList()"
+        formControlName="route"
+        [invalid]="!!fieldError('route')"
+        [errorMessage]="fieldError('route')"
+      />
+
+      <fieldset class="flex flex-col gap-2">
+        <legend class="text-sm font-medium text-slate-700">Days of week</legend>
+        <div class="flex flex-wrap gap-3">
+          @for (day of dayLabels; track day.value) {
+            <label class="flex min-h-11 items-center gap-1.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                [checked]="isDaySelected(day.value)"
+                (change)="toggleDay(day.value)"
+                class="h-4 w-4 rounded border-slate-300"
+              />
+              {{ day.label }}
+            </label>
+          }
+        </div>
+      </fieldset>
+
+      <ui-text-field
+        label="Departure time"
+        type="time"
+        formControlName="departure_time"
+        [invalid]="!!fieldError('departure_time')"
+        [errorMessage]="fieldError('departure_time')"
+      />
+
+      <div class="grid grid-cols-2 gap-4">
+        <ui-text-field
+          label="Effective from"
+          type="date"
+          formControlName="effective_from"
+          [invalid]="!!fieldError('effective_from')"
+          [errorMessage]="fieldError('effective_from')"
+        />
+        <ui-text-field label="Effective until" type="date" formControlName="effective_until" />
+      </div>
+
+      @if (editing()) {
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" formControlName="is_active" class="h-4 w-4 rounded border-slate-300" />
+          Active
+        </label>
+      }
+
+      <div class="mt-2 flex gap-3">
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+          {{ editing() ? 'Save changes' : 'Create schedule' }}
+        </ui-button>
+        <a
+          routerLink="/schedules"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          >Cancel</a
+        >
+      </div>
+    </form>
+  }
+</div>

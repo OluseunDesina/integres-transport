@@ -1,0 +1,58 @@
+<div class="mx-auto max-w-lg">
+  @if (notFound()) {
+    <p class="text-sm text-slate-500">
+      That driver couldn't be found.
+      <a routerLink="/drivers" class="font-medium text-slate-900 underline">Back to drivers</a>
+    </p>
+  } @else {
+    <h1 class="mb-6 text-lg font-semibold text-slate-900">
+      {{ editing() ? 'Edit driver' : 'New driver' }}
+    </h1>
+
+    @if (errorMessage(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-select
+        label="Business"
+        [options]="businessOptionsList()"
+        formControlName="business"
+        [invalid]="!!fieldError('business')"
+        [errorMessage]="fieldError('business')"
+      />
+      <ui-text-field
+        label="Name"
+        formControlName="name"
+        [invalid]="!!fieldError('name')"
+        [errorMessage]="fieldError('name')"
+      />
+      <ui-text-field label="Phone" formControlName="phone" />
+      <ui-text-field
+        label="License number"
+        formControlName="license_number"
+        [invalid]="!!fieldError('license_number')"
+        [errorMessage]="fieldError('license_number')"
+      />
+      <ui-text-field label="License expires" type="date" formControlName="license_expires_at" />
+
+      @if (editing()) {
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" formControlName="is_active" class="h-4 w-4 rounded border-slate-300" />
+          Active
+        </label>
+      }
+
+      <div class="mt-2 flex gap-3">
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+          {{ editing() ? 'Save changes' : 'Create driver' }}
+        </ui-button>
+        <a
+          routerLink="/drivers"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          >Cancel</a
+        >
+      </div>
+    </form>
+  }
+</div>

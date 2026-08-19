@@ -1,0 +1,10 @@
+<div class="flex flex-col gap-6">
+  <div>
+    <h1 class="text-lg font-semibold text-slate-900">Welcome, {{ authStore.user()?.email }}</h1>
+    <p class="mt-1 text-sm text-slate-500">Find a departure and reserve your seat.</p>
+  </div>
+
+  <div>
+    <ui-button (pressed)="goToSearch()">Search trips</ui-button>
+  </div>
+</div>

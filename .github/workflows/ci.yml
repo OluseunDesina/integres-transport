@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  DJANGO_SETTINGS_MODULE: config.settings.ci
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: integra_afc
+          POSTGRES_USER: integra
+          POSTGRES_PASSWORD: integra
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U integra -d integra_afc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_DB: integra_afc
+      # Not the postgres service's bootstrap/superuser role (that's still
+      # "integra", set below in services.postgres.env) — RLS is a no-op
+      # for a superuser connection regardless of FORCE ROW LEVEL
+      # SECURITY, so migrate/pytest run as this separate, ordinary role,
+      # provisioned by the "Provision database" step below.
+      POSTGRES_USER: integra_app
+      POSTGRES_PASSWORD: integra_app
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Provision database (extensions + non-superuser app role)
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          PGPASSWORD=integra psql -h localhost -U integra -d integra_afc -c 'CREATE EXTENSION IF NOT EXISTS btree_gist;'
+          PGPASSWORD=integra psql -h localhost -U integra -d integra_afc -c "CREATE ROLE integra_app LOGIN PASSWORD 'integra_app' NOSUPERUSER NOBYPASSRLS CREATEDB;"
+          PGPASSWORD=integra psql -h localhost -U integra -d integra_afc -c "ALTER DATABASE integra_afc OWNER TO integra_app;"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.12.2"
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: mypy
+        run: uv run mypy .
+
+      - name: Migrate
+        run: uv run python manage.py migrate
+
+      - name: pytest
+        run: uv run pytest --cov=apps --cov-report=term-missing
+
+      - name: OpenAPI drift check
+        run: ./scripts/check_openapi_drift.sh
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: |
+          for p in customer-app client-admin-app super-admin-app shared-ui shared-data auth layout api-client; do
+            npx ng lint "$p"
+          done
+
+      - name: Unit tests
+        # ChromeHeadlessNoSandbox is Angular's own built-in launcher
+        # (--no-sandbox, needed for GitHub Actions' unprivileged runner) —
+        # no custom karma.conf.js required. Looped explicitly (not via the
+        # test:all npm script) because `npm run x -- --flag` only forwards
+        # --flag to the last &&-chained command, not every `ng test` call.
+        run: |
+          for p in customer-app client-admin-app super-admin-app shared-ui shared-data auth layout api-client; do
+            npx ng test "$p" --watch=false --browsers=ChromeHeadlessNoSandbox
+          done
+
+      - name: Build all apps
+        run: npm run build:all
+
+      - name: OpenAPI schema drift check (vs backend/openapi.yaml)
+        run: ./scripts/check-openapi-drift.sh
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Start backend stack
+        run: docker compose up -d postgres redis backend
+
+      - name: Wait for backend readiness
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/api/v1/readiness/ && break
+            sleep 2
+          done
+
+      - name: Migrate
+        run: docker compose exec -T backend python manage.py migrate
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e + axe suite
+        working-directory: frontend
+        env:
+          CI: "true"
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 14

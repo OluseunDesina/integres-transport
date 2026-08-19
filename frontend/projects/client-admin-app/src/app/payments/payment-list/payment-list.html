@@ -1,0 +1,53 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Payments</h1>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <ui-select
+      label="Status"
+      [options]="statusFilterOptions"
+      [ngModel]="store.query().status ?? ''"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onStatusFilterChange($event)"
+    />
+  </div>
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No payments found"
+      description="Payments initiated by passengers for this business's bookings will appear here."
+    />
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Created</th>
+          <th class="px-4 py-2">Booking</th>
+          <th class="px-4 py-2">Amount</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">PSP reference</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (payment of store.items(); track payment.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2">{{ payment.created_at | date: 'short' }}</td>
+            <td class="px-4 py-2 font-mono text-xs text-slate-500">{{ truncatedId(payment.booking) }}</td>
+            <td class="px-4 py-2">{{ amountLabel(payment) }}</td>
+            <td class="px-4 py-2">
+              <ui-status-pill
+                [tone]="statusTone[payment.status]"
+                [label]="statusLabel[payment.status]"
+              />
+            </td>
+            <td class="px-4 py-2 font-mono text-xs text-slate-500">{{ payment.psp_reference || '—' }}</td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>

@@ -1,0 +1,131 @@
+<div class="mx-auto max-w-lg">
+  @if (notFound()) {
+    <p class="text-sm text-slate-500">
+      That route couldn't be found.
+      <a routerLink="/routes" class="font-medium text-slate-900 underline">Back to routes</a>
+    </p>
+  } @else {
+    <h1 class="mb-6 text-lg font-semibold text-slate-900">
+      {{ editing() ? 'Edit route' : 'New route' }}
+    </h1>
+
+    @if (errorMessage(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-select
+        label="Business"
+        [options]="businessOptionsList()"
+        formControlName="business"
+        [invalid]="!!fieldError('business')"
+        [errorMessage]="fieldError('business')"
+      />
+      <ui-text-field
+        label="Route name"
+        formControlName="name"
+        [invalid]="!!fieldError('name')"
+        [errorMessage]="fieldError('name')"
+      />
+      <ui-text-field label="Code" formControlName="code" />
+      <ui-text-field label="Description" formControlName="description" />
+
+      @if (editing()) {
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" formControlName="is_active" class="h-4 w-4 rounded border-slate-300" />
+          Active
+        </label>
+      }
+
+      <div class="mt-2 flex items-center gap-3">
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+          {{ editing() ? 'Save changes' : 'Create route' }}
+        </ui-button>
+        @if (detailsSaved()) {
+          <span class="text-sm text-emerald-700">Saved.</span>
+        }
+        <a
+          routerLink="/routes"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          >Cancel</a
+        >
+      </div>
+    </form>
+
+    @if (editing()) {
+      <div class="mt-10 border-t border-slate-200 pt-6">
+        <h2 class="mb-1 text-sm font-medium text-slate-700">Stops</h2>
+        <p class="mb-4 text-sm text-slate-500">
+          Add stops and order them the way the route runs, then save the order.
+        </p>
+
+        @if (stopsError(); as message) {
+          <ui-alert class="mb-4">{{ message }}</ui-alert>
+        }
+
+        @if (routeStops().length === 0) {
+          <p class="mb-4 text-sm text-slate-500">No stops added yet.</p>
+        } @else {
+          <ol class="mb-4 flex flex-col gap-2">
+            @for (stop of routeStops(); track stop.id; let i = $index) {
+              <li class="flex items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-2">
+                <span class="text-sm text-slate-900">{{ i + 1 }}. {{ stop.name }}</span>
+                <span class="flex items-center gap-1">
+                  <button
+                    type="button"
+                    (click)="moveStop(i, -1)"
+                    [disabled]="i === 0"
+                    class="inline-flex min-h-11 min-w-11 items-center justify-center text-slate-500 hover:text-slate-900 disabled:opacity-40"
+                    aria-label="Move up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    (click)="moveStop(i, 1)"
+                    [disabled]="i === routeStops().length - 1"
+                    class="inline-flex min-h-11 min-w-11 items-center justify-center text-slate-500 hover:text-slate-900 disabled:opacity-40"
+                    aria-label="Move down"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    (click)="removeStop(stop.id)"
+                    class="inline-flex min-h-11 items-center px-2 text-sm font-medium text-red-700 hover:text-red-800"
+                  >
+                    Remove
+                  </button>
+                </span>
+              </li>
+            }
+          </ol>
+        }
+
+        <div class="flex items-end gap-3">
+          <div class="flex-1">
+            <ui-select
+              label="Add a stop"
+              [options]="addStopOptions()"
+              [ngModel]="stopToAdd()"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="setStopToAdd($event)"
+            />
+          </div>
+          <ui-button type="button" variant="secondary" (pressed)="addStop()" [disabled]="!stopToAdd()">
+            Add
+          </ui-button>
+        </div>
+
+        <div class="mt-4">
+          <ui-button type="button" [loading]="savingStops()" [disabled]="savingStops()" (pressed)="saveStopOrder()">
+            Save stop order
+          </ui-button>
+          @if (stopsSaved()) {
+            <span class="ml-3 text-sm text-slate-500">Saved.</span>
+          }
+        </div>
+      </div>
+    }
+  }
+</div>

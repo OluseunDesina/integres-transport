@@ -1,0 +1,99 @@
+/* To learn more about Typescript configuration file: https://www.typescriptlang.org/docs/handbook/tsconfig-json.html. */
+/* To learn more about Angular compiler options: https://angular.dev/reference/configs/angular-compiler-options. */
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "experimentalDecorators": true,
+    "paths": {
+      "@api-client": [
+        "./projects/api-client/src/public-api.ts"
+      ],
+      "@auth": [
+        "./projects/auth/src/public-api.ts"
+      ],
+      "@layout": [
+        "./projects/layout/src/public-api.ts"
+      ],
+      "@shared-data": [
+        "./projects/shared-data/src/public-api.ts"
+      ],
+      "@shared-ui": [
+        "./projects/shared-ui/src/public-api.ts"
+      ]
+    },
+    "importHelpers": true,
+    "target": "ES2022",
+    "module": "preserve"
+  },
+  "angularCompilerOptions": {
+    "enableI18nLegacyMessageIdFormat": false,
+    "strictInjectionParameters": true,
+    "strictInputAccessModifiers": true,
+    "typeCheckHostBindings": true,
+    "strictTemplates": true
+  },
+  "files": [],
+  "references": [
+    {
+      "path": "./projects/customer-app/tsconfig.app.json"
+    },
+    {
+      "path": "./projects/customer-app/tsconfig.spec.json"
+    },
+    {
+      "path": "./projects/client-admin-app/tsconfig.app.json"
+    },
+    {
+      "path": "./projects/client-admin-app/tsconfig.spec.json"
+    },
+    {
+      "path": "./projects/super-admin-app/tsconfig.app.json"
+    },
+    {
+      "path": "./projects/super-admin-app/tsconfig.spec.json"
+    },
+    {
+      "path": "./projects/shared-ui/tsconfig.lib.json"
+    },
+    {
+      "path": "./projects/shared-ui/tsconfig.spec.json"
+    },
+    {
+      "path": "./projects/shared-data/tsconfig.lib.json"
+    },
+    {
+      "path": "./projects/shared-data/tsconfig.spec.json"
+    },
+    {
+      "path": "./projects/auth/tsconfig.lib.json"
+    },
+    {
+      "path": "./projects/auth/tsconfig.spec.json"
+    },
+    {
+      "path": "./projects/layout/tsconfig.lib.json"
+    },
+    {
+      "path": "./projects/layout/tsconfig.spec.json"
+    },
+    {
+      "path": "./projects/api-client/tsconfig.lib.json"
+    },
+    {
+      "path": "./projects/api-client/tsconfig.spec.json"
+    },
+    {
+      "path": "./projects/validator-app/tsconfig.app.json"
+    },
+    {
+      "path": "./projects/validator-app/tsconfig.spec.json"
+    }
+  ]
+}

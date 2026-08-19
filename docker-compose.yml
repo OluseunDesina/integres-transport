@@ -1,0 +1,104 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: integra_afc
+      POSTGRES_USER: integra
+      POSTGRES_PASSWORD: integra
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/docker/postgres/init-extensions.sql:/docker-entrypoint-initdb.d/init-extensions.sql:ro
+      - ./backend/docker/postgres/init-role-hardening.sql:/docker-entrypoint-initdb.d/init-role-hardening.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U integra -d integra_afc"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+      DJANGO_SECRET_KEY: local-insecure-secret-key-do-not-use-in-prod
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      POSTGRES_DB: integra_afc
+      POSTGRES_USER: integra_app
+      POSTGRES_PASSWORD: integra_app
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      CORS_ALLOWED_ORIGINS: http://localhost:4200,http://localhost:4201,http://localhost:4202,http://localhost:4203
+      PAYSTACK_SECRET_KEY: sk_test_local_dummy_do_not_use_in_prod
+      PAYSTACK_WEBHOOK_SECRET: local-paystack-webhook-secret-do-not-use-in-prod
+      INTEGRA_COMMISSION_RATE_PERCENT: "5.00"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    build: ./backend
+    command: celery -A config worker -l info
+    volumes:
+      - ./backend:/app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+      DJANGO_SECRET_KEY: local-insecure-secret-key-do-not-use-in-prod
+      POSTGRES_DB: integra_afc
+      POSTGRES_USER: integra_app
+      POSTGRES_PASSWORD: integra_app
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      PAYSTACK_SECRET_KEY: sk_test_local_dummy_do_not_use_in_prod
+      PAYSTACK_WEBHOOK_SECRET: local-paystack-webhook-secret-do-not-use-in-prod
+      INTEGRA_COMMISSION_RATE_PERCENT: "5.00"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    build: ./backend
+    command: celery -A config beat -l info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - ./backend:/app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+      DJANGO_SECRET_KEY: local-insecure-secret-key-do-not-use-in-prod
+      POSTGRES_DB: integra_afc
+      POSTGRES_USER: integra_app
+      POSTGRES_PASSWORD: integra_app
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_URL: redis://redis:6379/0
+      PAYSTACK_SECRET_KEY: sk_test_local_dummy_do_not_use_in_prod
+      PAYSTACK_WEBHOOK_SECRET: local-paystack-webhook-secret-do-not-use-in-prod
+      INTEGRA_COMMISSION_RATE_PERCENT: "5.00"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

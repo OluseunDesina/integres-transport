@@ -1,0 +1,51 @@
+<app-auth-layout>
+  <h1 class="mb-1 text-lg font-semibold text-slate-900">Create your account</h1>
+  <p class="mb-6 text-sm text-slate-500">{{ subtitle }}</p>
+
+  @if (errorMessage(); as message) {
+    <ui-alert class="mb-4">{{ message }}</ui-alert>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+    <ui-text-field
+      label="Business name"
+      autocomplete="organization"
+      formControlName="name"
+      [invalid]="!!fieldError('name')"
+      [errorMessage]="fieldError('name')"
+    />
+    <ui-text-field
+      label="Email"
+      type="email"
+      autocomplete="email"
+      formControlName="email"
+      [invalid]="!!fieldError('email')"
+      [errorMessage]="fieldError('email')"
+    />
+    <ui-text-field label="Phone" autocomplete="tel" formControlName="phone" />
+    <ui-text-field
+      label="Password"
+      type="password"
+      autocomplete="new-password"
+      formControlName="password"
+      [invalid]="!!fieldError('password')"
+      [errorMessage]="fieldError('password')"
+    />
+    <ui-text-field
+      label="Confirm password"
+      type="password"
+      autocomplete="new-password"
+      formControlName="confirmPassword"
+      [invalid]="!!fieldError('confirmPassword')"
+      [errorMessage]="fieldError('confirmPassword')"
+    />
+    <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+      Create account
+    </ui-button>
+  </form>
+
+  <p class="mt-6 text-sm text-slate-500">
+    Already have an account?
+    <a routerLink="/login" class="font-medium text-slate-900 underline">Sign in</a>
+  </p>
+</app-auth-layout>

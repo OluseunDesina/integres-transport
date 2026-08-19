@@ -1,0 +1,68 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Wallet Lookup</h1>
+  </div>
+
+  <p class="max-w-2xl text-sm text-slate-500">
+    Look up a passenger's wallet balance and transaction history for support or dispute
+    resolution. You'll need the passenger's id — there's no search by name or email yet.
+  </p>
+
+  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-wrap items-end gap-4">
+    <div class="w-full max-w-sm">
+      <ui-text-field
+        label="Passenger id"
+        formControlName="passengerId"
+        [invalid]="!!fieldError()"
+        [errorMessage]="fieldError()"
+      />
+    </div>
+    <ui-button
+      type="submit"
+      [loading]="submitting()"
+      [disabled]="!selectedBusinessStore.selectedBusinessId()"
+    >
+      Look up
+    </ui-button>
+  </form>
+
+  @if (!selectedBusinessStore.selectedBusinessId()) {
+    <ui-alert>Select a business before looking up a wallet.</ui-alert>
+  }
+
+  @if (errorMessage()) {
+    <ui-alert>{{ errorMessage() }}</ui-alert>
+  }
+
+  @if (wallet(); as w) {
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <ui-stat label="Balance" [hint]="'Passenger ' + searchedPassengerId()">
+        {{ w.currency }} {{ w.balance }}
+      </ui-stat>
+    </div>
+
+    @if (w.transactions.length === 0) {
+      <ui-empty-state
+        title="No transactions yet"
+        description="This passenger's wallet has no recorded activity."
+      />
+    } @else {
+      <ui-table>
+        <thead>
+          <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+            <th class="px-4 py-2">Date</th>
+            <th class="px-4 py-2">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (transaction of w.transactions; track transaction.id) {
+            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <td class="px-4 py-2">{{ transaction.created_at | date: 'short' }}</td>
+              <td class="px-4 py-2">{{ transaction.amount }} {{ transaction.currency }}</td>
+            </tr>
+          }
+        </tbody>
+      </ui-table>
+    }
+  }
+</div>

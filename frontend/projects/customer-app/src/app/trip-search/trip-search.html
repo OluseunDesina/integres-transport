@@ -1,0 +1,93 @@
+<div class="flex flex-col gap-6">
+  <div>
+    <h1 class="text-lg font-semibold text-slate-900">Search trips</h1>
+    <p class="mt-1 text-sm text-slate-500">
+      Choose where you are travelling from and to, then pick a departure.
+    </p>
+  </div>
+
+  @if (routesError(); as message) {
+    <ui-alert>
+      {{ message }}
+      <ui-button variant="secondary" class="mt-2" (pressed)="loadRoutes()">Retry</ui-button>
+    </ui-alert>
+  }
+
+  <div class="grid gap-4 sm:grid-cols-2">
+    <ui-select
+      label="Route"
+      class="sm:col-span-2"
+      [options]="routeOptions()"
+      [ngModel]="routeId()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onRouteChange($event)"
+    />
+    <ui-select
+      label="From"
+      [options]="fromStopOptions()"
+      [ngModel]="fromStopId()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onFromStopChange($event)"
+    />
+    <ui-select
+      label="To"
+      [options]="toStopOptions()"
+      [ngModel]="toStopId()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onToStopChange($event)"
+    />
+    <ui-text-field
+      label="Travel date"
+      type="date"
+      [ngModel]="serviceDate()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onServiceDateChange($event)"
+    />
+  </div>
+
+  <div>
+    <ui-button [disabled]="!canSearch()" [loading]="searching()" (pressed)="search()">
+      Search
+    </ui-button>
+  </div>
+
+  @if (searchError(); as message) {
+    <ui-alert>
+      {{ message }}
+      <ui-button variant="secondary" class="mt-2" (pressed)="search()">Retry</ui-button>
+    </ui-alert>
+  }
+
+  @if (trips(); as results) {
+    @if (results.length === 0) {
+      <ui-empty-state
+        title="No departures found"
+        description="Nothing runs on this route for the date you picked. Try another date."
+      />
+    } @else {
+      <section class="flex flex-col gap-3">
+        <h2 class="text-sm font-medium text-slate-700">
+          {{ results.length }} departure(s) available
+        </h2>
+        <ul class="flex flex-col gap-2">
+          @for (trip of results; track trip.id) {
+            <li
+              class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-4"
+            >
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-slate-900">{{ trip.route.name }}</p>
+                <p class="text-sm text-slate-500">
+                  Departs {{ trip.scheduled_departure_at | date: 'short' }}
+                </p>
+                @if (trip.vehicle) {
+                  <p class="text-xs text-slate-500">{{ trip.vehicle.registration_number }}</p>
+                }
+              </div>
+              <ui-button (pressed)="selectTrip(trip)">Choose seats</ui-button>
+            </li>
+          }
+        </ul>
+      </section>
+    }
+  }
+</div>

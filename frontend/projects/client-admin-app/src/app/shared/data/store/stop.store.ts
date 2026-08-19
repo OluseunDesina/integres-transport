@@ -1,0 +1,45 @@
+import { Injectable, inject } from '@angular/core';
+import { API_CLIENT } from '@api-client';
+import type { components } from '@api-client';
+import { AuthStore } from '@auth';
+import { ListStore, type Page } from '@shared-data';
+
+export type Stop = components['schemas']['Stop'];
+
+export interface StopQuery {
+  business?: string;
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'detail' in error) {
+    const detail = (error as { detail?: unknown }).detail;
+    if (typeof detail === 'string') {
+      return detail;
+    }
+  }
+  return 'Failed to load stops.';
+}
+
+@Injectable({ providedIn: 'root' })
+export class StopStore extends ListStore<Stop, StopQuery> {
+  private readonly api = inject(API_CLIENT);
+  private readonly authStore = inject(AuthStore);
+
+  constructor() {
+    super({}, 25);
+  }
+
+  protected override async fetchPage(
+    query: StopQuery,
+    page: Page
+  ): Promise<{ items: Stop[]; total: number }> {
+    const { data, error } = await this.api.GET('/api/v1/stops/', {
+      params: { query: { limit: page.limit, offset: page.offset, business: query.business } },
+      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+    });
+    if (!data) {
+      throw new Error(toErrorMessage(error));
+    }
+    return { items: data.results, total: data.count };
+  }
+}

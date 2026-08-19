@@ -1,0 +1,35 @@
+# Generated, vendored, or high-volume files that add noise to indexing and
+# agent context without adding signal. Complements .gitignore.
+
+# --- Dependencies ---
+node_modules/
+.venv/
+backend/uv.lock
+frontend/package-lock.json
+
+# --- Build output ---
+dist/
+.angular/
+staticfiles/
+mediafiles/
+
+# --- Test and coverage artifacts ---
+htmlcov/
+.coverage
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# --- Caches ---
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# --- Generated API client ---
+# Regenerate with `npm run openapi:generate`; never hand-edited.
+frontend/projects/api-client/src/lib/schema.ts
+
+# --- OS ---
+.DS_Store

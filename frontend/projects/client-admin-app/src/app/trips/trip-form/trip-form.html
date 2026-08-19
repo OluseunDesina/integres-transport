@@ -1,0 +1,55 @@
+<div class="mx-auto max-w-lg">
+  <h1 class="mb-6 text-lg font-semibold text-slate-900">New trip</h1>
+
+  @if (errorMessage(); as message) {
+    <ui-alert class="mb-4">{{ message }}</ui-alert>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+    <ui-select
+      label="Business"
+      [options]="businessOptionsList()"
+      formControlName="business"
+      [invalid]="!!fieldError('business')"
+      [errorMessage]="fieldError('business')"
+    />
+    <ui-select
+      label="Route"
+      [options]="routeOptionsList()"
+      formControlName="route"
+      [invalid]="!!fieldError('route')"
+      [errorMessage]="fieldError('route')"
+    />
+
+    <div class="grid grid-cols-2 gap-4">
+      <ui-text-field
+        label="Service date"
+        type="date"
+        formControlName="service_date"
+        [invalid]="!!fieldError('service_date')"
+        [errorMessage]="fieldError('service_date')"
+      />
+      <ui-text-field
+        label="Departure time"
+        type="time"
+        formControlName="departure_time"
+        [invalid]="!!fieldError('departure_time')"
+        [errorMessage]="fieldError('departure_time')"
+      />
+    </div>
+
+    <ui-select label="Vehicle" [options]="vehicleOptionsList()" formControlName="vehicle" />
+    <ui-select label="Driver" [options]="driverOptionsList()" formControlName="driver" />
+
+    <div class="mt-2 flex gap-3">
+      <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+        Create trip
+      </ui-button>
+      <a
+        routerLink="/trips"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+        >Cancel</a
+      >
+    </div>
+  </form>
+</div>

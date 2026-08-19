@@ -1,0 +1,69 @@
+<div class="mx-auto max-w-lg">
+  @if (notFound()) {
+    <p class="text-sm text-slate-500">
+      That vehicle couldn't be found.
+      <a routerLink="/vehicles" class="font-medium text-slate-900 underline">Back to vehicles</a>
+    </p>
+  } @else {
+    <h1 class="mb-6 text-lg font-semibold text-slate-900">
+      {{ editing() ? 'Edit vehicle' : 'New vehicle' }}
+    </h1>
+
+    @if (errorMessage(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-select
+        label="Business"
+        [options]="businessOptionsList()"
+        formControlName="business"
+        [invalid]="!!fieldError('business')"
+        [errorMessage]="fieldError('business')"
+      />
+      <ui-select
+        label="Vehicle type"
+        [options]="vehicleTypeOptionsList()"
+        formControlName="vehicle_type"
+        [invalid]="!!fieldError('vehicle_type')"
+        [errorMessage]="fieldError('vehicle_type')"
+      />
+      <ui-text-field
+        label="Registration number"
+        formControlName="registration_number"
+        [invalid]="!!fieldError('registration_number')"
+        [errorMessage]="fieldError('registration_number')"
+      />
+      <div class="grid grid-cols-2 gap-4">
+        <ui-text-field
+          label="Insurance expires"
+          type="date"
+          formControlName="insurance_expires_at"
+        />
+        <ui-text-field
+          label="Roadworthiness expires"
+          type="date"
+          formControlName="roadworthiness_expires_at"
+        />
+      </div>
+
+      @if (editing()) {
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" formControlName="is_active" class="h-4 w-4 rounded border-slate-300" />
+          Active
+        </label>
+      }
+
+      <div class="mt-2 flex gap-3">
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+          {{ editing() ? 'Save changes' : 'Create vehicle' }}
+        </ui-button>
+        <a
+          routerLink="/vehicles"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          >Cancel</a
+        >
+      </div>
+    </form>
+  }
+</div>

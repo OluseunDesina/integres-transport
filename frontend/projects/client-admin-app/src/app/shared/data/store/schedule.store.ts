@@ -1,0 +1,51 @@
+import { Injectable, inject } from '@angular/core';
+import { API_CLIENT } from '@api-client';
+import type { components } from '@api-client';
+import { AuthStore } from '@auth';
+import { ListStore, type Page } from '@shared-data';
+
+// The backend's `days_of_week` is a plain JSONField — drf-spectacular
+// can't infer an item type for it, so openapi-typescript generates
+// `unknown`. It's always a number[] in practice (validated server-side);
+// narrowed here rather than casting at every call site.
+export type Schedule = Omit<components['schemas']['Schedule'], 'days_of_week'> & {
+  days_of_week: number[];
+};
+
+export interface ScheduleQuery {
+  business?: string;
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'detail' in error) {
+    const detail = (error as { detail?: unknown }).detail;
+    if (typeof detail === 'string') {
+      return detail;
+    }
+  }
+  return 'Failed to load schedules.';
+}
+
+@Injectable({ providedIn: 'root' })
+export class ScheduleStore extends ListStore<Schedule, ScheduleQuery> {
+  private readonly api = inject(API_CLIENT);
+  private readonly authStore = inject(AuthStore);
+
+  constructor() {
+    super({}, 25);
+  }
+
+  protected override async fetchPage(
+    query: ScheduleQuery,
+    page: Page
+  ): Promise<{ items: Schedule[]; total: number }> {
+    const { data, error } = await this.api.GET('/api/v1/schedules/', {
+      params: { query: { limit: page.limit, offset: page.offset, business: query.business } },
+      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+    });
+    if (!data) {
+      throw new Error(toErrorMessage(error));
+    }
+    return { items: data.results as Schedule[], total: data.count };
+  }
+}

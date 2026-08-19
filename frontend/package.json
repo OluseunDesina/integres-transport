@@ -1,0 +1,70 @@
+{
+  "name": "frontend",
+  "version": "0.0.0",
+  "scripts": {
+    "ng": "ng",
+    "start:customer": "ng serve customer-app",
+    "start:client-admin": "ng serve client-admin-app",
+    "start:super-admin": "ng serve super-admin-app",
+    "start:validator": "ng serve validator-app",
+    "build": "ng build",
+    "build:all": "ng build customer-app && ng build client-admin-app && ng build super-admin-app && ng build validator-app",
+    "watch": "ng build --watch --configuration development",
+    "test": "ng test",
+    "test:all": "ng test customer-app --watch=false && ng test client-admin-app --watch=false && ng test super-admin-app --watch=false && ng test validator-app --watch=false && ng test shared-ui --watch=false && ng test shared-data --watch=false && ng test auth --watch=false && ng test layout --watch=false && ng test api-client --watch=false",
+    "lint": "ng lint",
+    "e2e": "playwright test",
+    "openapi:generate": "openapi-typescript ../backend/openapi.yaml -o projects/api-client/src/lib/schema.ts",
+    "openapi:check": "./scripts/check-openapi-drift.sh"
+  },
+  "prettier": {
+    "overrides": [
+      {
+        "files": "*.html",
+        "options": {
+          "parser": "angular"
+        }
+      }
+    ]
+  },
+  "private": true,
+  "dependencies": {
+    "@angular/cdk": "^20.2.14",
+    "@angular/common": "^20.0.0",
+    "@angular/compiler": "^20.0.0",
+    "@angular/core": "^20.0.0",
+    "@angular/forms": "^20.0.0",
+    "@angular/platform-browser": "^20.0.0",
+    "@angular/router": "^20.0.0",
+    "@angular/service-worker": "^20.0.0",
+    "openapi-fetch": "^0.17.0",
+    "qrcode": "^1.5.4",
+    "rxjs": "~7.8.0",
+    "tslib": "^2.3.0",
+    "zone.js": "~0.15.0"
+  },
+  "devDependencies": {
+    "@angular/build": "^20.3.33",
+    "@angular/cli": "^20.0.4",
+    "@angular/compiler-cli": "^20.0.0",
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.62.1",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/jasmine": "~5.1.0",
+    "@types/qrcode": "^1.5.6",
+    "angular-eslint": "21.0.1",
+    "eslint": "^9.39.1",
+    "jasmine-core": "~5.7.0",
+    "karma": "~6.4.0",
+    "karma-chrome-launcher": "~3.2.0",
+    "karma-coverage": "~2.2.0",
+    "karma-jasmine": "~5.1.0",
+    "karma-jasmine-html-reporter": "~2.1.0",
+    "ng-packagr": "^20.3.0",
+    "openapi-typescript": "^7.13.0",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.8.2",
+    "typescript-eslint": "8.46.4"
+  }
+}

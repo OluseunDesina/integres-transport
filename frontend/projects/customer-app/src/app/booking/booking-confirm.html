@@ -1,0 +1,42 @@
+@if (request(); as journey) {
+  <div class="flex flex-col gap-6">
+    <div>
+      <h1 class="text-lg font-semibold text-slate-900">Review your booking</h1>
+      <p class="mt-1 text-sm text-slate-500">Check the details below, then reserve your seats.</p>
+    </div>
+
+    @if (submitError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+
+    <dl
+      class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 rounded-md border border-slate-200 bg-white p-4 text-sm"
+    >
+      <dt class="text-slate-500">Route</dt>
+      <dd class="font-medium text-slate-900">{{ journey.routeName }}</dd>
+      <dt class="text-slate-500">From</dt>
+      <dd>{{ journey.fromStop.name }}</dd>
+      <dt class="text-slate-500">To</dt>
+      <dd>{{ journey.toStop.name }}</dd>
+      <dt class="text-slate-500">Departs</dt>
+      <dd>{{ journey.scheduledDepartureAt | date: 'medium' }}</dd>
+      <dt class="text-slate-500">Seats</dt>
+      <dd>{{ seatNumbers() }}</dd>
+      <dt class="text-slate-500">Fare</dt>
+      <dd>{{ fareLabel() }} × {{ journey.seats.length }}</dd>
+      <dt class="text-slate-500">Total</dt>
+      <dd class="font-medium text-slate-900">{{ totalLabel() }}</dd>
+    </dl>
+
+    <p class="text-sm text-slate-500">
+      Payment is not collected yet — your seats are held once you reserve.
+    </p>
+
+    <div class="flex gap-2">
+      <ui-button variant="secondary" [disabled]="submitting()" (pressed)="backToSeats()">
+        Back
+      </ui-button>
+      <ui-button [loading]="submitting()" (pressed)="submit()">Reserve seats</ui-button>
+    </div>
+  </div>
+}

@@ -1,0 +1,31 @@
+name: generate-trips cron
+
+# Stands in for Celery Beat's generate_trips job on the Vercel
+# deployment target, which runs no persistent beat process — see
+# docs/deployment.md. Deliberately uses GitHub Actions' scheduler
+# rather than Vercel's own Cron Jobs, even though this job's real
+# once-daily cadence is exactly what Vercel Cron is for: Vercel Cron
+# only ever sends a plain GET with no custom headers (just its own
+# reserved Authorization: Bearer $CRON_SECRET convention), and this
+# endpoint is POST-only and checks a custom X-Internal-Task-Secret
+# header — reusing the same GitHub Actions mechanism as
+# expire-seat-holds-cron.yml avoids a second auth convention for one
+# endpoint.
+#
+# BACKEND_URL and INTERNAL_TASK_SECRET are the same repo secrets
+# expire-seat-holds-cron.yml uses.
+
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  generate-trips:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the generate-trips endpoint
+        run: |
+          curl --fail -X POST \
+            "${{ secrets.BACKEND_URL }}/api/v1/internal/tasks/generate-trips/" \
+            -H "X-Internal-Task-Secret: ${{ secrets.INTERNAL_TASK_SECRET }}"

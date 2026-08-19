@@ -1,0 +1,43 @@
+<div class="mx-auto max-w-lg">
+  <h1 class="mb-6 text-lg font-semibold text-slate-900">White Label</h1>
+
+  @if (loadError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (loading()) {
+    <p class="text-sm text-slate-500">Loading…</p>
+  } @else {
+    @if (errorMessage(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-text-field
+        label="Domain"
+        formControlName="domain"
+        [invalid]="!!fieldError('domain')"
+        [errorMessage]="fieldError('domain')"
+      />
+      <ui-text-field label="Logo URL" formControlName="logo" />
+      <ui-text-field label="Primary color" formControlName="primary_color" />
+      <ui-text-field label="Secondary color" formControlName="secondary_color" />
+      <ui-text-field label="Email sender name" formControlName="email_sender_name" />
+      <ui-text-field
+        label="Email sender address"
+        type="email"
+        formControlName="email_sender_address"
+        [invalid]="!!fieldError('email_sender_address')"
+        [errorMessage]="fieldError('email_sender_address')"
+      />
+      <ui-text-field label="Terms URL" formControlName="terms_url" />
+
+      <div class="mt-2 flex items-center gap-3">
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+          Save changes
+        </ui-button>
+        @if (saved() && !form.dirty) {
+          <span class="text-sm text-emerald-700">Saved.</span>
+        }
+      </div>
+    </form>
+  }
+</div>

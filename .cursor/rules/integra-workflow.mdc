@@ -1,0 +1,32 @@
+---
+description: How we work on Integra AFC — spec before code, ADRs, self-check gate
+alwaysApply: true
+---
+
+# Integra AFC working agreement
+
+Automated Fare Collection platform: one Django/DRF backend, three white-labeled
+Angular 20 frontends. `CLAUDE.md` is the full source of truth for conventions —
+read it before non-trivial work. Current phase status lives in
+`docs/status-report-2026-08-14.md`.
+
+## Process
+
+1. **Spec before code.** Every phase/module gets `docs/specs/<phase>-<module>.md`
+   (scope, data model, API surface, edge cases, failure modes, test plan,
+   migration impact) before implementation starts. Template: `docs/specs/TEMPLATE.md`.
+2. **ADRs for architectural decisions**, including options rejected and why —
+   `docs/adr/`. Finalize a proposed ADR before spec'ing the phase that needs it,
+   not during it.
+3. **Thinnest vertical slice first**, then stop for review. Backend + frontend for
+   one feature beats a complete backend with no consumer.
+4. **Never guess on ambiguity.** Label unavoidable assumptions `ASSUMPTION:` in
+   output rather than silently picking one.
+5. **Self-check before declaring anything done** — `docs/self-check.md` defines
+   "done" (backend tests, e2e, accessibility, security sweep, report format).
+   Reports land at `docs/self-check-<date>.md`.
+
+## Keeping docs current
+
+`docs/architecture.md` (technical) and `docs/executive-overview.md`
+(non-technical) are updated at the end of every phase/slice, not just at launch.

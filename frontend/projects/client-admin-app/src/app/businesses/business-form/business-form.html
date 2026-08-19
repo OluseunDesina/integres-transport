@@ -1,0 +1,101 @@
+<div class="mx-auto max-w-lg">
+  @if (notFound()) {
+    <p class="text-sm text-slate-500">
+      That business couldn't be found.
+      <a routerLink="/businesses" class="font-medium text-slate-900 underline">Back to businesses</a>
+    </p>
+  } @else {
+    <h1 class="mb-6 text-lg font-semibold text-slate-900">
+      {{ editing() ? 'Edit business' : 'New business' }}
+    </h1>
+
+    @if (errorMessage(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    @if (existingBusiness(); as business) {
+      <div class="mb-4">
+        <ui-status-pill [label]="business.kyb_status" [tone]="kybStatusTone(business.kyb_status)" />
+      </div>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-select
+        label="Vertical"
+        [options]="verticalOptions"
+        formControlName="vertical"
+        [invalid]="!!fieldError('vertical')"
+        [errorMessage]="fieldError('vertical')"
+      />
+      <ui-text-field
+        label="Business name"
+        formControlName="name"
+        [invalid]="!!fieldError('name')"
+        [errorMessage]="fieldError('name')"
+      />
+      <ui-text-field
+        label="Currency"
+        formControlName="currency"
+        [invalid]="!!fieldError('currency')"
+        [errorMessage]="fieldError('currency')"
+      />
+      <ui-text-field
+        label="Timezone"
+        formControlName="timezone"
+        [invalid]="!!fieldError('timezone')"
+        [errorMessage]="fieldError('timezone')"
+      />
+      <ui-select
+        label="Booking mode"
+        [options]="bookingModeOptions"
+        formControlName="booking_mode_default"
+        [invalid]="!!fieldError('booking_mode_default')"
+        [errorMessage]="fieldError('booking_mode_default')"
+      />
+      <div class="mt-2 flex gap-3">
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+          {{ editing() ? 'Save changes' : 'Create business' }}
+        </ui-button>
+        <a
+          routerLink="/businesses"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          >Cancel</a
+        >
+      </div>
+    </form>
+
+    @if (editing() && existingBusiness()) {
+      <div *appHasPermission="'kyb.submit'" class="mt-10 border-t border-slate-200 pt-6">
+        <h2 class="mb-1 text-sm font-medium text-slate-700">Upload a KYB document</h2>
+        <p class="mb-4 text-sm text-slate-500">
+          You can upload additional documents at any time — uploading after this business is
+          approved adds the document but doesn't change its status.
+        </p>
+
+        @if (kybUploadError(); as message) {
+          <ui-alert class="mb-4">{{ message }}</ui-alert>
+        }
+
+        <form (ngSubmit)="onKybUpload()" class="flex flex-col gap-4" novalidate>
+          <ui-select
+            label="Document type"
+            [options]="documentTypeOptions"
+            [ngModel]="kybDocumentType()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="setKybDocumentType($event)"
+          />
+          <app-file-upload-field
+            label="File"
+            accept="application/pdf,image/*"
+            (fileSelected)="onKybFileSelected($event)"
+          />
+          <div>
+            <ui-button type="submit" [loading]="kybUploading()" [disabled]="kybUploading()">
+              Upload document
+            </ui-button>
+          </div>
+        </form>
+      </div>
+    }
+  }
+</div>

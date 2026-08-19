@@ -1,0 +1,48 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Your tickets</h1>
+    <ui-button variant="secondary" (pressed)="backToBookings()">Back to bookings</ui-button>
+  </div>
+
+  @if (loading()) {
+    <p class="text-sm text-slate-500">Loading tickets…</p>
+  } @else if (error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (tickets().length === 0) {
+    <ui-empty-state
+      title="No tickets yet"
+      description="Tickets are issued automatically once a booking is paid."
+    >
+      <ui-button (pressed)="backToBookings()">Back to bookings</ui-button>
+    </ui-empty-state>
+  } @else {
+    <div class="flex flex-col gap-4">
+      @for (ticket of tickets(); track ticket.id) {
+        <div class="flex flex-col items-center gap-3 rounded-md border border-slate-200 p-6 sm:flex-row sm:items-start sm:justify-between">
+          <div class="flex flex-col items-center gap-2">
+            @if (qrDataUrls()[ticket.id]; as src) {
+              <img
+                [src]="src"
+                alt="Scannable ticket QR code"
+                width="220"
+                height="220"
+                class="rounded-md border border-slate-200 bg-white p-2"
+              />
+            }
+            <ui-status-pill [tone]="statusTone[ticket.status]" [label]="statusLabel[ticket.status]" />
+          </div>
+          <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm text-slate-600">
+            <dt class="font-medium text-slate-500">Issued</dt>
+            <dd>{{ ticket.issued_at | date: 'short' }}</dd>
+            <dt class="font-medium text-slate-500">Valid until</dt>
+            <dd>{{ ticket.expires_at | date: 'short' }}</dd>
+            @if (ticket.boarded_at; as boardedAt) {
+              <dt class="font-medium text-slate-500">Boarded</dt>
+              <dd>{{ boardedAt | date: 'short' }}</dd>
+            }
+          </dl>
+        </div>
+      }
+    </div>
+  }
+</div>

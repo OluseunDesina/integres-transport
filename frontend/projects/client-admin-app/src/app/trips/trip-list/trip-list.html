@@ -1,0 +1,159 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Trips</h1>
+    <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewTrip()">New trip</ui-button>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <ui-select
+      label="Route"
+      [options]="routeFilterOptions()"
+      [ngModel]="store.query().route ?? ''"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onRouteFilterChange($event)"
+    />
+    <ui-select
+      label="Schedule"
+      [options]="scheduleFilterOptions()"
+      [ngModel]="store.query().schedule ?? ''"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onScheduleFilterChange($event)"
+    />
+    <ui-text-field
+      label="Service date"
+      type="date"
+      [ngModel]="store.query().service_date ?? ''"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onServiceDateFilterChange($event)"
+    />
+    <ui-select
+      label="Status"
+      [options]="statusFilterOptions"
+      [ngModel]="store.query().status ?? ''"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onStatusFilterChange($event)"
+    />
+  </div>
+
+  @if (assignmentError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No trips found"
+      description="Trips generated from a Schedule will appear here, or create a manual one-off trip."
+    >
+      <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewTrip()">New trip</ui-button>
+    </ui-empty-state>
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Route</th>
+          <th class="px-4 py-2">Service date</th>
+          <th class="px-4 py-2">Departure</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Vehicle</th>
+          <th class="px-4 py-2">Driver</th>
+          <th class="px-4 py-2">Compliance</th>
+          <th class="sticky right-0 bg-white px-4 py-2 shadow-[-6px_0_6px_-4px_rgba(15,23,42,0.15)]">
+            <span class="sr-only">Actions</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (trip of store.items(); track trip.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">{{ trip.route.name }}</td>
+            <td class="px-4 py-2">{{ trip.service_date }}</td>
+            <td class="px-4 py-2">{{ trip.scheduled_departure_at | date: 'short' }}</td>
+            <td class="px-4 py-2">
+              <ui-status-pill [tone]="statusTone[trip.status]" [label]="statusLabel[trip.status] ?? trip.status" />
+            </td>
+            <td class="max-w-40 px-4 py-2 [&_label]:sr-only">
+              @if (assignmentOptionsReady(trip.business)) {
+                <ui-select
+                  label="Vehicle"
+                  [options]="vehicleOptionsFor(trip.business)"
+                  [ngModel]="trip.vehicle?.id ?? ''"
+                  [ngModelOptions]="{ standalone: true }"
+                  (ngModelChange)="onVehicleChange(trip, $event)"
+                />
+              } @else {
+                <span class="text-sm text-slate-500">{{ trip.vehicle?.registration_number ?? '—' }}</span>
+              }
+            </td>
+            <td class="max-w-40 px-4 py-2 [&_label]:sr-only">
+              @if (assignmentOptionsReady(trip.business)) {
+                <ui-select
+                  label="Driver"
+                  [options]="driverOptionsFor(trip.business)"
+                  [ngModel]="trip.driver?.id ?? ''"
+                  [ngModelOptions]="{ standalone: true }"
+                  (ngModelChange)="onDriverChange(trip, $event)"
+                />
+              } @else {
+                <span class="text-sm text-slate-500">{{ trip.driver?.name ?? '—' }}</span>
+              }
+            </td>
+            <td class="px-4 py-2">
+              @if (trip.compliance_warnings.length > 0) {
+                <ui-status-pill
+                  tone="negative"
+                  [label]="trip.compliance_warnings.length + ' warning(s)'"
+                  [title]="trip.compliance_warnings.join('; ')"
+                />
+              } @else {
+                <ui-status-pill tone="positive" label="Compliant" />
+              }
+            </td>
+            <td class="sticky right-0 bg-white px-4 py-2 text-right shadow-[-6px_0_6px_-4px_rgba(15,23,42,0.15)]">
+              @if (canTransition(trip.status)) {
+                <ui-button
+                  *appHasPermission="'scheduling.manage'"
+                  variant="secondary"
+                  (pressed)="changeStatus(trip)"
+                >
+                  Change status
+                </ui-button>
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>
+
+<ng-template #statusBody>
+  <fieldset class="flex flex-col gap-2">
+    <legend class="text-sm font-medium text-slate-700">New status</legend>
+    @for (option of statusOptions(); track option.target) {
+      <label class="flex items-center gap-2 text-sm">
+        <input
+          type="radio"
+          name="trip-status-target"
+          [checked]="statusTarget() === option.target"
+          (change)="setStatusTarget(option.target)"
+        />
+        {{ option.label }}
+      </label>
+    }
+  </fieldset>
+  @if (statusTarget() === 'cancelled') {
+    <div class="mt-4 flex flex-col gap-1">
+      <label for="trip-status-reason" class="text-sm font-medium text-slate-700">Reason</label>
+      <textarea
+        id="trip-status-reason"
+        rows="3"
+        [value]="statusReason()"
+        (input)="setStatusReason($any($event.target).value)"
+        class="rounded-md border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+      ></textarea>
+    </div>
+  }
+</ng-template>

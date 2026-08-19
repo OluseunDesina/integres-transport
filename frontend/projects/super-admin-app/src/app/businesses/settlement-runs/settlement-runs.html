@@ -1,0 +1,79 @@
+<div class="flex flex-col gap-6">
+  <div>
+    <a routerLink="/businesses" class="text-sm text-slate-500 hover:text-slate-900">&larr; Businesses</a>
+    <h1 class="mt-2 text-lg font-semibold text-slate-900">
+      Settlement runs
+      @if (business(); as b) {
+        — {{ b.name }}
+      }
+    </h1>
+  </div>
+
+  @if (notFound()) {
+    <ui-alert>Business not found.</ui-alert>
+  } @else {
+    @if (store.error()) {
+      <ui-alert>{{ store.error() }}</ui-alert>
+    } @else if (store.isEmpty()) {
+      <ui-empty-state
+        title="No settlement runs yet"
+        description="Runs triggered for this business will appear here."
+      />
+    } @else {
+      <ui-table [loading]="store.loading()">
+        <thead>
+          <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+            <th class="px-4 py-2">Period</th>
+            <th class="px-4 py-2">Status</th>
+            <th class="px-4 py-2">Total</th>
+            <th class="px-4 py-2">PSP reference</th>
+            <th class="px-4 py-2">Executed</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (run of store.items(); track run.id) {
+            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <td class="px-4 py-2">{{ run.period_start }} – {{ run.period_end }}</td>
+              <td class="px-4 py-2">
+                <ui-status-pill [tone]="statusTone[run.status]" [label]="statusLabel[run.status]" />
+              </td>
+              <td class="px-4 py-2">{{ totalLabel(run) }}</td>
+              <td class="px-4 py-2 font-mono text-xs text-slate-500">
+                {{ run.psp_transfer_reference || '—' }}
+              </td>
+              <td class="px-4 py-2">{{ run.executed_at ? (run.executed_at | date: 'short') : '—' }}</td>
+            </tr>
+          }
+        </tbody>
+      </ui-table>
+      <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+    }
+
+    <div class="max-w-md rounded-md border border-slate-200 p-4">
+      <h2 class="mb-4 text-sm font-medium text-slate-900">Trigger a settlement run</h2>
+
+      @if (payoutNotConfigured()) {
+        <ui-alert class="mb-4">
+          This Business has no Paystack payout destination configured.
+          <a
+            [routerLink]="['/businesses', businessId(), 'paystack-account']"
+            class="underline"
+            >Configure one first.</a
+          >
+        </ui-alert>
+      } @else if (triggerError(); as message) {
+        <ui-alert class="mb-4">{{ message }}</ui-alert>
+      }
+
+      <form [formGroup]="form" (ngSubmit)="onTrigger()" class="flex flex-col gap-4" novalidate>
+        <ui-text-field label="Period start" type="date" formControlName="period_start" />
+        <ui-text-field label="Period end" type="date" formControlName="period_end" />
+        <div>
+          <ui-button type="submit" [loading]="triggering()" [disabled]="triggering()">
+            Trigger
+          </ui-button>
+        </div>
+      </form>
+    </div>
+  }
+</div>

@@ -1,0 +1,36 @@
+<div class="flex flex-col gap-6">
+  <h1 class="text-lg font-semibold text-slate-900">Validate a ticket</h1>
+
+  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+    <ui-text-field label="Service date" type="date" formControlName="serviceDate" />
+
+    <ui-select label="Trip" [options]="tripOptions()" formControlName="tripId" />
+
+    @if (selectedTrip(); as trip) {
+      <p class="-mt-2 text-sm text-slate-500">
+        {{ trip.route.name }} · {{ trip.service_date }} · {{ trip.status }}
+      </p>
+    }
+
+    <ui-text-field
+      label="Ticket QR payload (scan or paste)"
+      formControlName="payload"
+      autocomplete="off"
+    />
+
+    <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+      Validate ticket
+    </ui-button>
+  </form>
+
+  @if (result(); as outcome) {
+    @if (outcome.ok) {
+      <ui-alert variant="success">
+        {{ outcome.data.status }} — {{ outcome.data.passenger_name }}, seat
+        {{ outcome.data.seat_number }} ({{ outcome.data.from_stop }} → {{ outcome.data.to_stop }})
+      </ui-alert>
+    } @else {
+      <ui-alert>{{ outcome.message }}</ui-alert>
+    }
+  }
+</div>

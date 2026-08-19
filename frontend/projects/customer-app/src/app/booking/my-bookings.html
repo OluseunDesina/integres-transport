@@ -1,0 +1,86 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">My bookings</h1>
+    <ui-button variant="secondary" (pressed)="goToSearch()">Book a trip</ui-button>
+  </div>
+
+  @if (store.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No bookings yet"
+      description="Once you reserve a seat, your trips will show up here."
+    >
+      <ui-button (pressed)="goToSearch()">Search trips</ui-button>
+    </ui-empty-state>
+  } @else {
+    @if (paymentError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Route</th>
+          <th class="px-4 py-2">Departure</th>
+          <th class="px-4 py-2">Seats</th>
+          <th class="px-4 py-2">Total</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2 text-right"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (booking of store.items(); track booking.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">{{ booking.trip.route.name }}</td>
+            <td class="px-4 py-2">{{ booking.trip.scheduled_departure_at | date: 'short' }}</td>
+            <td class="px-4 py-2">{{ seatNumbers(booking) }}</td>
+            <td class="px-4 py-2">{{ totalLabel(booking) }}</td>
+            <td class="px-4 py-2">
+              <ui-status-pill
+                [tone]="statusTone[booking.status]"
+                [label]="statusLabel[booking.status]"
+              />
+            </td>
+            <td class="px-4 py-2 text-right">
+              @if (canPay(booking)) {
+                <ui-button
+                  [loading]="payingBookingIds().has(booking.id)"
+                  (pressed)="payNow(booking)"
+                >
+                  Pay now
+                </ui-button>
+              }
+              @if (canViewTickets(booking)) {
+                <ui-button variant="secondary" (pressed)="viewTickets(booking)">
+                  View tickets
+                </ui-button>
+              }
+              @if (canCancel(booking)) {
+                <ui-button variant="secondary" (pressed)="cancel(booking)">Cancel</ui-button>
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>
+
+<ng-template #cancelBody>
+  <p class="text-sm text-slate-600">
+    Your seats will be released and this booking cannot be reinstated.
+  </p>
+  <div class="mt-4 flex flex-col gap-1">
+    <label for="booking-cancel-reason" class="text-sm font-medium text-slate-700">
+      Reason (optional)
+    </label>
+    <textarea
+      id="booking-cancel-reason"
+      rows="3"
+      [value]="cancelReason()"
+      (input)="setCancelReason($any($event.target).value)"
+      class="rounded-md border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+    ></textarea>
+  </div>
+</ng-template>

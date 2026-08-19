@@ -1,0 +1,47 @@
+<div class="mx-auto max-w-lg">
+  @if (invitedEmail(); as email) {
+    <h1 class="mb-6 text-lg font-semibold text-slate-900">Invite a client</h1>
+    <ui-alert variant="success" class="mb-4">Invitation sent to {{ email }}.</ui-alert>
+    <div class="flex gap-3">
+      <ui-button (pressed)="inviteAnother()">Invite another</ui-button>
+      <a
+        routerLink="/home"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+        >Back to home</a
+      >
+    </div>
+  } @else {
+    <h1 class="mb-6 text-lg font-semibold text-slate-900">Invite a client</h1>
+
+    @if (generalError(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-text-field
+        label="Business name"
+        formControlName="name"
+        [invalid]="!!nameFieldError()"
+        [errorMessage]="nameFieldError()"
+      />
+      <ui-text-field
+        label="Email"
+        type="email"
+        autocomplete="email"
+        formControlName="email"
+        [invalid]="!!emailFieldError()"
+        [errorMessage]="emailFieldError()"
+      />
+      <div class="mt-2 flex gap-3">
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+          Send invitation
+        </ui-button>
+        <a
+          routerLink="/home"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          >Cancel</a
+        >
+      </div>
+    </form>
+  }
+</div>

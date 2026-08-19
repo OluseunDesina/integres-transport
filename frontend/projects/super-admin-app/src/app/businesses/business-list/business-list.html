@@ -1,0 +1,72 @@
+<div class="flex flex-col gap-6">
+  <h1 class="text-lg font-semibold text-slate-900">Businesses</h1>
+
+  <form (ngSubmit)="onSearchSubmit()" class="flex items-end gap-3">
+    <div class="w-full max-w-sm">
+      <ui-text-field
+        label="Search by name"
+        [ngModel]="searchTerm()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="onSearchTermChange($event)"
+      />
+    </div>
+    <ui-button type="submit" variant="secondary">Search</ui-button>
+  </form>
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No businesses found"
+      description="Businesses across every Client will appear here."
+    />
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Name</th>
+          <th class="px-4 py-2">Client</th>
+          <th class="px-4 py-2">Vertical</th>
+          <th class="px-4 py-2">KYB status</th>
+          <th class="px-4 py-2">Active</th>
+          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (business of store.items(); track business.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">{{ business.name }}</td>
+            <td class="px-4 py-2">{{ business.client_name }}</td>
+            <td class="px-4 py-2">{{ business.vertical }}</td>
+            <td class="px-4 py-2">
+              <ui-status-pill
+                [tone]="statusTone[business.kyb_status]"
+                [label]="statusLabel[business.kyb_status]"
+              />
+            </td>
+            <td class="px-4 py-2">
+              @if (business.is_active) {
+                <ui-status-pill tone="positive" label="Active" />
+              } @else {
+                <ui-status-pill tone="neutral" label="Inactive" />
+              }
+            </td>
+            <td class="px-4 py-2 text-right">
+              <a
+                [routerLink]="['/businesses', business.id, 'paystack-account']"
+                class="mr-4 text-sm font-medium text-slate-700 hover:text-slate-900"
+                >Paystack</a
+              >
+              <a
+                [routerLink]="['/businesses', business.id, 'settlement-runs']"
+                class="text-sm font-medium text-slate-700 hover:text-slate-900"
+                >Settlements</a
+              >
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>

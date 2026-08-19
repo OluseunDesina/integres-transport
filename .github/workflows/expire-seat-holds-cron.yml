@@ -1,0 +1,27 @@
+name: expire-seat-holds cron
+
+# Stands in for Celery Beat's expire_seat_holds job on the Vercel
+# deployment target, which runs no persistent beat process — see
+# docs/deployment.md. Vercel's own Cron Jobs cap at once/day on the
+# Hobby plan, far too coarse for a job that needs roughly its real
+# 1-minute cadence to behave visibly correctly, so this reuses GitHub
+# Actions' own scheduler instead — no new signup, no cost.
+#
+# BACKEND_URL and INTERNAL_TASK_SECRET are repo secrets, set once the
+# Vercel backend project's real URL and INTERNAL_TASK_SECRET value are
+# known (docs/deployment.md §5).
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  expire-seat-holds:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the expire-seat-holds endpoint
+        run: |
+          curl --fail -X POST \
+            "${{ secrets.BACKEND_URL }}/api/v1/internal/tasks/expire-seat-holds/" \
+            -H "X-Internal-Task-Secret: ${{ secrets.INTERNAL_TASK_SECRET }}"

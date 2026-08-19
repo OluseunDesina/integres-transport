@@ -1,0 +1,106 @@
+@if (request(); as journey) {
+  <div class="flex flex-col gap-6">
+    <div>
+      <h1 class="text-lg font-semibold text-slate-900">Choose your seats</h1>
+      <p class="mt-1 text-sm text-slate-500">
+        {{ journey.routeName }} — {{ journey.fromStop.name }} to {{ journey.toStop.name }}
+      </p>
+      <p class="text-sm text-slate-500">
+        Departs {{ journey.scheduledDepartureAt | date: 'short' }}
+      </p>
+    </div>
+
+    @if (journey.notice; as notice) {
+      <ui-alert>{{ notice }}</ui-alert>
+    }
+
+    @if (loadError(); as message) {
+      <ui-alert>
+        {{ message }}
+        <ui-button variant="secondary" class="mt-2" (pressed)="load()">Retry</ui-button>
+      </ui-alert>
+    }
+
+    @if (fareError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+
+    @if (loading()) {
+      <p class="text-sm text-slate-500">Loading seats…</p>
+    } @else if (!loadError() && !hasSeats()) {
+      <ui-empty-state
+        title="Seating not yet configured"
+        description="No vehicle has been assigned to this departure yet, so there are no seats to choose."
+      />
+    } @else if (hasSeats()) {
+      <section class="flex flex-col gap-4">
+        <div class="flex flex-wrap items-center gap-4 text-xs text-slate-600">
+          <span class="inline-flex items-center gap-2">
+            <span class="h-4 w-4 rounded border border-slate-300 bg-white"></span> Available
+          </span>
+          <span class="inline-flex items-center gap-2">
+            <span class="h-4 w-4 rounded border border-slate-900 bg-slate-900"></span> Selected
+          </span>
+          <span class="inline-flex items-center gap-2">
+            <span class="h-4 w-4 rounded border border-slate-200 bg-slate-100"></span> Taken
+          </span>
+        </div>
+
+        <div
+          role="group"
+          aria-label="Seat map"
+          class="flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-4"
+        >
+          @for (seatRow of seatRows(); track seatRow.row) {
+            <div class="flex flex-wrap gap-2">
+              @for (entry of seatRow.seats; track entry.seat.id) {
+                <button
+                  type="button"
+                  [disabled]="!entry.is_available || fareError() !== null"
+                  [attr.aria-pressed]="isSelected(entry.seat.id)"
+                  [attr.aria-label]="seatLabel(entry)"
+                  (click)="toggleSeat(entry)"
+                  class="inline-flex min-h-11 min-w-11 items-center justify-center rounded border px-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+                  [class.border-slate-900]="isSelected(entry.seat.id)"
+                  [class.bg-slate-900]="isSelected(entry.seat.id)"
+                  [class.text-white]="isSelected(entry.seat.id)"
+                  [class.border-slate-300]="entry.is_available && !isSelected(entry.seat.id)"
+                  [class.bg-white]="entry.is_available && !isSelected(entry.seat.id)"
+                  [class.text-slate-900]="entry.is_available && !isSelected(entry.seat.id)"
+                  [class.border-slate-200]="!entry.is_available"
+                  [class.bg-slate-100]="!entry.is_available"
+                  [class.text-slate-400]="!entry.is_available"
+                  [class.cursor-not-allowed]="!entry.is_available"
+                >
+                  {{ entry.seat.seat_number }}
+                </button>
+              }
+            </div>
+          }
+        </div>
+
+        <div
+          class="flex flex-wrap items-center justify-between gap-4 rounded-md border border-slate-200 bg-white p-4"
+        >
+          <div class="text-sm">
+            @if (fareLabel(); as fare) {
+              <p class="text-slate-500">{{ fare }} per seat</p>
+            }
+            <p class="font-medium text-slate-900">
+              {{ selectedCount() }} seat(s) selected
+              @if (totalLabel(); as total) {
+                — total {{ total }}
+              }
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <ui-button variant="secondary" (pressed)="back()">Back</ui-button>
+            <ui-button [disabled]="!canContinue()" (pressed)="continueToConfirm()">
+              Continue
+            </ui-button>
+          </div>
+        </div>
+      </section>
+    }
+  </div>
+}

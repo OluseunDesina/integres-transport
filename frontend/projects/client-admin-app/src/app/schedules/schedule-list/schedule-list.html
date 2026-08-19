@@ -1,0 +1,60 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Schedules</h1>
+    <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewSchedule()">New schedule</ui-button>
+  </div>
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No schedules yet"
+      description="Create a schedule to start generating Trips for a Route."
+    >
+      <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewSchedule()">New schedule</ui-button>
+    </ui-empty-state>
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Route</th>
+          <th class="px-4 py-2">Days</th>
+          <th class="px-4 py-2">Departure</th>
+          <th class="px-4 py-2">Effective</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (schedule of store.items(); track schedule.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">
+              {{ routeNames().get(schedule.route) ?? schedule.route }}
+            </td>
+            <td class="px-4 py-2">{{ formatDays(schedule.days_of_week) }}</td>
+            <td class="px-4 py-2">{{ schedule.departure_time }}</td>
+            <td class="px-4 py-2">
+              {{ schedule.effective_from }}{{ schedule.effective_until ? ' – ' + schedule.effective_until : '+' }}
+            </td>
+            <td class="px-4 py-2">
+              @if (schedule.is_active) {
+                <ui-status-pill tone="positive" label="Active" />
+              } @else {
+                <ui-status-pill tone="neutral" label="Inactive" />
+              }
+            </td>
+            <td class="px-4 py-2 text-right">
+              <a
+                *appHasPermission="'scheduling.manage'"
+                [routerLink]="['/schedules', schedule.id, 'edit']"
+                class="text-sm font-medium text-slate-700 hover:text-slate-900"
+                >Edit</a
+              >
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>

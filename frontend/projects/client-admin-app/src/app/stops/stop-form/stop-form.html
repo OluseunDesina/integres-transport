@@ -1,0 +1,56 @@
+<div class="mx-auto max-w-lg">
+  @if (notFound()) {
+    <p class="text-sm text-slate-500">
+      That stop couldn't be found.
+      <a routerLink="/stops" class="font-medium text-slate-900 underline">Back to stops</a>
+    </p>
+  } @else {
+    <h1 class="mb-6 text-lg font-semibold text-slate-900">
+      {{ editing() ? 'Edit stop' : 'New stop' }}
+    </h1>
+
+    @if (errorMessage(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-select
+        label="Business"
+        [options]="businessOptionsList()"
+        formControlName="business"
+        [invalid]="!!fieldError('business')"
+        [errorMessage]="fieldError('business')"
+      />
+      <ui-text-field
+        label="Stop name"
+        formControlName="name"
+        [invalid]="!!fieldError('name')"
+        [errorMessage]="fieldError('name')"
+      />
+      <ui-text-field label="Address" formControlName="address" />
+      <div class="grid grid-cols-2 gap-4">
+        <ui-text-field label="Latitude" formControlName="latitude" />
+        <ui-text-field label="Longitude" formControlName="longitude" />
+      </div>
+      <p class="-mt-2 text-sm text-slate-500">Provide an address or both latitude and longitude.</p>
+
+      @if (editing()) {
+        <label class="flex items-center gap-2 text-sm text-slate-700">
+          <input type="checkbox" formControlName="is_active" class="h-4 w-4 rounded border-slate-300" />
+          Active
+        </label>
+      }
+
+      <div class="mt-2 flex gap-3">
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+          {{ editing() ? 'Save changes' : 'Create stop' }}
+        </ui-button>
+        <a
+          routerLink="/stops"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          >Cancel</a
+        >
+      </div>
+    </form>
+  }
+</div>

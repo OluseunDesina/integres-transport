@@ -1,0 +1,43 @@
+---
+description: Angular 20 workspace conventions for the three Integra frontends
+globs: frontend/**/*.ts,frontend/**/*.html,frontend/**/*.css,frontend/**/*.scss
+alwaysApply: false
+---
+
+# Frontend conventions
+
+Angular CLI workspace (not Nx): `customer-app`, `client-admin-app`,
+`super-admin-app` plus shared libraries (`shared-ui`, `shared-data`, `auth`,
+`layout`, `api-client`).
+
+## Component style
+
+- Standalone components (no `standalone: true` — implicit in v20),
+  `ChangeDetectionStrategy.OnPush` everywhere.
+- `input()`/`output()` functions, not decorators; `host` object, not
+  `@HostBinding`/`@HostListener`.
+- Native control flow (`@if`/`@for`), reactive forms only, `inject()` over
+  constructor injection.
+- Tailwind v4 first. CDK `Dialog` for overlays, CDK `BreakpointObserver` for
+  responsive breakpoints.
+- File naming has no `.component` suffix.
+
+## Boundaries
+
+- Path aliases (`@shared-ui`, `@shared-data`, `@auth`, `@layout`, `@api-client`)
+  only across library boundaries — never deep relative imports into another
+  project.
+- Concrete per-domain stores extend `ListStore` at
+  `src/app/shared/data/store/<domain>.store.ts` **inside each app**, not in
+  `shared-data`.
+- `api-client`'s `schema.ts` is generated — never hand-edit. Run
+  `npm run openapi:generate`; `npm run openapi:check` is the drift check.
+- Never hardcode API URLs. Use `src/environments/` wired via `angular.json`
+  `fileReplacements`.
+
+## Commands
+
+`npm run start:{customer,client-admin,super-admin}` (ports 4200/4201/4202),
+`npm run test:all`, `npx ng lint <project>` per project (no combined target),
+`npx playwright test` (needs `docker compose up -d postgres redis backend` and a
+migrate first — `globalSetup` seeds e2e users inside the backend container).

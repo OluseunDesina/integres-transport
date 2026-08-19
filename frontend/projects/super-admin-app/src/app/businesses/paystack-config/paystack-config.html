@@ -1,0 +1,46 @@
+<div class="mx-auto flex max-w-lg flex-col gap-6">
+  <div>
+    <a routerLink="/businesses" class="text-sm text-slate-500 hover:text-slate-900">&larr; Businesses</a>
+    <h1 class="mt-2 text-lg font-semibold text-slate-900">
+      Paystack account
+      @if (business(); as b) {
+        — {{ b.name }}
+      }
+    </h1>
+  </div>
+
+  @if (notFound()) {
+    <ui-alert>Business not found.</ui-alert>
+  } @else if (loading()) {
+    <p class="text-sm text-slate-500">Loading…</p>
+  } @else {
+    @if (!alreadyConfigured()) {
+      <p class="text-sm text-slate-500">Not yet configured — fill in the form below.</p>
+    }
+    @if (successMessage(); as message) {
+      <ui-alert variant="success">{{ message }}</ui-alert>
+    }
+    @if (loadError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-text-field label="Bank code" formControlName="bank_code" />
+      <ui-text-field label="Account number" formControlName="account_number" />
+      <ui-text-field label="Account name" formControlName="account_name" />
+      <ui-text-field
+        label="Recipient code"
+        formControlName="recipient_code"
+        [invalid]="form.controls.recipient_code.invalid && form.controls.recipient_code.touched"
+        errorMessage="This field is required."
+      />
+      <label class="flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" formControlName="is_active" />
+        Active
+      </label>
+      <div>
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">Save</ui-button>
+      </div>
+    </form>
+  }
+</div>

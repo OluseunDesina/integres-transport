@@ -1,0 +1,6596 @@
+openapi: 3.0.3
+info:
+  title: Integra AFC API
+  version: 1.0.0
+  description: Automated Fare Collection platform API. Versioned from v1; see docs/adr/
+    for tenancy, auth and domain-model decisions.
+paths:
+  /api/v1/auth/client-admin/token/:
+    post:
+      operationId: auth_client_admin_token_create
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientAdminTokenObtain'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ClientAdminTokenObtain'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClientAdminTokenObtain'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenObtainResponse'
+          description: ''
+  /api/v1/auth/customer/token/:
+    post:
+      operationId: auth_customer_token_create
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerTokenObtain'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CustomerTokenObtain'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CustomerTokenObtain'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenObtainResponse'
+          description: ''
+  /api/v1/auth/me/:
+    get:
+      operationId: auth_me_retrieve
+      tags:
+      - auth
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+          description: ''
+  /api/v1/auth/super-admin/token/:
+    post:
+      operationId: auth_super_admin_token_create
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuperAdminTokenObtain'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SuperAdminTokenObtain'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SuperAdminTokenObtain'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenObtainResponse'
+          description: ''
+  /api/v1/auth/token/refresh/:
+    post:
+      operationId: auth_token_refresh_create
+      description: |-
+        Takes a refresh type JSON web token and returns an access type JSON web
+        token if the refresh token is valid.
+      tags:
+      - auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TokenRefresh'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenRefresh'
+          description: ''
+  /api/v1/bookings/:
+    get:
+      operationId: bookings_list
+      description: |-
+        GET is staff-only ops visibility (`booking.view`); POST is the
+        passenger-facing booking-creation endpoint — `IsAuthenticated` only,
+        no Role/Permission gate, since passengers have no Role
+        (docs/adr/0003, and see `apps.fares.views.TripFareView`'s own note
+        on this same distinction).
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter to a single status.
+      - in: query
+        name: trip
+        schema:
+          type: string
+        description: Filter to a single Trip.
+      tags:
+      - bookings
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBookingList'
+          description: ''
+    post:
+      operationId: bookings_create
+      description: |-
+        GET is staff-only ops visibility (`booking.view`); POST is the
+        passenger-facing booking-creation endpoint — `IsAuthenticated` only,
+        no Role/Permission gate, since passengers have no Role
+        (docs/adr/0003, and see `apps.fares.views.TripFareView`'s own note
+        on this same distinction).
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+        description: Client-generated key. A retried request with the same key and
+          body returns the original Booking rather than creating a second one.
+        required: true
+      tags:
+      - bookings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BookingCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BookingCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+          description: ''
+  /api/v1/bookings/{booking_id}/tickets/:
+    get:
+      operationId: bookings_tickets_list
+      description: |-
+        GET /bookings/{booking_id}/tickets/ — the passenger's own
+        Tickets for one Booking (normally one, N for a group booking).
+        Ownership-mismatch returns 403, matching
+        `apps.booking.views.BookingCancelView`'s own precedent; a real but
+        not-yet-`paid` Booking returns 404 (no Tickets exist yet), matching
+        `PaystackAccountConfigView`'s "distinct 404 for a real-but-not-yet-
+        configured state" precedent.
+      parameters:
+      - in: path
+        name: booking_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - bookings
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTicketList'
+          description: ''
+  /api/v1/bookings/{id}/cancel/:
+    post:
+      operationId: bookings_cancel_create
+      description: |-
+        POST /bookings/{id}/cancel/ — passenger, own booking only. No
+        `booking.manage` codename exists for staff (§2 of the spec): staff
+        can see Bookings (`booking.view`), not cancel them on a passenger's
+        behalf, this phase.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - bookings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingCancel'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BookingCancel'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BookingCancel'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+          description: ''
+  /api/v1/bookings/mine/:
+    get:
+      operationId: bookings_mine_list
+      description: GET /bookings/mine/ — the passenger's own booking history.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - bookings
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBookingList'
+          description: ''
+  /api/v1/businesses/:
+    get:
+      operationId: businesses_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - businesses
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBusinessList'
+          description: ''
+    post:
+      operationId: businesses_create
+      tags:
+      - businesses
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Business'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Business'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Business'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Business'
+          description: ''
+  /api/v1/businesses/{business_id}/kyb-documents/:
+    post:
+      operationId: businesses_kyb_documents_create
+      parameters:
+      - in: path
+        name: business_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - businesses
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/KybDocument'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/KybDocument'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KybDocument'
+          description: ''
+  /api/v1/businesses/{id}/:
+    patch:
+      operationId: businesses_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - businesses
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBusiness'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedBusiness'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedBusiness'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Business'
+          description: ''
+  /api/v1/client-invitations/{token}/:
+    get:
+      operationId: client_invitations_retrieve
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - client-invitations
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientInvitationResolve'
+          description: ''
+  /api/v1/client-invitations/{token}/complete/:
+    post:
+      operationId: client_invitations_complete_create
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - client-invitations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientInvitationComplete'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ClientInvitationComplete'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClientInvitationComplete'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenObtainResponse'
+          description: ''
+  /api/v1/clients/me/:
+    get:
+      operationId: clients_me_retrieve
+      tags:
+      - clients
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientMe'
+          description: ''
+  /api/v1/clients/me/kyc-documents/:
+    post:
+      operationId: clients_me_kyc_documents_create
+      tags:
+      - clients
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/KycDocument'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/KycDocument'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycDocument'
+          description: ''
+  /api/v1/clients/register/:
+    post:
+      operationId: clients_register_create
+      tags:
+      - clients
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientRegistration'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ClientRegistration'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClientRegistration'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenObtainResponse'
+          description: ''
+  /api/v1/drivers/:
+    get:
+      operationId: drivers_list
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - drivers
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDriverList'
+          description: ''
+    post:
+      operationId: drivers_create
+      tags:
+      - drivers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DriverCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DriverCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DriverCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Driver'
+          description: ''
+  /api/v1/drivers/{id}/:
+    patch:
+      operationId: drivers_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - drivers
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDriver'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDriver'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDriver'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Driver'
+          description: ''
+  /api/v1/fare-journeys/:
+    get:
+      operationId: fare_journeys_list
+      description: |-
+        GET /fare-journeys/ — staff read-only visibility, gated on
+        `tapngo.view`. No staff-side mutation of a journey exists this
+        slice, matching `apps.booking.views.BookingListCreateView`'s GET
+        branch.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter to a single status.
+      - in: query
+        name: trip
+        schema:
+          type: string
+        description: Filter to a single Trip.
+      tags:
+      - fare-journeys
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedFareJourneyList'
+          description: ''
+  /api/v1/fare-journeys/mine/:
+    get:
+      operationId: fare_journeys_mine_list
+      description: |-
+        GET /fare-journeys/mine/ — the passenger's own journey history,
+        parity with `apps.booking.views.BookingMineView`.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - fare-journeys
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedFareJourneyList'
+          description: ''
+  /api/v1/fare-rules/:
+    get:
+      operationId: fare_rules_list
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: route
+        schema:
+          type: string
+        description: Filter to one Route.
+      tags:
+      - fare-rules
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedFareRuleList'
+          description: ''
+    post:
+      operationId: fare_rules_create
+      tags:
+      - fare-rules
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FareRuleCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/FareRuleCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FareRuleCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FareRule'
+          description: ''
+  /api/v1/fare-rules/{id}/:
+    patch:
+      operationId: fare_rules_partial_update
+      description: |-
+        PATCH supersedes: closes the path's rule and returns the new
+        successor (a different `id`). See FareRuleSupersedeSerializer.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - fare-rules
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedFareRuleSupersede'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedFareRuleSupersede'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedFareRuleSupersede'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FareRule'
+          description: ''
+  /api/v1/fare-segment-rules/:
+    get:
+      operationId: fare_segment_rules_list
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: route
+        schema:
+          type: string
+        description: Filter to one Route.
+      tags:
+      - fare-segment-rules
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedFareSegmentRuleList'
+          description: ''
+    post:
+      operationId: fare_segment_rules_create
+      tags:
+      - fare-segment-rules
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FareSegmentRuleCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/FareSegmentRuleCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FareSegmentRuleCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FareSegmentRule'
+          description: ''
+  /api/v1/fare-segment-rules/{id}/:
+    patch:
+      operationId: fare_segment_rules_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - fare-segment-rules
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedFareSegmentRuleSupersede'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedFareSegmentRuleSupersede'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedFareSegmentRuleSupersede'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FareSegmentRule'
+          description: ''
+  /api/v1/health/:
+    get:
+      operationId: health_retrieve
+      description: 'Liveness probe: process is up. Does not touch the database.'
+      tags:
+      - health
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+          description: ''
+  /api/v1/ledger/accounts/:
+    get:
+      operationId: ledger_accounts_list
+      description: |-
+        GET /ledger/accounts/?business= — a Business's LedgerAccount
+        rows. Requires `ledger.view`. `business` is resolved via
+        `LedgerAccountListQuerySerializer._resolve_business`, itself scoped
+        by `Business.objects`'s `TenantScopedManager` — a `business`
+        belonging to another Client doesn't resolve at all (400), the same
+        `DoesNotExist -> ValidationError` shape
+        `apps.tapngo.serializers._resolve_trip` already establishes for the
+        same kind of query-param FK lookup.
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to one Business.
+        required: true
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - ledger
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLedgerAccountList'
+          description: ''
+  /api/v1/ledger/entries/:
+    get:
+      operationId: ledger_entries_list
+      description: |-
+        GET /ledger/entries/?business=&account= — a Business's
+        JournalEntry rows, each with its lines nested. Requires
+        `ledger.view`.
+
+        `list()` is overridden (rather than relying on DRF's default
+        single-queryset render) to batch exactly one extra `JournalLine`
+        query for the whole page, grouped by `journal_entry_id` and handed
+        to the serializer via context — the N+1-avoidance mechanism
+        `JournalEntrySerializer.get_lines` depends on, necessary because
+        `JournalLine.journal_entry` has no reverse accessor to
+        `prefetch_related` through.
+      parameters:
+      - in: query
+        name: account
+        schema:
+          type: string
+        description: Filter to entries touching one LedgerAccount.
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to one Business.
+        required: true
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - ledger
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedJournalEntryList'
+          description: ''
+  /api/v1/payments/:
+    get:
+      operationId: payments_list
+      description: |-
+        GET is staff-only visibility (`payments.view`); POST is the
+        passenger-facing payment-initiation endpoint — `IsAuthenticated`
+        only, no Role/Permission gate, matching
+        `apps.booking.views.BookingListCreateView`'s exact same POST/GET
+        split for the identical reason (passengers have no Role,
+        docs/adr/0003).
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to one Business.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter to one status.
+      tags:
+      - payments
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPaymentIntentList'
+          description: ''
+    post:
+      operationId: payments_create
+      description: |-
+        GET is staff-only visibility (`payments.view`); POST is the
+        passenger-facing payment-initiation endpoint — `IsAuthenticated`
+        only, no Role/Permission gate, matching
+        `apps.booking.views.BookingListCreateView`'s exact same POST/GET
+        split for the identical reason (passengers have no Role,
+        docs/adr/0003).
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+        description: Client-generated key. A retried request with the same key and
+          body returns the original PaymentIntent rather than initiating a second
+          payment.
+        required: true
+      tags:
+      - payments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentInitiate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PaymentInitiate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PaymentInitiate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentInitiateResponse'
+          description: ''
+  /api/v1/payments/{id}/:
+    get:
+      operationId: payments_retrieve
+      description: GET /payments/{id}/ — own PaymentIntent only.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - payments
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentIntent'
+          description: ''
+  /api/v1/payments/mine/:
+    get:
+      operationId: payments_mine_list
+      description: GET /payments/mine/ — the passenger's own PaymentIntents.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - payments
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPaymentIntentList'
+          description: ''
+  /api/v1/readiness/:
+    get:
+      operationId: readiness_retrieve
+      description: 'Readiness probe: process is up and the database is reachable.'
+      tags:
+      - readiness
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Readiness'
+          description: ''
+  /api/v1/routes/:
+    get:
+      operationId: routes_list
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - routes
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRouteList'
+          description: ''
+    post:
+      operationId: routes_create
+      tags:
+      - routes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RouteCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RouteCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Route'
+          description: ''
+  /api/v1/routes/{id}/:
+    patch:
+      operationId: routes_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - routes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedRoute'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedRoute'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedRoute'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Route'
+          description: ''
+  /api/v1/routes/{id}/stops/:
+    put:
+      operationId: routes_stops_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - routes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteStopsUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RouteStopsUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RouteStopsUpdate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Route'
+          description: ''
+  /api/v1/routes/browse/:
+    get:
+      operationId: routes_browse_list
+      description: |-
+        GET /routes/browse/ — the passenger-facing Route list, see
+        docs/specs/4-fares-seating-booking-frontend.md §3.2.
+
+        Deliberately a separate view class rather than RouteListCreateView
+        with widened permissions: passengers hold no Role/Permission at all
+        (docs/adr/0003), so this is IsAuthenticated + the ordinary tenancy
+        scoping every BaseModel query already enforces — the same posture
+        apps.fares.views.TripFareView and apps.seating.views.TripAvailabilityView
+        already established. Keeping it separate also keeps the
+        passenger-visible filtering (active Routes, bookable ones only) out
+        of the staff view, and means no create/edit affordance can ever
+        reach this URL.
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - routes
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRouteBrowseList'
+          description: ''
+  /api/v1/schedules/:
+    get:
+      operationId: schedules_list
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - schedules
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedScheduleList'
+          description: ''
+    post:
+      operationId: schedules_create
+      tags:
+      - schedules
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ScheduleCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ScheduleCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+          description: ''
+  /api/v1/schedules/{id}/:
+    patch:
+      operationId: schedules_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - schedules
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSchedule'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSchedule'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSchedule'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+          description: ''
+  /api/v1/settlement-runs/:
+    get:
+      operationId: settlement_runs_list
+      description: |-
+        GET/POST /settlement-runs/ — Phase 5 Slice 3. IsPlatformStaff-
+        gated, not a Role/Permission codename: a payout is a platform
+        financial operation, not client self-service — mirrors
+        apps.businesses.views.BusinessSeatHoldView's/
+        PaystackAccountConfigView's own gating exactly (the spec's own API
+        surface note).
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to one Business.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - settlement-runs
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSettlementRunList'
+          description: ''
+    post:
+      operationId: settlement_runs_create
+      description: |-
+        GET/POST /settlement-runs/ — Phase 5 Slice 3. IsPlatformStaff-
+        gated, not a Role/Permission codename: a payout is a platform
+        financial operation, not client self-service — mirrors
+        apps.businesses.views.BusinessSeatHoldView's/
+        PaystackAccountConfigView's own gating exactly (the spec's own API
+        surface note).
+      tags:
+      - settlement-runs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettlementRunTrigger'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SettlementRunTrigger'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SettlementRunTrigger'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettlementRun'
+          description: ''
+  /api/v1/staff/:
+    get:
+      operationId: staff_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - staff
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedStaffList'
+          description: ''
+  /api/v1/staff/{user_id}/:
+    patch:
+      operationId: staff_partial_update
+      parameters:
+      - in: path
+        name: user_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - staff
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedStaffUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedStaffUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedStaffUpdate'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Staff'
+          description: ''
+  /api/v1/staff/invitations/:
+    post:
+      operationId: staff_invitations_create
+      tags:
+      - staff
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffInvitationCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StaffInvitationCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StaffInvitationCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffInvitationCreatedResponse'
+          description: ''
+  /api/v1/staff/invitations/{token}/:
+    get:
+      operationId: staff_invitations_retrieve
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - staff
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffInvitationResolve'
+          description: ''
+  /api/v1/staff/invitations/{token}/accept/:
+    post:
+      operationId: staff_invitations_accept_create
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - staff
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffInvitationAccept'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StaffInvitationAccept'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StaffInvitationAccept'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenObtainResponse'
+          description: ''
+  /api/v1/staff/roles/:
+    get:
+      operationId: staff_roles_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - staff
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRoleList'
+          description: ''
+  /api/v1/stops/:
+    get:
+      operationId: stops_list
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - stops
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedStopList'
+          description: ''
+    post:
+      operationId: stops_create
+      tags:
+      - stops
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StopCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StopCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stop'
+          description: ''
+  /api/v1/stops/{id}/:
+    patch:
+      operationId: stops_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - stops
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedStop'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedStop'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedStop'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stop'
+          description: ''
+  /api/v1/super-admin/businesses/:
+    get:
+      operationId: super_admin_businesses_list
+      description: |-
+        GET /super-admin/businesses/ — cross-client Business search for
+        platform staff, Phase 5 frontend Slice C. Needed before either of
+        that slice's two other endpoints (Paystack account config,
+        settlement-run trigger) are usable: neither the tenant-scoped
+        `GET /businesses/` nor the kyb_status-filtered `KybQueueListView`
+        let platform staff find an arbitrary, already-approved Business.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Filter by Business name (icontains).
+      tags:
+      - super-admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBusinessSuperAdminList'
+          description: ''
+  /api/v1/super-admin/businesses/{id}/paystack-account/:
+    get:
+      operationId: super_admin_businesses_paystack_account_retrieve
+      description: |-
+        GET/PATCH /super-admin/businesses/{id}/paystack-account/ —
+        super-admin-only, mirrors
+        apps.businesses.views.BusinessSeatHoldView exactly, adjusted for a
+        OneToOne-related model that may not have a row yet
+        (`configure_paystack_account` uses `update_or_create`).
+
+        GET added in Phase 5 frontend Slice C — the PATCH-only original
+        left a config screen with no way to show "already configured"
+        state or avoid a blind overwrite. Returns a distinct 404 message
+        when the Business exists but has no `PaystackAccount` row yet
+        (vs. a plain "Not found." when the Business itself doesn't exist),
+        so the frontend can render "not yet configured" as an expected,
+        non-error state.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - super-admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaystackAccount'
+          description: ''
+    patch:
+      operationId: super_admin_businesses_paystack_account_partial_update
+      description: |-
+        GET/PATCH /super-admin/businesses/{id}/paystack-account/ —
+        super-admin-only, mirrors
+        apps.businesses.views.BusinessSeatHoldView exactly, adjusted for a
+        OneToOne-related model that may not have a row yet
+        (`configure_paystack_account` uses `update_or_create`).
+
+        GET added in Phase 5 frontend Slice C — the PATCH-only original
+        left a config screen with no way to show "already configured"
+        state or avoid a blind overwrite. Returns a distinct 404 message
+        when the Business exists but has no `PaystackAccount` row yet
+        (vs. a plain "Not found." when the Business itself doesn't exist),
+        so the frontend can render "not yet configured" as an expected,
+        non-error state.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - super-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPaystackAccount'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPaystackAccount'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPaystackAccount'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaystackAccount'
+          description: ''
+  /api/v1/super-admin/businesses/{id}/seat-hold/:
+    patch:
+      operationId: super_admin_businesses_seat_hold_partial_update
+      description: |-
+        Super-admin-only — docs/adr/0004. Deliberately not part of
+        BusinessUpdateView's client-admin PATCH path; see
+        Business.seat_hold_minutes's own docstring for why.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - super-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBusinessSeatHold'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedBusinessSeatHold'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedBusinessSeatHold'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessSeatHold'
+          description: ''
+  /api/v1/super-admin/client-invitations/:
+    post:
+      operationId: super_admin_client_invitations_create
+      tags:
+      - super-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientInvitationCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ClientInvitationCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClientInvitationCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvitationCreatedResponse'
+          description: ''
+  /api/v1/super-admin/kyb-queue/:
+    get:
+      operationId: super_admin_kyb_queue_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - super-admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBusinessKybQueueList'
+          description: ''
+  /api/v1/super-admin/kyb-queue/{business_id}/decide/:
+    post:
+      operationId: super_admin_kyb_queue_decide_create
+      parameters:
+      - in: path
+        name: business_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - super-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KybDecision'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/KybDecision'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/KybDecision'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessKybQueue'
+          description: ''
+  /api/v1/super-admin/kyc-queue/:
+    get:
+      operationId: super_admin_kyc_queue_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - super-admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedClientKycQueueList'
+          description: ''
+  /api/v1/super-admin/kyc-queue/{client_id}/decide/:
+    post:
+      operationId: super_admin_kyc_queue_decide_create
+      parameters:
+      - in: path
+        name: client_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - super-admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KycDecision'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/KycDecision'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/KycDecision'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientKycQueue'
+          description: ''
+  /api/v1/tap-credentials/:
+    post:
+      operationId: tap_credentials_create
+      description: |-
+        POST /tap-credentials/ — a passenger issues a credential for
+        themselves. `IsAuthenticated` only, no Role/Permission gate —
+        passengers have no Role (docs/adr/0003), same reasoning
+        `apps.booking.views.BookingListCreateView`'s POST branch documents.
+
+        `@extend_schema` is required here, not optional: `serializer_class`
+        (used for request validation) and the actual response shape
+        (`TapCredentialIssuedSerializer`, built manually below since it needs
+        `token` from context, not the instance) are genuinely different
+        serializers — without this, drf-spectacular infers the response
+        schema from `serializer_class` too and documents the *request* shape
+        as the response, silently omitting `token` from the generated
+        OpenAPI schema and every typed frontend client built from it.
+      tags:
+      - tap-credentials
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TapCredentialIssue'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TapCredentialIssue'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TapCredentialIssue'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TapCredentialIssued'
+          description: ''
+  /api/v1/tap-credentials/{id}/:
+    patch:
+      operationId: tap_credentials_partial_update
+      description: |-
+        PATCH /tap-credentials/{id}/ — revoke only, own credentials only.
+        `@extend_schema` required — see `TapCredentialCreateView`'s own
+        docstring: the response is built from a different serializer
+        (`TapCredentialSerializer`) than the one validating the request.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - tap-credentials
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTapCredentialUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTapCredentialUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTapCredentialUpdate'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TapCredential'
+          description: ''
+  /api/v1/tap-credentials/mine/:
+    get:
+      operationId: tap_credentials_mine_list
+      description: |-
+        GET /tap-credentials/mine/ — the passenger's own credentials.
+        `token` never appears in this response.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - tap-credentials
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTapCredentialList'
+          description: ''
+  /api/v1/ticketing/revoked/:
+    get:
+      operationId: ticketing_revoked_retrieve
+      description: |-
+        GET /ticketing/revoked/ — genuinely empty in practice this slice
+        (nothing sets `Ticket.Status.REVOKED` yet — see
+        docs/specs/6-ticketing.md's non-goals), but wired against the real
+        query rather than hardcoded, so a future refund phase needs no
+        endpoint change. `@extend_schema` required — see `SigningKeysView`'s
+        own docstring.
+      tags:
+      - ticketing
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokedTicketsResponse'
+          description: ''
+  /api/v1/ticketing/signing-keys/:
+    get:
+      operationId: ticketing_signing_keys_retrieve
+      description: |-
+        GET /ticketing/signing-keys/ — JWKS-shaped, every `kid` currently
+        in `TICKET_SIGNING_KEYS`. `IsAuthenticated` only, no `ticketing.*`
+        permission — this is low-sensitivity key material a future offline
+        validator device needs to cache, not a privileged action.
+
+        `@extend_schema` is required here, not optional — this view has no
+        `serializer_class` (its response isn't backed by a model), the same
+        reason `apps.tapngo.views.TapCredentialCreateView`'s own docstring
+        already explains for that app's equivalent case.
+      tags:
+      - ticketing
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SigningKeysResponse'
+          description: ''
+  /api/v1/trips/:
+    get:
+      operationId: trips_list
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: route
+        schema:
+          type: string
+        description: Filter to a single Route.
+      - in: query
+        name: schedule
+        schema:
+          type: string
+        description: Filter to a single Schedule.
+      - in: query
+        name: service_date
+        schema:
+          type: string
+        description: Filter to a single service_date (YYYY-MM-DD).
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter to a single status.
+      tags:
+      - trips
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTripList'
+          description: ''
+    post:
+      operationId: trips_create
+      tags:
+      - trips
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TripCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TripCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TripCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trip'
+          description: ''
+  /api/v1/trips/{id}/:
+    patch:
+      operationId: trips_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - trips
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTripAssignment'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTripAssignment'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTripAssignment'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trip'
+          description: ''
+  /api/v1/trips/{id}/availability/:
+    get:
+      operationId: trips_availability_list
+      description: |-
+        Seat availability for a Trip's segment —
+        docs/specs/4-fares-seating-booking.md §3. Not permission-codename
+        gated: same IsAuthenticated + ordinary tenancy scoping as
+        apps.fares.views.TripFareView, and for the same reason (passengers
+        have no Role — see that view's own docstring).
+      parameters:
+      - in: query
+        name: from_stop
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: query
+        name: to_stop
+        schema:
+          type: string
+        required: true
+      tags:
+      - trips
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SeatAvailability'
+          description: ''
+  /api/v1/trips/{id}/fare/:
+    get:
+      operationId: trips_fare_retrieve
+      description: |-
+        Fare quote for a Trip's segment —
+        docs/specs/4-fares-seating-booking.md §3. Not permission-codename
+        gated: passengers have no Role (see that spec's own note on this),
+        so this is IsAuthenticated + the ordinary tenancy scoping every
+        BaseModel query already enforces — the first phase where that
+        distinction (staff permission-gated vs. passenger
+        tenancy-scoped-only) actually matters.
+      parameters:
+      - in: query
+        name: from_stop
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: query
+        name: to_stop
+        schema:
+          type: string
+        required: true
+      tags:
+      - trips
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripFareQuote'
+          description: ''
+  /api/v1/trips/{id}/status/:
+    post:
+      operationId: trips_status_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - trips
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TripStatus'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TripStatus'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TripStatus'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trip'
+          description: ''
+  /api/v1/trips/{trip_id}/taps/:
+    post:
+      operationId: trips_taps_create
+      description: |-
+        POST /trips/{trip_id}/taps/ — the validator action, gated on
+        `tapngo.record`. See docs/specs/4b-tap-and-go.md's "Operator harness"
+        section: this endpoint is what that harness drives.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+        description: Client-generated key. A retried request with the same key and
+          body returns the original TapEvent rather than recording a second one.
+        required: true
+      - in: path
+        name: trip_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - trips
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TapRecord'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TapRecord'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TapRecord'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TapEvent'
+          description: ''
+  /api/v1/trips/{trip_id}/tickets/validate/:
+    post:
+      operationId: trips_tickets_validate_create
+      description: |-
+        POST /trips/{trip_id}/tickets/validate/ — the validator action,
+        gated on `ticketing.validate`. Mirrors `apps.tapngo.views.TapRecordView`'s
+        exact shape: `Idempotency-Key` header required before anything else,
+        each typed exception from `validate_ticket` mapped to its own
+        status.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+        description: Client-generated key. A retried request with the same key and
+          body returns the original validation result rather than re-validating.
+        required: true
+      - in: path
+        name: trip_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - trips
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TicketValidate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TicketValidate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TicketValidate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketValidationResult'
+          description: ''
+  /api/v1/trips/search/:
+    get:
+      operationId: trips_search_list
+      description: |-
+        GET /trips/search/ — the passenger-facing Trip list, see
+        docs/specs/4-fares-seating-booking-frontend.md §3.3.
+
+        Separate from TripListCreateView for the same reason
+        apps.network.views.RouteBrowseView is separate from
+        RouteListCreateView: passengers hold no Role/Permission
+        (docs/adr/0003), so this is IsAuthenticated + ordinary tenancy
+        scoping. Reuses TripSerializer unchanged — `compliance_warnings` is
+        useful rather than sensitive to a passenger choosing between
+        departures, so forking a passenger-only subset would be extra
+        surface for no gain.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: route
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: service_date
+        schema:
+          type: string
+        description: The service date to search (YYYY-MM-DD).
+        required: true
+      tags:
+      - trips
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTripList'
+          description: ''
+  /api/v1/vehicle-types/:
+    get:
+      operationId: vehicle_types_list
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - vehicle-types
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedVehicleTypeList'
+          description: ''
+    post:
+      operationId: vehicle_types_create
+      tags:
+      - vehicle-types
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VehicleTypeCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VehicleTypeCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VehicleTypeCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleType'
+          description: ''
+  /api/v1/vehicle-types/{id}/:
+    patch:
+      operationId: vehicle_types_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - vehicle-types
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicleType'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicleType'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicleType'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleType'
+          description: ''
+  /api/v1/vehicle-types/{id}/seats/:
+    get:
+      operationId: vehicle_types_seats_list
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - vehicle-types
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSeatList'
+          description: ''
+    put:
+      operationId: vehicle_types_seats_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - vehicle-types
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VehicleTypeSeatsUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VehicleTypeSeatsUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VehicleTypeSeatsUpdate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSeatList'
+          description: ''
+  /api/v1/vehicles/:
+    get:
+      operationId: vehicles_list
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - vehicles
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedVehicleList'
+          description: ''
+    post:
+      operationId: vehicles_create
+      tags:
+      - vehicles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VehicleCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VehicleCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VehicleCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vehicle'
+          description: ''
+  /api/v1/vehicles/{id}/:
+    patch:
+      operationId: vehicles_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - vehicles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicle'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicle'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedVehicle'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vehicle'
+          description: ''
+  /api/v1/wallet/:
+    get:
+      operationId: wallet_retrieve
+      description: |-
+        GET /wallet/?business=&passenger= — staff lookup for
+        support/disputes.
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: The Business to look up.
+        required: true
+      - in: query
+        name: passenger
+        schema:
+          type: string
+        description: The passenger to look up.
+        required: true
+      tags:
+      - wallet
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+          description: ''
+  /api/v1/wallet/mine/:
+    get:
+      operationId: wallet_mine_retrieve
+      description: GET /wallet/mine/?business= — the passenger's own wallet.
+      parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: The Business to look up.
+        required: true
+      tags:
+      - wallet
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wallet'
+          description: ''
+  /api/v1/white-label/:
+    get:
+      operationId: white_label_retrieve
+      tags:
+      - white-label
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WhiteLabelConfig'
+          description: ''
+    patch:
+      operationId: white_label_partial_update
+      tags:
+      - white-label
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedWhiteLabelConfig'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedWhiteLabelConfig'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedWhiteLabelConfig'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WhiteLabelConfig'
+          description: ''
+  /api/v1/white-label/resolve/:
+    get:
+      operationId: white_label_resolve_retrieve
+      tags:
+      - white-label
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WhiteLabelResolve'
+          description: ''
+components:
+  schemas:
+    AccountTypeEnum:
+      enum:
+      - wallet
+      - business_clearing
+      - integra_commission
+      - psp_suspense
+      - refund_contra
+      type: string
+      description: |-
+        * `wallet` - Wallet
+        * `business_clearing` - Business clearing
+        * `integra_commission` - Integra commission
+        * `psp_suspense` - PSP suspense
+        * `refund_contra` - Refund / concession contra
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        trip:
+          allOf:
+          - $ref: '#/components/schemas/BookingTrip'
+          readOnly: true
+        passenger:
+          type: string
+          format: uuid
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/BookingStatusEnum'
+          readOnly: true
+        total_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+        cancellation_reason:
+          type: string
+          readOnly: true
+        seats:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingSeatReservation'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - cancellation_reason
+      - created_at
+      - currency
+      - id
+      - passenger
+      - seats
+      - status
+      - total_amount
+      - trip
+    BookingCancel:
+      type: object
+      description: |-
+        POST /bookings/{id}/cancel/ body. Mirrors
+        `apps.scheduling.serializers.TripStatusSerializer`'s
+        illegal-transition-in-`validate()` shape, narrowed to `Booking`'s
+        only legal cancel transition (`pending_payment` -> `cancelled`).
+      properties:
+        reason:
+          type: string
+          default: ''
+    BookingCreate:
+      type: object
+      description: |-
+        POST /bookings/ body — see the spec's §3 request-handling order.
+
+        No `create()`: unlike e.g. `apps.fares.serializers.FareRuleCreateSerializer`,
+        the view calls `apps.booking.services.create_booking` directly rather
+        than `serializer.save()` — that service needs `request.user` and the
+        `Idempotency-Key` header, neither of which is part of this body, the
+        same reason `apps.scheduling.serializers.TripStatusSerializer` has no
+        `create()`/`update()` either.
+      properties:
+        trip:
+          type: string
+          format: uuid
+        seats:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingSeatRequest'
+      required:
+      - seats
+      - trip
+    BookingModeDefaultEnum:
+      enum:
+      - reservation
+      - tap_and_go
+      type: string
+      description: |-
+        * `reservation` - Reservation
+        * `tap_and_go` - Tap and go
+    BookingModeEnum:
+      enum:
+      - reservation
+      - tap_and_go
+      type: string
+      description: |-
+        * `reservation` - Reservation
+        * `tap_and_go` - Tap and go
+    BookingSeatRequest:
+      type: object
+      properties:
+        seat:
+          type: string
+          format: uuid
+        from_stop:
+          type: string
+          format: uuid
+        to_stop:
+          type: string
+          format: uuid
+      required:
+      - from_stop
+      - seat
+      - to_stop
+    BookingSeatReservation:
+      type: object
+      description: |-
+        Nested read-only shape for `BookingSerializer.seats` — queried
+        separately (`SeatReservation.objects.filter(booking=...)`), never a
+        reverse accessor: every FK in `apps.seating` uses `related_name="+"`
+        (see that app's `models.py` docstring), so there is no
+        `booking.seatreservation_set` to traverse.
+      properties:
+        id:
+          type: string
+          format: uuid
+        seat:
+          type: string
+        from_stop:
+          type: string
+        to_stop:
+          type: string
+        status:
+          type: string
+        held_until:
+          type: string
+          format: date-time
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - amount
+      - from_stop
+      - held_until
+      - id
+      - seat
+      - status
+      - to_stop
+    BookingStatusEnum:
+      enum:
+      - pending_payment
+      - paid
+      - cancelled
+      - expired
+      type: string
+      description: |-
+        * `pending_payment` - Pending payment
+        * `paid` - Paid
+        * `cancelled` - Cancelled
+        * `expired` - Expired
+    BookingTrip:
+      type: object
+      description: |-
+        Schema-only shape for `BookingSerializer.get_trip` — see
+        docs/specs/4-fares-seating-booking-frontend.md §3.4. Mirrors
+        apps.scheduling.serializers.TripSerializer.get_route's own nested
+        {id, name} convention.
+      properties:
+        id:
+          type: string
+          format: uuid
+        route:
+          $ref: '#/components/schemas/BookingTripRoute'
+        scheduled_departure_at:
+          type: string
+          format: date-time
+        service_date:
+          type: string
+          format: date
+      required:
+      - id
+      - route
+      - scheduled_departure_at
+      - service_date
+    BookingTripRoute:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required:
+      - id
+      - name
+    Business:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        vertical:
+          $ref: '#/components/schemas/VerticalEnum'
+        name:
+          type: string
+          maxLength: 255
+        currency:
+          type: string
+          maxLength: 8
+        timezone:
+          type: string
+          maxLength: 64
+        booking_mode_default:
+          $ref: '#/components/schemas/BookingModeDefaultEnum'
+        fare_pricing_mode:
+          $ref: '#/components/schemas/FarePricingModeEnum'
+        is_active:
+          type: boolean
+        kyb_status:
+          allOf:
+          - $ref: '#/components/schemas/KybStatusEnum'
+          readOnly: true
+        kyb_submitted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - booking_mode_default
+      - created_at
+      - currency
+      - id
+      - kyb_status
+      - kyb_submitted_at
+      - name
+      - timezone
+      - vertical
+    BusinessKybQueue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        client:
+          type: string
+          format: uuid
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        vertical:
+          allOf:
+          - $ref: '#/components/schemas/VerticalEnum'
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        kyb_status:
+          allOf:
+          - $ref: '#/components/schemas/KybStatusEnum'
+          readOnly: true
+        kyb_submitted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        documents:
+          type: array
+          items:
+            $ref: '#/components/schemas/KybDocument'
+          readOnly: true
+      required:
+      - client
+      - client_name
+      - documents
+      - id
+      - kyb_status
+      - kyb_submitted_at
+      - name
+      - vertical
+    BusinessSeatHold:
+      type: object
+      description: |-
+        Request body and response shape for the super-admin-only PATCH —
+        docs/adr/0004. A plain Serializer, not a ModelSerializer: this
+        endpoint's writable surface is exactly one field, deliberately
+        never exposed on BusinessSerializer itself (see
+        Business.seat_hold_minutes's own docstring). `id` is read-only,
+        included only so the response confirms which Business was updated —
+        BusinessSerializer itself can't be reused for the response since it
+        doesn't include seat_hold_minutes at all.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        seat_hold_minutes:
+          type: integer
+          minimum: 1
+      required:
+      - id
+      - seat_hold_minutes
+    BusinessSuperAdmin:
+      type: object
+      description: |-
+        Read-only cross-client Business search for platform staff —
+        Phase 5 frontend Slice C. Unlike `BusinessKybQueueSerializer`, not
+        filtered to any `kyb_status` (that queue drops a Business the
+        moment it's decided; this is the general "pick a Business" list
+        platform staff need before configuring its Paystack payout account
+        or triggering a settlement run, neither of which existed before).
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        client:
+          type: string
+          format: uuid
+          readOnly: true
+        client_name:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        vertical:
+          allOf:
+          - $ref: '#/components/schemas/VerticalEnum'
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        kyb_status:
+          allOf:
+          - $ref: '#/components/schemas/KybStatusEnum'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - client
+      - client_name
+      - created_at
+      - currency
+      - id
+      - is_active
+      - kyb_status
+      - name
+      - vertical
+    ChannelEnum:
+      enum:
+      - qr
+      - nfc
+      type: string
+      description: |-
+        * `qr` - QR code
+        * `nfc` - NFC
+    ClientAdminTokenObtain:
+      type: object
+      description: |-
+        Shared base for the customer and client-admin serializers, which
+        both need optional client disambiguation.
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          writeOnly: true
+        client:
+          type: string
+          format: uuid
+      required:
+      - email
+      - password
+    ClientInvitationComplete:
+      type: object
+      properties:
+        phone:
+          type: string
+          maxLength: 32
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - password
+    ClientInvitationCreate:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        email:
+          type: string
+          format: email
+      required:
+      - email
+      - name
+    ClientInvitationResolve:
+      type: object
+      properties:
+        name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ClientInvitationResolveStatusEnum'
+          readOnly: true
+      required:
+      - email
+      - name
+      - status
+    ClientInvitationResolveStatusEnum:
+      enum:
+      - pending
+      - accepted
+      - revoked
+      - expired
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `accepted` - Accepted
+        * `revoked` - Revoked
+        * `expired` - Expired
+    ClientKycQueue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+          nullable: true
+        phone:
+          type: string
+          readOnly: true
+        kyc_status:
+          allOf:
+          - $ref: '#/components/schemas/KycStatusEnum'
+          readOnly: true
+        kyc_submitted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        documents:
+          type: array
+          items:
+            $ref: '#/components/schemas/KycDocument'
+          readOnly: true
+      required:
+      - documents
+      - email
+      - id
+      - kyc_status
+      - kyc_submitted_at
+      - name
+      - phone
+    ClientMe:
+      type: object
+      description: |-
+        The read-back Phase 1 never built (only `POST /clients/me/kyc-documents/`
+        existed) — mirrors `WhiteLabelConfigView.get()`'s "own Client" scoping.
+        Single-object, so `get_documents` doesn't need `ClientKycQueueSerializer`'s
+        batched-cache trick (that's for N+1 across a *list* of Clients).
+      properties:
+        kyc_status:
+          allOf:
+          - $ref: '#/components/schemas/KycStatusEnum'
+          readOnly: true
+        kyc_submitted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        kyc_rejection_reason:
+          type: string
+          readOnly: true
+        documents:
+          type: array
+          items:
+            $ref: '#/components/schemas/KycDocument'
+          readOnly: true
+      required:
+      - documents
+      - kyc_rejection_reason
+      - kyc_status
+      - kyc_submitted_at
+    ClientRegistration:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          maxLength: 32
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - email
+      - name
+      - password
+    CustomerTokenObtain:
+      type: object
+      description: |-
+        Shared base for the customer and client-admin serializers, which
+        both need optional client disambiguation.
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          writeOnly: true
+        client:
+          type: string
+          format: uuid
+      required:
+      - email
+      - password
+    DecisionEnum:
+      enum:
+      - approve
+      - reject
+      type: string
+      description: |-
+        * `approve` - approve
+        * `reject` - reject
+    DocumentTypeEnum:
+      enum:
+      - certificate_of_incorporation
+      - proof_of_address
+      - directors_id
+      - tax_certificate
+      - other
+      type: string
+      description: |-
+        * `certificate_of_incorporation` - Certificate of incorporation
+        * `proof_of_address` - Proof of address
+        * `directors_id` - Director's ID
+        * `tax_certificate` - Tax certificate
+        * `other` - Other
+    Driver:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        phone:
+          type: string
+          maxLength: 32
+        license_number:
+          type: string
+          maxLength: 64
+        license_expires_at:
+          type: string
+          format: date
+          nullable: true
+        is_active:
+          type: boolean
+        compliance_warnings:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - compliance_warnings
+      - created_at
+      - id
+      - license_number
+      - name
+    DriverCreate:
+      type: object
+      properties:
+        business:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 255
+        phone:
+          type: string
+          default: ''
+          maxLength: 32
+        license_number:
+          type: string
+          maxLength: 64
+        license_expires_at:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - business
+      - license_number
+      - name
+    EntryTypeEnum:
+      enum:
+      - payment
+      - refund
+      - concession
+      type: string
+      description: |-
+        * `payment` - Payment
+        * `refund` - Refund
+        * `concession` - Concession
+    FareJourney:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        trip:
+          allOf:
+          - $ref: '#/components/schemas/FareJourneyTrip'
+          readOnly: true
+        passenger:
+          type: string
+          format: uuid
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status44bEnum'
+          readOnly: true
+          default: open
+        board_stop:
+          type: string
+        alight_stop:
+          type: string
+          nullable: true
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+        currency:
+          type: string
+          readOnly: true
+        boarded_at:
+          type: string
+          format: date-time
+          readOnly: true
+        alighted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - alight_stop
+      - alighted_at
+      - amount
+      - board_stop
+      - boarded_at
+      - business
+      - created_at
+      - currency
+      - id
+      - passenger
+      - status
+      - trip
+    FareJourneyNested:
+      type: object
+      description: Nested read-only shape for `TapEventSerializer.journey`.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status44bEnum'
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+        currency:
+          type: string
+          readOnly: true
+      required:
+      - amount
+      - currency
+      - id
+      - status
+    FareJourneyTrip:
+      type: object
+      description: |-
+        Schema-only shape for `FareJourneySerializer.get_trip` — mirrors
+        `apps.booking.serializers.BookingTripSerializer`'s own nested
+        {id, route: {id, name}} convention.
+      properties:
+        id:
+          type: string
+          format: uuid
+        route:
+          $ref: '#/components/schemas/FareJourneyTripRoute'
+        scheduled_departure_at:
+          type: string
+          format: date-time
+        service_date:
+          type: string
+          format: date
+      required:
+      - id
+      - route
+      - scheduled_departure_at
+      - service_date
+    FareJourneyTripRoute:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required:
+      - id
+      - name
+    FarePricingModeEnum:
+      enum:
+      - flat
+      - per_segment
+      type: string
+      description: |-
+        * `flat` - Flat
+        * `per_segment` - Per segment
+    FareRule:
+      type: object
+      description: |-
+        Read shape. `business`/`route` are never writable after creation.
+        PATCH uses `FareRuleSupersedeSerializer` — amount changes create a
+        new version rather than mutating this row.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        route:
+          type: string
+          format: uuid
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        effective_from:
+          type: string
+          format: date-time
+          readOnly: true
+        effective_to:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - business
+      - created_at
+      - effective_from
+      - effective_to
+      - id
+      - route
+    FareRuleCreate:
+      type: object
+      properties:
+        business:
+          type: string
+          format: uuid
+        route:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        effective_from:
+          type: string
+          format: date-time
+      required:
+      - amount
+      - business
+      - route
+    FareSegmentRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        route:
+          type: string
+          format: uuid
+          readOnly: true
+        from_stop:
+          type: string
+          format: uuid
+          readOnly: true
+        to_stop:
+          type: string
+          format: uuid
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        effective_from:
+          type: string
+          format: date-time
+          readOnly: true
+        effective_to:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - business
+      - created_at
+      - effective_from
+      - effective_to
+      - from_stop
+      - id
+      - route
+      - to_stop
+    FareSegmentRuleCreate:
+      type: object
+      properties:
+        business:
+          type: string
+          format: uuid
+        route:
+          type: string
+          format: uuid
+        from_stop:
+          type: string
+          format: uuid
+        to_stop:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        effective_from:
+          type: string
+          format: date-time
+      required:
+      - amount
+      - business
+      - from_stop
+      - route
+      - to_stop
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+      - status
+    InvitationCreatedResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+      required:
+      - id
+    JournalEntry:
+      type: object
+      description: |-
+        `lines` is populated from `self.context["lines_by_entry"]`, a
+        dict the view builds with one batched `JournalLine` query per page
+        — `JournalLine.journal_entry` uses `related_name="+"`, so there is
+        no reverse accessor/`prefetch_related` path to lean on here, the
+        same reasoning `apps.tapngo`'s serializers document for their own
+        FKs.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        entry_type:
+          allOf:
+          - $ref: '#/components/schemas/EntryTypeEnum'
+          readOnly: true
+        external_reference:
+          type: string
+          readOnly: true
+        memo:
+          type: string
+          readOnly: true
+        settlement_run:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalLineNested'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - created_at
+      - entry_type
+      - external_reference
+      - id
+      - lines
+      - memo
+      - settlement_run
+    JournalLineNested:
+      type: object
+      description: |-
+        Nested read-only shape for `JournalEntrySerializer.lines`.
+
+        `account` is sourced from the raw `account_id` column, not the
+        related `LedgerAccount` object — deliberately: dereferencing
+        `line.account` would need `select_related("account")` to avoid an
+        N+1, but `LedgerAccount` carries its own RLS policy, and a
+        `select_related` JOIN against an RLS-protected table silently drops
+        the *referencing* row (here, the `JournalLine` itself, which the
+        requesting staff user's session otherwise has every right to see)
+        whenever the *joined-to* row isn't visible under the current
+        session — exactly the platform commission account (`client=None`),
+        invisible to an ordinary Business's staff. Reading `account_id`
+        directly needs no join and never triggers this.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        account:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+      required:
+      - account
+      - amount
+      - currency
+      - id
+    KybDecision:
+      type: object
+      properties:
+        decision:
+          $ref: '#/components/schemas/DecisionEnum'
+        reason:
+          type: string
+      required:
+      - decision
+    KybDocument:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        document_type:
+          $ref: '#/components/schemas/DocumentTypeEnum'
+        file:
+          type: string
+          format: uri
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusE94Enum'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - document_type
+      - file
+      - id
+      - status
+    KybStatusEnum:
+      enum:
+      - pending
+      - submitted
+      - approved
+      - rejected
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `submitted` - Submitted
+        * `approved` - Approved
+        * `rejected` - Rejected
+    KycDecision:
+      type: object
+      properties:
+        decision:
+          $ref: '#/components/schemas/DecisionEnum'
+        reason:
+          type: string
+      required:
+      - decision
+    KycDocument:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        document_type:
+          $ref: '#/components/schemas/DocumentTypeEnum'
+        file:
+          type: string
+          format: uri
+        status:
+          allOf:
+          - $ref: '#/components/schemas/StatusE94Enum'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created_at
+      - document_type
+      - file
+      - id
+      - status
+    KycStatusEnum:
+      enum:
+      - pending
+      - submitted
+      - approved
+      - rejected
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `submitted` - Submitted
+        * `approved` - Approved
+        * `rejected` - Rejected
+    LedgerAccount:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        account_type:
+          allOf:
+          - $ref: '#/components/schemas/AccountTypeEnum'
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        passenger:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        psp_provider:
+          type: string
+          readOnly: true
+        cached_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+        cached_balance_updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - account_type
+      - business
+      - cached_balance
+      - cached_balance_updated_at
+      - created_at
+      - id
+      - passenger
+      - psp_provider
+    Me:
+      type: object
+      description: |-
+        `permissions` is additive to the Phase 0 contract (§4) — passengers
+        get `["customer:access"]`, platform staff get `["super-admin:access"]`,
+        client staff get `["client-admin:access", *role.permissions.codenames]`.
+        `role_name`/`client_name` are additive too (NavShell profile menu) —
+        both null for passengers and platform staff, since neither has a
+        `role` FK, and platform staff have no `client` at all.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        first_name:
+          type: string
+          readOnly: true
+        last_name:
+          type: string
+          readOnly: true
+        client:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          description: NULL for platform staff. Set for tenant-scoped staff and passengers.
+        is_platform_staff:
+          type: boolean
+          readOnly: true
+        is_client_staff:
+          type: boolean
+          readOnly: true
+          description: 'Only meaningful when `client` is set: True routes this user
+            to the client-admin app, False to the customer (passenger) app. Coarse
+            Phase 0 split — full RBAC roles land in Phase 1.'
+        permissions:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        role_name:
+          type: string
+          nullable: true
+          readOnly: true
+        client_name:
+          type: string
+          nullable: true
+          readOnly: true
+      required:
+      - client
+      - client_name
+      - email
+      - first_name
+      - id
+      - is_client_staff
+      - is_platform_staff
+      - last_name
+      - permissions
+      - role_name
+    PaginatedBookingList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Booking'
+    PaginatedBusinessKybQueueList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessKybQueue'
+    PaginatedBusinessList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Business'
+    PaginatedBusinessSuperAdminList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessSuperAdmin'
+    PaginatedClientKycQueueList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClientKycQueue'
+    PaginatedDriverList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Driver'
+    PaginatedFareJourneyList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/FareJourney'
+    PaginatedFareRuleList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/FareRule'
+    PaginatedFareSegmentRuleList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/FareSegmentRule'
+    PaginatedJournalEntryList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/JournalEntry'
+    PaginatedLedgerAccountList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerAccount'
+    PaginatedPaymentIntentList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentIntent'
+    PaginatedRoleList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Role'
+    PaginatedRouteBrowseList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteBrowse'
+    PaginatedRouteList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Route'
+    PaginatedScheduleList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Schedule'
+    PaginatedSeatList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Seat'
+    PaginatedSettlementRunList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SettlementRun'
+    PaginatedStaffList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Staff'
+    PaginatedStopList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Stop'
+    PaginatedTapCredentialList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TapCredential'
+    PaginatedTicketList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ticket'
+    PaginatedTripList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Trip'
+    PaginatedVehicleList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Vehicle'
+    PaginatedVehicleTypeList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/VehicleType'
+    PatchedBusiness:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        vertical:
+          $ref: '#/components/schemas/VerticalEnum'
+        name:
+          type: string
+          maxLength: 255
+        currency:
+          type: string
+          maxLength: 8
+        timezone:
+          type: string
+          maxLength: 64
+        booking_mode_default:
+          $ref: '#/components/schemas/BookingModeDefaultEnum'
+        fare_pricing_mode:
+          $ref: '#/components/schemas/FarePricingModeEnum'
+        is_active:
+          type: boolean
+        kyb_status:
+          allOf:
+          - $ref: '#/components/schemas/KybStatusEnum'
+          readOnly: true
+        kyb_submitted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedBusinessSeatHold:
+      type: object
+      description: |-
+        Request body and response shape for the super-admin-only PATCH —
+        docs/adr/0004. A plain Serializer, not a ModelSerializer: this
+        endpoint's writable surface is exactly one field, deliberately
+        never exposed on BusinessSerializer itself (see
+        Business.seat_hold_minutes's own docstring). `id` is read-only,
+        included only so the response confirms which Business was updated —
+        BusinessSerializer itself can't be reused for the response since it
+        doesn't include seat_hold_minutes at all.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        seat_hold_minutes:
+          type: integer
+          minimum: 1
+    PatchedDriver:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        phone:
+          type: string
+          maxLength: 32
+        license_number:
+          type: string
+          maxLength: 64
+        license_expires_at:
+          type: string
+          format: date
+          nullable: true
+        is_active:
+          type: boolean
+        compliance_warnings:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedFareRuleSupersede:
+      type: object
+      description: |-
+        PATCH body — closes the path's rule and returns a new successor.
+        `effective_from` omitted means "now"; a future value schedules the
+        change without affecting today's quote.
+      properties:
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        effective_from:
+          type: string
+          format: date-time
+    PatchedFareSegmentRuleSupersede:
+      type: object
+      properties:
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        effective_from:
+          type: string
+          format: date-time
+    PatchedPaystackAccount:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        bank_code:
+          type: string
+          maxLength: 16
+        account_number:
+          type: string
+          maxLength: 32
+        account_name:
+          type: string
+          maxLength: 255
+        recipient_code:
+          type: string
+          maxLength: 255
+        is_active:
+          type: boolean
+        verified_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+    PatchedRoute:
+      type: object
+      description: |-
+        Read + PATCH shape. `stops` embeds the ordered Stop list so
+        `GET /routes/` needs no separate detail/nested endpoint — batched
+        per-request (not per-row) to avoid the same N+1 shape
+        apps.businesses.serializers.BusinessKybQueueSerializer.get_documents
+        already fixed once.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        code:
+          type: string
+          maxLength: 32
+        description:
+          type: string
+        is_active:
+          type: boolean
+        stops:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteStopEntry'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedSchedule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        route:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        days_of_week: {}
+        departure_time:
+          type: string
+          format: time
+        effective_from:
+          type: string
+          format: date
+        effective_until:
+          type: string
+          format: date
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedStaffUpdate:
+      type: object
+      properties:
+        role:
+          type: string
+          format: uuid
+        is_active:
+          type: boolean
+    PatchedStop:
+      type: object
+      description: |-
+        Read + PATCH shape. `business` is read_only here — never
+        writable after creation, and DRF never runs validation against
+        read_only relational fields, so no queryset-at-import-time trap.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        address:
+          type: string
+          maxLength: 500
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedTapCredentialUpdate:
+      type: object
+      description: |-
+        PATCH /tap-credentials/{id}/ body — revocation only, per the spec
+        ('{is_active: false} only'). Reactivation is rejected: a passenger
+        who wants a working credential again issues a new one.
+      properties:
+        is_active:
+          type: boolean
+    PatchedTripAssignment:
+      type: object
+      description: |-
+        PATCH /trips/{id}/ body — assignment only, both nullable (a null
+        clears the current assignment).
+      properties:
+        vehicle:
+          type: string
+          format: uuid
+          nullable: true
+        driver:
+          type: string
+          format: uuid
+          nullable: true
+    PatchedVehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        vehicle_type:
+          type: string
+          format: uuid
+          readOnly: true
+        registration_number:
+          type: string
+          maxLength: 32
+        insurance_expires_at:
+          type: string
+          format: date
+          nullable: true
+        roadworthiness_expires_at:
+          type: string
+          format: date
+          nullable: true
+        is_active:
+          type: boolean
+        compliance_warnings:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedVehicleType:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        capacity:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+    PatchedWhiteLabelConfig:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        domain:
+          type: string
+          maxLength: 255
+        logo:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 200
+          - type: string
+            maxLength: 0
+        primary_color:
+          type: string
+          maxLength: 32
+        secondary_color:
+          type: string
+          maxLength: 32
+        email_sender_name:
+          type: string
+          maxLength: 255
+        email_sender_address:
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        terms_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 200
+          - type: string
+            maxLength: 0
+    PaymentInitiate:
+      type: object
+      description: POST /payments/ body.
+      properties:
+        booking_id:
+          type: string
+          format: uuid
+      required:
+      - booking_id
+    PaymentInitiateResponse:
+      type: object
+      description: |-
+        Response shape for POST /payments/ — narrower than the full read
+        serializer below, and field-renamed to match the spec's API surface
+        (`authorization_url`/`reference`, not the model's own
+        `psp_authorization_url`/`psp_reference` names).
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status448Enum'
+          readOnly: true
+        authorization_url:
+          type: string
+        reference:
+          type: string
+      required:
+      - authorization_url
+      - id
+      - reference
+      - status
+    PaymentIntent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        booking:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        passenger:
+          type: string
+          format: uuid
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status448Enum'
+          readOnly: true
+        psp_provider:
+          type: string
+          readOnly: true
+        psp_reference:
+          type: string
+          readOnly: true
+        psp_authorization_url:
+          type: string
+          readOnly: true
+        succeeded_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        failed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        requires_manual_refund:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - booking
+      - business
+      - created_at
+      - currency
+      - failed_at
+      - id
+      - passenger
+      - psp_authorization_url
+      - psp_provider
+      - psp_reference
+      - requires_manual_refund
+      - status
+      - succeeded_at
+    PaystackAccount:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        bank_code:
+          type: string
+          maxLength: 16
+        account_number:
+          type: string
+          maxLength: 32
+        account_name:
+          type: string
+          maxLength: 255
+        recipient_code:
+          type: string
+          maxLength: 255
+        is_active:
+          type: boolean
+        verified_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - id
+      - verified_at
+    Readiness:
+      type: object
+      properties:
+        status:
+          type: string
+        database:
+          type: string
+      required:
+      - status
+    RevokedTicketsResponse:
+      type: object
+      description: Schema-only shape for `GET /ticketing/revoked/`.
+      properties:
+        revoked_ticket_ids:
+          type: array
+          items:
+            type: string
+      required:
+      - revoked_ticket_ids
+    Role:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        permissions:
+          type: array
+          items:
+            type: string
+          readOnly: true
+      required:
+      - id
+      - name
+      - permissions
+    Route:
+      type: object
+      description: |-
+        Read + PATCH shape. `stops` embeds the ordered Stop list so
+        `GET /routes/` needs no separate detail/nested endpoint — batched
+        per-request (not per-row) to avoid the same N+1 shape
+        apps.businesses.serializers.BusinessKybQueueSerializer.get_documents
+        already fixed once.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        code:
+          type: string
+          maxLength: 32
+        description:
+          type: string
+        is_active:
+          type: boolean
+        stops:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteStopEntry'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - code
+      - created_at
+      - id
+      - name
+      - stops
+    RouteBrowse:
+      type: object
+      description: |-
+        Passenger-facing read shape for `GET /routes/browse/` — see
+        docs/specs/4-fares-seating-booking-frontend.md §3.2. Two deliberate
+        differences from the staff `RouteSerializer` it extends:
+
+        - `business` embeds {id, name} rather than a bare FK id: a passenger
+          whose Client runs several Businesses (that spec's own `DECISION`)
+          needs to see which operator a Route belongs to, and has no
+          separate businesses endpoint to resolve the id against.
+        - only active Stops are embedded (`active_stops_only`), matching the
+          active-stop count RouteBrowseView filters Routes on. Embedding a
+          deactivated Stop would offer an unbookable option in the trip
+          search's stop picker — the exact class of failure that spec's §3.2
+          says to filter out server-side rather than leave for the frontend
+          to discover.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          allOf:
+          - $ref: '#/components/schemas/RouteBusiness'
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        code:
+          type: string
+          maxLength: 32
+        description:
+          type: string
+        is_active:
+          type: boolean
+        stops:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteStopEntry'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - created_at
+      - id
+      - name
+      - stops
+    RouteBusiness:
+      type: object
+      description: |-
+        Schema-only shape for `RouteBrowseSerializer.get_business` —
+        mirrors apps.scheduling.serializers.TripRouteSerializer's own {id,
+        name} embed, and exists for the same reason: without it
+        drf-spectacular infers `Any` for the generated schema.ts.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required:
+      - id
+      - name
+    RouteCreate:
+      type: object
+      properties:
+        business:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 255
+        code:
+          type: string
+          default: ''
+          maxLength: 32
+        description:
+          type: string
+          default: ''
+      required:
+      - business
+      - name
+    RouteStopEntry:
+      type: object
+      description: |-
+        Schema-only shape for `RouteSerializer.get_stops` — a Stop plus
+        its position on this Route. A plain Serializer, not a ModelSerializer
+        subclass of StopSerializer: never instantiated for real serialization
+        (get_stops builds its own dicts for the batched-query reasons in its
+        docstring), so there's no Meta.fields to keep in sync — this exists
+        purely so drf-spectacular can infer a real type instead of `Any` for
+        the frontend's generated schema.ts, same fix as
+        apps.clients.serializers.ClientKycQueueSerializer.get_documents's own
+        @extend_schema_field precedent.
+      properties:
+        id:
+          type: string
+          format: uuid
+        business:
+          type: string
+          format: uuid
+        name:
+          type: string
+        address:
+          type: string
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        sequence:
+          type: integer
+      required:
+      - address
+      - business
+      - created_at
+      - id
+      - is_active
+      - latitude
+      - longitude
+      - name
+      - sequence
+    RouteStopsUpdate:
+      type: object
+      description: |-
+        Body: {"stops": [<stop_id>, ...]} — array order is the new
+        sequence. `route` (the parent Route, already resolved by the view)
+        is passed in via context, not a field, since it's already known from
+        the URL.
+      properties:
+        stops:
+          type: array
+          items:
+            type: string
+            format: uuid
+      required:
+      - stops
+    Schedule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        route:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        days_of_week: {}
+        departure_time:
+          type: string
+          format: time
+        effective_from:
+          type: string
+          format: date
+        effective_until:
+          type: string
+          format: date
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - created_at
+      - departure_time
+      - effective_from
+      - id
+      - route
+    ScheduleCreate:
+      type: object
+      properties:
+        route:
+          type: string
+          format: uuid
+        days_of_week:
+          type: array
+          items:
+            type: integer
+        departure_time:
+          type: string
+          format: time
+        effective_from:
+          type: string
+          format: date
+        effective_until:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - days_of_week
+      - departure_time
+      - effective_from
+      - route
+    Seat:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        vehicle_type:
+          type: string
+          format: uuid
+          readOnly: true
+        seat_number:
+          type: string
+          readOnly: true
+        row:
+          type: integer
+          readOnly: true
+          nullable: true
+        column:
+          type: integer
+          readOnly: true
+          nullable: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - column
+      - created_at
+      - id
+      - is_active
+      - row
+      - seat_number
+      - vehicle_type
+    SeatAvailability:
+      type: object
+      properties:
+        seat:
+          $ref: '#/components/schemas/Seat'
+        is_available:
+          type: boolean
+      required:
+      - is_available
+      - seat
+    SettlementRun:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        period_start:
+          type: string
+          format: date
+          readOnly: true
+        period_end:
+          type: string
+          format: date
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/SettlementRunStatusEnum'
+          readOnly: true
+        initiated_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        total_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+        psp_transfer_reference:
+          type: string
+          readOnly: true
+        psp_transfer_status:
+          type: string
+          readOnly: true
+        executed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - created_at
+      - currency
+      - executed_at
+      - id
+      - initiated_by
+      - period_end
+      - period_start
+      - psp_transfer_reference
+      - psp_transfer_status
+      - status
+      - total_amount
+    SettlementRunStatusEnum:
+      enum:
+      - pending
+      - processing
+      - paid_out
+      - failed
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `processing` - Processing
+        * `paid_out` - Paid out
+        * `failed` - Failed
+    SettlementRunTrigger:
+      type: object
+      description: POST /settlement-runs/ body.
+      properties:
+        business:
+          type: string
+          format: uuid
+        period_start:
+          type: string
+          format: date
+        period_end:
+          type: string
+          format: date
+      required:
+      - business
+      - period_end
+      - period_start
+    SigningKeyEntry:
+      type: object
+      properties:
+        kid:
+          type: string
+        public_key:
+          type: string
+      required:
+      - kid
+      - public_key
+    SigningKeysResponse:
+      type: object
+      description: |-
+        Schema-only shape for `GET /ticketing/signing-keys/` — not backed
+        by a model, mirrors `apps.tapngo.serializers.FareJourneyTripSerializer`'s
+        own "schema-only" convention for a plain-dict response.
+      properties:
+        keys:
+          type: array
+          items:
+            $ref: '#/components/schemas/SigningKeyEntry'
+      required:
+      - keys
+    Staff:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        first_name:
+          type: string
+          readOnly: true
+        last_name:
+          type: string
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/Role'
+          readOnly: true
+        is_active:
+          type: boolean
+      required:
+      - email
+      - first_name
+      - id
+      - last_name
+      - role
+    StaffInvitationAccept:
+      type: object
+      properties:
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - password
+    StaffInvitationCreate:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          format: uuid
+      required:
+      - email
+      - role
+    StaffInvitationCreatedResponse:
+      type: object
+      description: |-
+        Same shape as apps.clients.serializers.InvitationCreatedResponseSerializer
+        for the identical "invite and return {id}" response — duplicated
+        rather than cross-imported, matching how KYC/KYB's near-identical
+        per-app serializers are already handled.
+      properties:
+        id:
+          type: string
+          format: uuid
+      required:
+      - id
+    StaffInvitationResolve:
+      type: object
+      properties:
+        client_name:
+          type: string
+          readOnly: true
+        role_name:
+          type: string
+          readOnly: true
+        status:
+          type: string
+          readOnly: true
+      required:
+      - client_name
+      - role_name
+      - status
+    Status448Enum:
+      enum:
+      - pending
+      - succeeded
+      - failed
+      - cancelled
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `succeeded` - Succeeded
+        * `failed` - Failed
+        * `cancelled` - Cancelled
+    Status44bEnum:
+      enum:
+      - open
+      - closed
+      - needs_review
+      type: string
+      description: |-
+        * `open` - Open
+        * `closed` - Closed
+        * `needs_review` - Needs review
+    Status61dEnum:
+      enum:
+      - scheduled
+      - in_progress
+      - completed
+      - cancelled
+      type: string
+      description: |-
+        * `scheduled` - Scheduled
+        * `in_progress` - In progress
+        * `completed` - Completed
+        * `cancelled` - Cancelled
+    StatusE94Enum:
+      enum:
+      - pending
+      - approved
+      - rejected
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `approved` - Approved
+        * `rejected` - Rejected
+    Stop:
+      type: object
+      description: |-
+        Read + PATCH shape. `business` is read_only here — never
+        writable after creation, and DRF never runs validation against
+        read_only relational fields, so no queryset-at-import-time trap.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        address:
+          type: string
+          maxLength: 500
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - created_at
+      - id
+      - name
+    StopCreate:
+      type: object
+      description: |-
+        POST-only shape — `business` is a genuine client choice here (a
+        Client can run several Businesses), resolved manually against the
+        live, tenant-scoped Business.objects manager at request time, never
+        via a class-body PrimaryKeyRelatedField(queryset=...).
+      properties:
+        business:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 255
+        address:
+          type: string
+          default: ''
+          maxLength: 500
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+      required:
+      - business
+      - name
+    SuperAdminTokenObtain:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          writeOnly: true
+      required:
+      - email
+      - password
+    TapCredential:
+      type: object
+      description: GET /tap-credentials/mine/ shape — `token` never appears here.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        channel:
+          allOf:
+          - $ref: '#/components/schemas/ChannelEnum'
+          readOnly: true
+        label:
+          type: string
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - channel
+      - created_at
+      - id
+      - is_active
+      - label
+    TapCredentialIssue:
+      type: object
+      description: POST /tap-credentials/ body.
+      properties:
+        channel:
+          $ref: '#/components/schemas/ChannelEnum'
+        label:
+          type: string
+          default: ''
+      required:
+      - channel
+    TapCredentialIssued:
+      type: object
+      description: |-
+        Response shape for POST /tap-credentials/ only — the one place
+        `token` is ever exposed. `token` isn't a model field (only
+        `token_hash` is), so it's sourced from serializer context rather
+        than the instance.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        token:
+          type: string
+          readOnly: true
+        channel:
+          allOf:
+          - $ref: '#/components/schemas/ChannelEnum'
+          readOnly: true
+        label:
+          type: string
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - channel
+      - created_at
+      - id
+      - is_active
+      - label
+      - token
+    TapEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        trip:
+          type: string
+          format: uuid
+          readOnly: true
+        tap_type:
+          allOf:
+          - $ref: '#/components/schemas/TapTypeEnum'
+          readOnly: true
+        stop:
+          type: string
+          format: uuid
+          readOnly: true
+        tapped_at:
+          type: string
+          format: date-time
+          readOnly: true
+        journey:
+          $ref: '#/components/schemas/FareJourneyNested'
+      required:
+      - id
+      - journey
+      - stop
+      - tap_type
+      - tapped_at
+      - trip
+    TapRecord:
+      type: object
+      description: POST /trips/{trip_id}/taps/ body.
+      properties:
+        token:
+          type: string
+        tap_type:
+          $ref: '#/components/schemas/TapTypeEnum'
+        stop_id:
+          type: string
+          format: uuid
+      required:
+      - stop_id
+      - tap_type
+      - token
+    TapTypeEnum:
+      enum:
+      - board
+      - alight
+      type: string
+      description: |-
+        * `board` - Board
+        * `alight` - Alight
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        signed_payload:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/TicketStatusEnum'
+          readOnly: true
+        issued_at:
+          type: string
+          format: date-time
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          readOnly: true
+        boarded_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - boarded_at
+      - expires_at
+      - id
+      - issued_at
+      - signed_payload
+      - status
+    TicketStatusEnum:
+      enum:
+      - issued
+      - boarded
+      - expired
+      - revoked
+      type: string
+      description: |-
+        * `issued` - Issued
+        * `boarded` - Boarded
+        * `expired` - Expired
+        * `revoked` - Revoked
+    TicketValidate:
+      type: object
+      description: |-
+        POST /trips/{trip_id}/tickets/validate/ body — mirrors
+        `apps.tapngo.serializers.TapRecordSerializer`'s minimal shape; no FK
+        resolution needed here, since everything is resolved from the
+        decoded payload inside `apps.ticketing.services.validate_ticket`.
+      properties:
+        payload:
+          type: string
+      required:
+      - payload
+    TicketValidationResult:
+      type: object
+      description: |-
+        Schema-only shape for a successful validation response — not
+        backed by a model, same convention as `SigningKeysResponseSerializer`
+        above.
+      properties:
+        status:
+          type: string
+        passenger_name:
+          type: string
+        seat_number:
+          type: string
+        from_stop:
+          type: string
+        to_stop:
+          type: string
+        trip_departure_at:
+          type: string
+          format: date-time
+      required:
+      - from_stop
+      - passenger_name
+      - seat_number
+      - status
+      - to_stop
+      - trip_departure_at
+    TokenObtainResponse:
+      type: object
+      description: |-
+        Documents the actual response shape of the three token-obtain
+        endpoints for drf-spectacular. `AudienceScopedTokenObtainSerializer`
+        itself only describes the *request* fields (email/password/client),
+        so without this, the generated OpenAPI schema — and the TS types
+        generated from it — would incorrectly describe the response as an
+        echo of the request instead of `{access, refresh}`.
+      properties:
+        access:
+          type: string
+        refresh:
+          type: string
+      required:
+      - access
+      - refresh
+    TokenRefresh:
+      type: object
+      properties:
+        access:
+          type: string
+          readOnly: true
+        refresh:
+          type: string
+      required:
+      - access
+      - refresh
+    Trip:
+      type: object
+      description: |-
+        Read-only shape — Trip has no plain field-level PATCH; writes go
+        through TripAssignmentSerializer (vehicle/driver) or
+        TripStatusSerializer (status) instead.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        schedule:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        route:
+          allOf:
+          - $ref: '#/components/schemas/TripRoute'
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        service_date:
+          type: string
+          format: date
+          readOnly: true
+        scheduled_departure_at:
+          type: string
+          format: date-time
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/Status61dEnum'
+          readOnly: true
+        status_changed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        vehicle:
+          allOf:
+          - $ref: '#/components/schemas/TripVehicle'
+          nullable: true
+          readOnly: true
+        driver:
+          allOf:
+          - $ref: '#/components/schemas/TripDriver'
+          nullable: true
+          readOnly: true
+        booking_mode:
+          allOf:
+          - $ref: '#/components/schemas/BookingModeEnum'
+          readOnly: true
+        cancellation_reason:
+          type: string
+          readOnly: true
+        compliance_warnings:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - booking_mode
+      - business
+      - cancellation_reason
+      - compliance_warnings
+      - created_at
+      - driver
+      - id
+      - route
+      - schedule
+      - scheduled_departure_at
+      - service_date
+      - status
+      - status_changed_at
+      - vehicle
+    TripCreate:
+      type: object
+      description: |-
+        Manual (one-off) Trip creation. `schedule` is never accepted here
+        — create_manual_trip() always sets schedule=None server-side.
+      properties:
+        route:
+          type: string
+          format: uuid
+        service_date:
+          type: string
+          format: date
+        departure_time:
+          type: string
+          format: time
+        vehicle:
+          type: string
+          format: uuid
+          nullable: true
+        driver:
+          type: string
+          format: uuid
+          nullable: true
+      required:
+      - departure_time
+      - route
+      - service_date
+    TripDriver:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required:
+      - id
+      - name
+    TripFareQuote:
+      type: object
+      properties:
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        currency:
+          type: string
+      required:
+      - amount
+      - currency
+    TripRoute:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required:
+      - id
+      - name
+    TripStatus:
+      type: object
+      description: |-
+        POST /trips/{id}/status/ body. Mirrors
+        apps.businesses.serializers.KybDecisionSerializer's
+        reject-needs-a-reason shape, adapted to "cancelled needs a reason".
+        Transition legality (TRIP_TRANSITIONS) is checked here, against
+        `self.context["trip"]`'s current status — same context-passing
+        convention as apps.network.serializers.RouteStopsUpdateSerializer.
+      properties:
+        status:
+          $ref: '#/components/schemas/Status61dEnum'
+        reason:
+          type: string
+          default: ''
+      required:
+      - status
+    TripVehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        registration_number:
+          type: string
+      required:
+      - id
+      - registration_number
+    Vehicle:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        vehicle_type:
+          type: string
+          format: uuid
+          readOnly: true
+        registration_number:
+          type: string
+          maxLength: 32
+        insurance_expires_at:
+          type: string
+          format: date
+          nullable: true
+        roadworthiness_expires_at:
+          type: string
+          format: date
+          nullable: true
+        is_active:
+          type: boolean
+        compliance_warnings:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - compliance_warnings
+      - created_at
+      - id
+      - registration_number
+      - vehicle_type
+    VehicleCreate:
+      type: object
+      properties:
+        business:
+          type: string
+          format: uuid
+        vehicle_type:
+          type: string
+          format: uuid
+        registration_number:
+          type: string
+          maxLength: 32
+        insurance_expires_at:
+          type: string
+          format: date
+          nullable: true
+        roadworthiness_expires_at:
+          type: string
+          format: date
+          nullable: true
+      required:
+      - business
+      - registration_number
+      - vehicle_type
+    VehicleType:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        capacity:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - capacity
+      - created_at
+      - id
+      - name
+    VehicleTypeCreate:
+      type: object
+      properties:
+        business:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 100
+        capacity:
+          type: integer
+          minimum: 1
+      required:
+      - business
+      - capacity
+      - name
+    VehicleTypeSeatsUpdate:
+      type: object
+      description: |-
+        Body: {"seat_numbers": ["1A", "1B", ...]} — mirrors
+        apps.network.serializers.RouteStopsUpdateSerializer's
+        replace-the-set shape. `vehicle_type` (already resolved by the
+        view from the URL) is passed in via context, not a field.
+      properties:
+        seat_numbers:
+          type: array
+          items:
+            type: string
+            maxLength: 10
+      required:
+      - seat_numbers
+    VerticalEnum:
+      enum:
+      - shuttle
+      - intercity
+      - metro
+      type: string
+      description: |-
+        * `shuttle` - Shuttle
+        * `intercity` - Intercity
+        * `metro` - Metro
+    Wallet:
+      type: object
+      properties:
+        balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        currency:
+          type: string
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/WalletTransaction'
+      required:
+      - balance
+      - currency
+      - transactions
+    WalletTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - created_at
+      - currency
+      - id
+    WhiteLabelConfig:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        domain:
+          type: string
+          maxLength: 255
+        logo:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 200
+          - type: string
+            maxLength: 0
+        primary_color:
+          type: string
+          maxLength: 32
+        secondary_color:
+          type: string
+          maxLength: 32
+        email_sender_name:
+          type: string
+          maxLength: 255
+        email_sender_address:
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        terms_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 200
+          - type: string
+            maxLength: 0
+      required:
+      - domain
+      - id
+    WhiteLabelResolve:
+      type: object
+      properties:
+        client_id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        logo:
+          type: string
+          format: uri
+          readOnly: true
+        primary_color:
+          type: string
+          readOnly: true
+        secondary_color:
+          type: string
+          readOnly: true
+        email_sender_name:
+          type: string
+          readOnly: true
+        terms_url:
+          type: string
+          format: uri
+          readOnly: true
+      required:
+      - client_id
+      - email_sender_name
+      - logo
+      - name
+      - primary_color
+      - secondary_color
+      - terms_url
+  securitySchemes:
+    jwtAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

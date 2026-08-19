@@ -1,0 +1,64 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Bookings</h1>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <ui-select
+      label="Trip"
+      [options]="tripFilterOptions()"
+      [ngModel]="store.query().trip ?? ''"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onTripFilterChange($event)"
+    />
+    <ui-select
+      label="Status"
+      [options]="statusFilterOptions"
+      [ngModel]="store.query().status ?? ''"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onStatusFilterChange($event)"
+    />
+  </div>
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No bookings found"
+      description="Bookings made by passengers against your trips will appear here."
+    />
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Route</th>
+          <th class="px-4 py-2">Service date</th>
+          <th class="px-4 py-2">Departure</th>
+          <th class="px-4 py-2">Seats</th>
+          <th class="px-4 py-2">Total</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Booked</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (booking of store.items(); track booking.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">{{ booking.trip.route.name }}</td>
+            <td class="px-4 py-2">{{ booking.trip.service_date }}</td>
+            <td class="px-4 py-2">{{ booking.trip.scheduled_departure_at | date: 'short' }}</td>
+            <td class="px-4 py-2">{{ seatNumbers(booking) }}</td>
+            <td class="px-4 py-2">{{ totalLabel(booking) }}</td>
+            <td class="px-4 py-2">
+              <ui-status-pill
+                [tone]="statusTone[booking.status]"
+                [label]="statusLabel[booking.status]"
+              />
+            </td>
+            <td class="px-4 py-2">{{ booking.created_at | date: 'short' }}</td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>
