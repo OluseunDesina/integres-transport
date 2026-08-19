@@ -3,28 +3,17 @@
   <p class="mb-6 text-sm text-slate-500">{{ subtitle }}</p>
 
   @if (errorMessage(); as message) {
-    <ui-alert class="mb-4">{{ message }}</ui-alert>
+  <ui-alert class="mb-4">{{ message }}</ui-alert>
   }
 
   <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-    <ui-text-field
-      label="Email"
-      type="email"
-      autocomplete="email"
-      formControlName="email"
-      [invalid]="!!fieldError('email')"
-      [errorMessage]="fieldError('email')"
-    />
-    <ui-text-field
-      label="Password"
-      type="password"
-      autocomplete="current-password"
-      formControlName="password"
-      [invalid]="!!fieldError('password')"
-      [errorMessage]="fieldError('password')"
-    />
+    <ui-text-field label="Email" type="email" autocomplete="email" formControlName="email"
+      [invalid]="!!fieldError('email')" [errorMessage]="fieldError('email')" />
+    <ui-text-field label="Password" type="password" autocomplete="current-password" formControlName="password"
+      [invalid]="!!fieldError('password')" [errorMessage]="fieldError('password')" />
     <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
       Sign in
     </ui-button>
   </form>
 </app-auth-layout>
+<p class="text-center">v 1.0</p>
