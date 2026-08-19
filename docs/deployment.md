@@ -154,7 +154,29 @@ hardcodes `config.settings.vercel` as its own default, the same way
    ```sql
    CREATE ROLE integra_app LOGIN PASSWORD '<a real generated password>' NOSUPERUSER NOBYPASSRLS;
    GRANT ALL ON DATABASE postgres TO integra_app;
+   GRANT ALL ON SCHEMA public TO integra_app;
    ```
+
+   **The third line is not optional, and it's the one genuinely
+   Supabase-specific gotcha in this whole runbook** — found live, not
+   anticipated: `backend/docker/postgres/init-role-hardening.sql`'s
+   local/CI recipe gets away with *not* granting schema privileges
+   explicitly, because it runs `ALTER DATABASE <db> OWNER TO
+   integra_app` on a **freshly created** database, and Postgres 15+ ties
+   the `public` schema's ownership to the `pg_database_owner`
+   pseudo-role — so database ownership alone is enough there. Supabase's
+   `postgres` database is different: it's pre-existing and
+   Supabase-managed (their own Auth/Storage schemas, `anon`/
+   `authenticated`/`service_role`, etc.), so taking ownership of it the
+   same way would be the wrong move — this plan deliberately only grants
+   database-level privileges. But a database-level `GRANT` doesn't touch
+   the pre-existing `public` schema's own ACL, and `pg_database_owner`
+   still resolves to Supabase's own owning role either way. Skipping the
+   `GRANT ALL ON SCHEMA public` line produces a working `integra_app`
+   login that can `CONNECT` but gets
+   `psycopg.errors.InsufficientPrivilege: permission denied for schema
+   public` the moment `manage.py migrate` tries to create the very first
+   table (`django_migrations`).
 
    If `CREATEROLE` isn't available on the plan/project, the fallback is
    connecting as Supabase's own `postgres` role directly — accept this
