@@ -9,7 +9,9 @@ import { SelectedBusinessStore } from '../../shared/data/store/selected-business
 function makePaymentIntent(overrides: Partial<PaymentIntent> = {}): PaymentIntent {
   return {
     id: 'payment-1',
+    intent_type: 'booking_payment',
     booking: 'booking-1234-5678',
+    wallet_business: null,
     business: 'biz-1',
     passenger: 'user-1',
     amount: '1500.00',

@@ -1,0 +1,76 @@
+<div class="flex flex-col gap-6">
+  <div>
+    <h1 class="text-lg font-semibold text-slate-900">Wallet</h1>
+    <p class="mt-1 text-sm text-slate-500">
+      Top up your balance with an operator, or pay for a booking straight from it.
+    </p>
+  </div>
+
+  @if (routesError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
+  <div class="max-w-sm">
+    <ui-select
+      label="Operator"
+      [options]="businessOptions()"
+      [ngModel]="businessId()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onBusinessChange($event)"
+    />
+  </div>
+
+  @if (businessId()) {
+    @if (walletError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    } @else if (loadingWallet()) {
+      <p class="text-sm text-slate-500">Loading…</p>
+    } @else if (wallet(); as w) {
+      <div class="rounded-lg border border-slate-200 bg-white p-6">
+        <p class="text-sm text-slate-500">Balance</p>
+        <p class="mt-1 text-2xl font-semibold text-slate-900">{{ balanceLabel() }}</p>
+      </div>
+
+      @if (topupError(); as message) {
+        <ui-alert>{{ message }}</ui-alert>
+      }
+      <div class="flex max-w-sm items-end gap-3">
+        <div class="flex-1">
+          <ui-text-field
+            label="Top up amount"
+            [ngModel]="topupAmount()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="setTopupAmount($event)"
+          />
+        </div>
+        <ui-button [loading]="toppingUp()" [disabled]="toppingUp()" (pressed)="topUp()">
+          Top up
+        </ui-button>
+      </div>
+
+      @if (w.transactions.length === 0) {
+        <ui-empty-state
+          title="No activity yet"
+          description="Top-ups and payments made from this wallet will appear here."
+        />
+      } @else {
+        <ui-table>
+          <thead>
+            <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+              <th class="px-4 py-2">Date</th>
+              <th class="px-4 py-2">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (transaction of w.transactions; track transaction.id) {
+              <tr class="border-b border-slate-100 last:border-0">
+                <td class="px-4 py-2">{{ transaction.created_at | date: 'short' }}</td>
+                <td class="px-4 py-2">{{ transactionLabel(transaction) }}</td>
+              </tr>
+            }
+          </tbody>
+        </ui-table>
+      }
+    }
+  }
+</div>

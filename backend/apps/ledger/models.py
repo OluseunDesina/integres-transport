@@ -176,6 +176,7 @@ class JournalEntry(BaseModel):
         PAYMENT = "payment", "Payment"
         REFUND = "refund", "Refund"
         CONCESSION = "concession", "Concession"
+        TOPUP = "topup", "Wallet top-up"
 
     business = models.ForeignKey(Business, on_delete=models.PROTECT, related_name="+")
     entry_type = models.CharField(max_length=16, choices=EntryType.choices)

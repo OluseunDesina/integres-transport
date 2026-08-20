@@ -45,6 +45,12 @@
             </td>
             <td class="px-4 py-2 text-right">
               <a
+                *appHasPermission="'seating.view'"
+                [routerLink]="['/vehicle-types', vehicleType.id, 'seats']"
+                class="mr-4 text-sm font-medium text-slate-700 hover:text-slate-900"
+                >Seat map</a
+              >
+              <a
                 *appHasPermission="'fleet.manage'"
                 [routerLink]="['/vehicle-types', vehicleType.id, 'edit']"
                 class="text-sm font-medium text-slate-700 hover:text-slate-900"

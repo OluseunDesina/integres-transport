@@ -1,0 +1,25 @@
+name: notification-ticket-reminder-sweep cron
+
+# Stands in for Celery Beat's notification_ticket_reminder_sweep job on
+# the Vercel deployment target — see notification-compliance-sweep-cron.yml's
+# own comment for the full reasoning, identical here.
+#
+# 03:15 UTC daily, matching apps/notifications/migrations/0002's own
+# Celery Beat schedule for the same job under Docker (staggered 15
+# minutes after the compliance sweep, arbitrarily, so they never
+# contend for the same lock/connection burst).
+
+on:
+  schedule:
+    - cron: "15 3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  notification-ticket-reminder-sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the notification-ticket-reminder-sweep endpoint
+        run: |
+          curl --fail -X POST \
+            "${{ secrets.BACKEND_URL }}/api/v1/internal/tasks/notification-ticket-reminder-sweep/" \
+            -H "X-Internal-Task-Secret: ${{ secrets.INTERNAL_TASK_SECRET }}"

@@ -53,6 +53,7 @@ def test_create_default_roles_creates_owner_manager_staff_with_correct_permissio
         "payments.view",
         "wallet.view",
         "ticketing.validate",
+        "notifications.view",
     }
     assert staff_codenames == {
         "client.view",
@@ -68,6 +69,7 @@ def test_create_default_roles_creates_owner_manager_staff_with_correct_permissio
         "payments.view",
         "wallet.view",
         "ticketing.validate",
+        "notifications.view",
     }
     assert roles["Owner"].is_default_owner_role is True
     assert roles["Manager"].is_default_owner_role is False

@@ -116,12 +116,15 @@ describe('SeatPicker', () => {
 
     await createComponent();
 
-    expect(component['seatRows']().map((r) => [r.row, r.seats.map((s) => s.seat.seat_number)])).toEqual(
-      [
-        [1, ['1A', '1B']],
-        [2, ['2A']],
-      ]
-    );
+    expect(
+      component['seatRows']().map((r) => [
+        r.row,
+        r.segments.map((segment) => segment.map((s) => s.seat.seat_number)),
+      ])
+    ).toEqual([
+      [1, [['1A', '1B']]],
+      [2, [['2A']]],
+    ]);
   });
 
   it('falls back to one flat row when no seat has geometry', async () => {
@@ -129,6 +132,24 @@ describe('SeatPicker', () => {
 
     expect(component['seatRows']().length).toBe(1);
     expect(component['seatRows']()[0].row).toBeNull();
+  });
+
+  it('splits a row into segments at an aisle column gap', async () => {
+    respondWith([
+      makeSeat('seat-1', '1A', true, 1, 1),
+      makeSeat('seat-2', '1B', true, 1, 2),
+      makeSeat('seat-3', '1C', true, 1, 4),
+      makeSeat('seat-4', '1D', true, 1, 5),
+    ]);
+
+    await createComponent();
+
+    expect(
+      component['seatRows']()[0].segments.map((segment) => segment.map((s) => s.seat.seat_number))
+    ).toEqual([
+      ['1A', '1B'],
+      ['1C', '1D'],
+    ]);
   });
 
   it('tracks a running total across multiple selected seats', async () => {

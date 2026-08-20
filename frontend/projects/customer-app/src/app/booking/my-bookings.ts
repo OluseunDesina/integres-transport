@@ -107,6 +107,12 @@ export class MyBookings implements OnInit {
   private readonly authStore = inject(AuthStore);
   private readonly router = inject(Router);
 
+  // One wallet-balance fetch per distinct Business among the current
+  // page's pending_payment bookings, not one per row — a passenger's
+  // pending bookings are usually all with the same operator.
+  protected readonly walletBalances = signal<ReadonlyMap<string, string>>(new Map());
+  protected readonly payingFromWalletBookingIds = signal<ReadonlySet<string>>(new Set());
+
   @ViewChild('cancelBody') private readonly cancelBody!: TemplateRef<unknown>;
 
   protected readonly statusTone = STATUS_TONE;
@@ -129,16 +135,49 @@ export class MyBookings implements OnInit {
   protected readonly danger = computed(() => true);
   protected readonly confirmLabel = computed(() => 'Cancel booking');
 
-  ngOnInit(): void {
-    void this.store.getAll();
+  async ngOnInit(): Promise<void> {
+    await this.store.getAll();
+    await this.loadWalletBalances();
   }
 
   protected onPageChange(offset: number): void {
     void this.store.changePage(offset);
   }
 
+  private async loadWalletBalances(): Promise<void> {
+    const businessIds = new Set(
+      this.store
+        .items()
+        .filter((booking) => booking.status === PAYABLE_STATUS)
+        .map((booking) => booking.business)
+    );
+    const entries = await Promise.all(
+      Array.from(businessIds, async (businessId) => {
+        const { data } = await this.api.GET('/api/v1/wallet/mine/', {
+          params: { query: { business: businessId } },
+          headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+        });
+        return [businessId, data?.balance ?? '0.00'] as const;
+      })
+    );
+    this.walletBalances.set(new Map(entries));
+  }
+
   protected canCancel(booking: Booking): boolean {
     return booking.status === CANCELLABLE_STATUS;
+  }
+
+  protected canPayFromWallet(booking: Booking): boolean {
+    if (booking.status !== PAYABLE_STATUS) {
+      return false;
+    }
+    const balance = this.walletBalances().get(booking.business);
+    // Display-only gate, not a source of truth — the backend
+    // independently re-checks the exact Decimal balance under a row
+    // lock at payment time (`InsufficientWalletBalance`), so a Number()
+    // comparison here only decides whether the button renders, never
+    // whether money actually moves.
+    return balance !== undefined && Number(balance) >= Number(booking.total_amount);
   }
 
   protected canPay(booking: Booking): boolean {
@@ -221,6 +260,37 @@ export class MyBookings implements OnInit {
       return;
     }
     this.paymentError.set(extractFirstErrorMessage(error, 'Could not start payment. Try again.'));
+  }
+
+  protected async payFromWallet(booking: Booking): Promise<void> {
+    if (this.payingFromWalletBookingIds().has(booking.id)) {
+      return;
+    }
+    this.paymentError.set(null);
+    this.payingFromWalletBookingIds.update((ids) => new Set(ids).add(booking.id));
+
+    // No Idempotency-Key: unlike payNow()'s Paystack round-trip, this
+    // is synchronous and the backend's own row-lock on the booking
+    // (`pay_booking_from_wallet`) already makes a double-click safe —
+    // a retry just sees the booking already paid and fails cleanly.
+    const { data, error } = await this.api.POST('/api/v1/bookings/{id}/pay-from-wallet/', {
+      params: { path: { id: booking.id } },
+      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+    });
+
+    this.payingFromWalletBookingIds.update((ids) => {
+      const next = new Set(ids);
+      next.delete(booking.id);
+      return next;
+    });
+
+    if (data) {
+      await this.store.getAll();
+      return;
+    }
+    this.paymentError.set(
+      extractFirstErrorMessage(error, 'Could not pay from your wallet. Try again.')
+    );
   }
 
   private idempotencyKeyFor(bookingId: string): string {

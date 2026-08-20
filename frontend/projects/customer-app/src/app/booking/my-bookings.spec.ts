@@ -279,6 +279,80 @@ describe('MyBookings', () => {
     );
   });
 
+  it('loads a wallet balance for each distinct Business among pending_payment bookings', async () => {
+    apiClient.GET.and.callFake((path: string) => {
+      if (path === '/api/v1/wallet/mine/') {
+        return Promise.resolve({ data: { balance: '2000.00', currency: 'NGN', transactions: [] } });
+      }
+      return Promise.resolve({ data: { count: 1, results: [makeBooking()] } });
+    });
+
+    await createComponent();
+
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/wallet/mine/',
+      jasmine.objectContaining({ params: { query: { business: 'biz-1' } } })
+    );
+    expect(component['canPayFromWallet'](makeBooking() as never)).toBeTrue();
+  });
+
+  it('does not offer pay-from-wallet when the balance is short', async () => {
+    apiClient.GET.and.callFake((path: string) => {
+      if (path === '/api/v1/wallet/mine/') {
+        return Promise.resolve({ data: { balance: '10.00', currency: 'NGN', transactions: [] } });
+      }
+      return Promise.resolve({ data: { count: 1, results: [makeBooking()] } });
+    });
+
+    await createComponent();
+
+    expect(component['canPayFromWallet'](makeBooking() as never)).toBeFalse();
+    const actions = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      'tbody tr td:last-child ui-button'
+    );
+    expect(Array.from(actions).some((btn) => btn.textContent?.trim() === 'Pay from wallet')).toBeFalse();
+  });
+
+  it('pays from wallet and refetches the list on success', async () => {
+    apiClient.GET.and.callFake((path: string) => {
+      if (path === '/api/v1/wallet/mine/') {
+        return Promise.resolve({ data: { balance: '2000.00', currency: 'NGN', transactions: [] } });
+      }
+      return Promise.resolve({ data: { count: 1, results: [makeBooking()] } });
+    });
+    await createComponent();
+    apiClient.POST.and.resolveTo({ data: makeBooking({ status: 'paid' }) });
+    apiClient.GET.calls.reset();
+
+    await component['payFromWallet'](makeBooking() as never);
+
+    expect(apiClient.POST).toHaveBeenCalledWith(
+      '/api/v1/bookings/{id}/pay-from-wallet/',
+      jasmine.objectContaining({ params: { path: { id: 'booking-1' } } })
+    );
+    expect(apiClient.GET).toHaveBeenCalledWith('/api/v1/bookings/mine/', jasmine.anything());
+    expect(component['paymentError']()).toBeNull();
+  });
+
+  it('shows the server message when paying from wallet fails', async () => {
+    apiClient.GET.and.callFake((path: string) => {
+      if (path === '/api/v1/wallet/mine/') {
+        return Promise.resolve({ data: { balance: '2000.00', currency: 'NGN', transactions: [] } });
+      }
+      return Promise.resolve({ data: { count: 1, results: [makeBooking()] } });
+    });
+    await createComponent();
+    apiClient.POST.and.resolveTo({
+      error: { detail: 'Your wallet balance is not enough to pay for this booking.' },
+    });
+
+    await component['payFromWallet'](makeBooking() as never);
+
+    expect(component['paymentError']()).toBe(
+      'Your wallet balance is not enough to pay for this booking.'
+    );
+  });
+
   it('renders the paid status pill with a view-tickets action and no pay or cancel action', async () => {
     apiClient.GET.and.resolveTo({
       data: { count: 1, results: [makeBooking({ status: 'paid' })] },

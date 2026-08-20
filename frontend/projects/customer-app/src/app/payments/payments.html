@@ -1,0 +1,37 @@
+<div class="flex flex-col gap-6">
+  <div>
+    <h1 class="text-lg font-semibold text-slate-900">My payments</h1>
+    <p class="mt-1 text-sm text-slate-500">Every payment attempt for your bookings, including failed ones.</p>
+  </div>
+
+  @if (store.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No payments yet"
+      description="Payments you make for a booking will appear here."
+    />
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Created</th>
+          <th class="px-4 py-2">Amount</th>
+          <th class="px-4 py-2">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (payment of store.items(); track payment.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2">{{ payment.created_at | date: 'short' }}</td>
+            <td class="px-4 py-2">{{ amountLabel(payment) }}</td>
+            <td class="px-4 py-2">
+              <ui-status-pill [tone]="statusTone[payment.status]" [label]="statusLabel[payment.status]" />
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>

@@ -34,6 +34,7 @@ const ENTRY_TYPE_LABEL: Record<JournalEntry['entry_type'], string> = {
   payment: 'Payment',
   refund: 'Refund',
   concession: 'Concession',
+  topup: 'Wallet top-up',
 };
 
 function accountLabel(account: LedgerAccount): string {

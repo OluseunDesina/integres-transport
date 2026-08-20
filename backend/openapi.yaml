@@ -284,6 +284,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/Booking'
           description: ''
+  /api/v1/bookings/{id}/pay-from-wallet/:
+    post:
+      operationId: bookings_pay_from_wallet_create
+      description: |-
+        POST /bookings/{id}/pay-from-wallet/ — Phase 7. Passenger, own
+        booking only; no request body (the booking id in the path is the
+        whole request). Mirrors `BookingCancelView`'s own
+        404-not-found/403-not-yours split, since both operate on a specific
+        passenger's own booking by id.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - bookings
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentIntent'
+          description: ''
   /api/v1/bookings/mine/:
     get:
       operationId: bookings_mine_list
@@ -1006,6 +1033,78 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedJournalEntryList'
           description: ''
+  /api/v1/notifications/{id}/read/:
+    post:
+      operationId: notifications_read_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/v1/notifications/mine/:
+    get:
+      operationId: notifications_mine_list
+      description: |-
+        GET /notifications/mine/?unread_only= — the authenticated user's
+        own notifications. `IsAuthenticated` only, matching
+        `apps.booking.views.BookingMineView`'s shape — a passenger has no
+        Role (ADR-0003) and still needs this for the ticket-reminder case.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: unread_only
+        schema:
+          type: boolean
+        description: When true, only unread notifications are returned.
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationList'
+          description: ''
+  /api/v1/notifications/read-all/:
+    post:
+      operationId: notifications_read_all_create
+      tags:
+      - notifications
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationReadAllResponse'
+          description: ''
   /api/v1/payments/:
     get:
       operationId: payments_list
@@ -1081,7 +1180,6 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/PaymentInitiate'
-        required: true
       security:
       - jwtAuth: []
       responses:
@@ -1862,12 +1960,50 @@ paths:
                 $ref: '#/components/schemas/PaystackAccount'
           description: ''
   /api/v1/super-admin/businesses/{id}/seat-hold/:
+    get:
+      operationId: super_admin_businesses_seat_hold_retrieve
+      description: |-
+        Super-admin-only — docs/adr/0004. Deliberately not part of
+        BusinessUpdateView's client-admin PATCH path; see
+        Business.seat_hold_minutes's own docstring for why.
+
+        GET added alongside the original PATCH-only shape (a UI gap: no way
+        to read the current value before editing it) — same precedent
+        `PaystackAccountConfigView` already set. Unlike that view, no
+        404-for-unconfigured branch is needed: `seat_hold_minutes` is a
+        plain non-nullable field with a model default, so every Business
+        always has a value, never an "unconfigured" state.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - super-admin
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessSeatHold'
+          description: ''
     patch:
       operationId: super_admin_businesses_seat_hold_partial_update
       description: |-
         Super-admin-only — docs/adr/0004. Deliberately not part of
         BusinessUpdateView's client-admin PATCH path; see
         Business.seat_hold_minutes's own docstring for why.
+
+        GET added alongside the original PATCH-only shape (a UI gap: no way
+        to read the current value before editing it) — same precedent
+        `PaystackAccountConfigView` already set. Unlike that view, no
+        404-for-unconfigured branch is needed: `seat_hold_minutes` is a
+        plain non-nullable field with a model default, so every Business
+        always has a value, never an "unconfigured" state.
       parameters:
       - in: path
         name: id
@@ -2650,18 +2786,6 @@ paths:
           type: string
           format: uuid
         required: true
-      - name: limit
-        required: false
-        in: query
-        description: Number of results to return per page.
-        schema:
-          type: integer
-      - name: offset
-        required: false
-        in: query
-        description: The initial index from which to return the results.
-        schema:
-          type: integer
       tags:
       - vehicle-types
       security:
@@ -2671,7 +2795,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedSeatList'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Seat'
           description: ''
     put:
       operationId: vehicle_types_seats_update
@@ -2682,18 +2808,6 @@ paths:
           type: string
           format: uuid
         required: true
-      - name: limit
-        required: false
-        in: query
-        description: Number of results to return per page.
-        schema:
-          type: integer
-      - name: offset
-        required: false
-        in: query
-        description: The initial index from which to return the results.
-        schema:
-          type: integer
       tags:
       - vehicle-types
       requestBody:
@@ -2715,7 +2829,49 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedSeatList'
+                type: array
+                items:
+                  $ref: '#/components/schemas/Seat'
+          description: ''
+  /api/v1/vehicle-types/{id}/seats/generate/:
+    post:
+      operationId: vehicle_types_seats_generate_create
+      description: |-
+        POST /vehicle-types/{id}/seats/generate/ — the UI-facing seat-map
+        builder endpoint (docs/specs/8-seat-map-generation.md). Computes a
+        full rows x columns layout and writes it via the same
+        replace_vehicle_type_seats() the lower-level PUT above uses.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - vehicle-types
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VehicleTypeSeatsGenerate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VehicleTypeSeatsGenerate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VehicleTypeSeatsGenerate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Seat'
           description: ''
   /api/v1/vehicles/:
     get:
@@ -3573,11 +3729,13 @@ components:
       - payment
       - refund
       - concession
+      - topup
       type: string
       description: |-
         * `payment` - Payment
         * `refund` - Refund
         * `concession` - Concession
+        * `topup` - Wallet top-up
     FareJourney:
       type: object
       properties:
@@ -3862,6 +4020,14 @@ components:
           type: string
       required:
       - status
+    IntentTypeEnum:
+      enum:
+      - booking_payment
+      - wallet_topup
+      type: string
+      description: |-
+        * `booking_payment` - Booking payment
+        * `wallet_topup` - Wallet top-up
     InvitationCreatedResponse:
       type: object
       properties:
@@ -4163,6 +4329,77 @@ components:
       - last_name
       - permissions
       - role_name
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        notification_type:
+          allOf:
+          - $ref: '#/components/schemas/NotificationTypeEnum'
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+        body:
+          type: string
+          readOnly: true
+        related_object_type:
+          type: string
+          readOnly: true
+        related_object_id:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        read_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - body
+      - created_at
+      - id
+      - notification_type
+      - read_at
+      - related_object_id
+      - related_object_type
+      - title
+    NotificationReadAllResponse:
+      type: object
+      properties:
+        marked_read:
+          type: integer
+      required:
+      - marked_read
+    NotificationTypeEnum:
+      enum:
+      - license_expiring
+      - insurance_expiring
+      - roadworthiness_expiring
+      - ticket_unused_reminder
+      - kyc_document_submitted
+      - kyb_document_submitted
+      type: string
+      description: |-
+        * `license_expiring` - Driver license expiring
+        * `insurance_expiring` - Vehicle insurance expiring
+        * `roadworthiness_expiring` - Roadworthiness expiring
+        * `ticket_unused_reminder` - Unused ticket reminder
+        * `kyc_document_submitted` - New KYC document submitted
+        * `kyb_document_submitted` - New KYB document submitted
+    NumberingSchemeEnum:
+      enum:
+      - row_letter
+      type: string
+      description: '* `row_letter` - row_letter'
     PaginatedBookingList:
       type: object
       required:
@@ -4416,6 +4653,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/LedgerAccount'
+    PaginatedNotificationList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
     PaginatedPaymentIntentList:
       type: object
       required:
@@ -4531,29 +4791,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Schedule'
-    PaginatedSeatList:
-      type: object
-      required:
-      - count
-      - results
-      properties:
-        count:
-          type: integer
-          example: 123
-        next:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?offset=400&limit=100
-        previous:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?offset=200&limit=100
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/Seat'
     PaginatedSettlementRunList:
       type: object
       required:
@@ -5118,13 +5355,18 @@ components:
             maxLength: 0
     PaymentInitiate:
       type: object
-      description: POST /payments/ body.
+      description: |-
+        POST /payments/ body — exactly one of `booking_id` (pay for a
+        booking via a fresh Paystack charge) or `wallet_topup` (fund the
+        passenger's wallet with no Booking attached). A blend of the two
+        isn't supported — see docs/specs/7-passenger-wallet.md's own
+        non-goals.
       properties:
         booking_id:
           type: string
           format: uuid
-      required:
-      - booking_id
+        wallet_topup:
+          $ref: '#/components/schemas/WalletTopupInitiate'
     PaymentInitiateResponse:
       type: object
       description: |-
@@ -5157,10 +5399,20 @@ components:
           type: string
           format: uuid
           readOnly: true
+        intent_type:
+          allOf:
+          - $ref: '#/components/schemas/IntentTypeEnum'
+          readOnly: true
         booking:
           type: string
           format: uuid
           readOnly: true
+          nullable: true
+        wallet_business:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
         business:
           type: string
           format: uuid
@@ -5215,6 +5467,7 @@ components:
       - currency
       - failed_at
       - id
+      - intent_type
       - passenger
       - psp_authorization_url
       - psp_provider
@@ -5222,6 +5475,7 @@ components:
       - requires_manual_refund
       - status
       - succeeded_at
+      - wallet_business
     PaystackAccount:
       type: object
       properties:
@@ -5594,6 +5848,27 @@ components:
       required:
       - is_available
       - seat
+    SeatSpec:
+      type: object
+      description: |-
+        One seat within VehicleTypeSeatsUpdateSerializer's `seats` list —
+        `row`/`column` are optional, matching Seat's own nullable fields: a
+        manual PUT doesn't have to supply grid geometry, only generate/
+        always does.
+      properties:
+        seat_number:
+          type: string
+          maxLength: 10
+        row:
+          type: integer
+          minimum: 1
+          nullable: true
+        column:
+          type: integer
+          minimum: 1
+          nullable: true
+      required:
+      - seat_number
     SettlementRun:
       type: object
       properties:
@@ -6445,21 +6720,44 @@ components:
       - business
       - capacity
       - name
+    VehicleTypeSeatsGenerate:
+      type: object
+      description: |-
+        Body for POST /vehicle-types/{id}/seats/generate/ —
+        docs/specs/8-seat-map-generation.md. `vehicle_type` is passed in
+        via context, same as VehicleTypeSeatsUpdateSerializer above.
+      properties:
+        rows:
+          type: integer
+          minimum: 1
+        columns:
+          type: integer
+          minimum: 1
+        aisle_after_column:
+          type: integer
+          minimum: 1
+          nullable: true
+        numbering_scheme:
+          allOf:
+          - $ref: '#/components/schemas/NumberingSchemeEnum'
+          default: row_letter
+      required:
+      - columns
+      - rows
     VehicleTypeSeatsUpdate:
       type: object
       description: |-
-        Body: {"seat_numbers": ["1A", "1B", ...]} — mirrors
-        apps.network.serializers.RouteStopsUpdateSerializer's
+        Body: {"seats": [{"seat_number": "1A", "row": 1, "column": 1}, ...]}
+        — mirrors apps.network.serializers.RouteStopsUpdateSerializer's
         replace-the-set shape. `vehicle_type` (already resolved by the
         view from the URL) is passed in via context, not a field.
       properties:
-        seat_numbers:
+        seats:
           type: array
           items:
-            type: string
-            maxLength: 10
+            $ref: '#/components/schemas/SeatSpec'
       required:
-      - seat_numbers
+      - seats
     VerticalEnum:
       enum:
       - shuttle
@@ -6487,6 +6785,23 @@ components:
       - balance
       - currency
       - transactions
+    WalletTopupInitiate:
+      type: object
+      description: |-
+        Nested shape for `PaymentInitiateSerializer.wallet_topup` — Phase
+        7. `business_id` names the wallet being funded (there's no Booking
+        to denormalize it from, unlike the booking-payment shape below).
+      properties:
+        business_id:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - amount
+      - business_id
     WalletTransaction:
       type: object
       properties:

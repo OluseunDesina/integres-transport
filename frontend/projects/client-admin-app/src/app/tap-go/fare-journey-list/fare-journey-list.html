@@ -1,0 +1,54 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Tap & Go journeys</h1>
+  </div>
+
+  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <ui-select
+      label="Status"
+      [options]="statusFilterOptions"
+      [ngModel]="store.query().status ?? ''"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onStatusFilterChange($event)"
+    />
+  </div>
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No tap-and-go journeys found"
+      description="Passenger board/alight taps recorded on tap-and-go trips will appear here."
+    />
+  } @else {
+    <ui-table [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+          <th class="px-4 py-2">Route</th>
+          <th class="px-4 py-2">Board → Alight</th>
+          <th class="px-4 py-2">Amount</th>
+          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Boarded</th>
+          <th class="px-4 py-2">Alighted</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (journey of store.items(); track journey.id) {
+          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+            <td class="px-4 py-2 font-medium text-slate-900">{{ journey.trip.route.name }}</td>
+            <td class="px-4 py-2">{{ journey.board_stop }} → {{ journey.alight_stop ?? '—' }}</td>
+            <td class="px-4 py-2">{{ amountLabel(journey) }}</td>
+            <td class="px-4 py-2">
+              <ui-status-pill [tone]="statusTone[journey.status]" [label]="statusLabel[journey.status]" />
+            </td>
+            <td class="px-4 py-2">{{ journey.boarded_at | date: 'short' }}</td>
+            <td class="px-4 py-2">
+              {{ journey.alighted_at ? (journey.alighted_at | date: 'short') : '—' }}
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>

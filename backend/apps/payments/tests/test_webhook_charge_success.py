@@ -68,10 +68,21 @@ def test_charge_success_pays_the_booking_confirms_seats_and_posts_a_balanced_ent
         intent.refresh_from_db()
         booking_after = Booking.all_objects.get(pk=booking.pk)
         reservation_after = SeatReservation.all_objects.get(pk=reservation.pk)
-        wallet = LedgerAccount.all_objects.get(
+        # A fresh card payment debits psp_suspense, not the passenger's
+        # wallet (Phase 7 — docs/specs/7-passenger-wallet.md's own
+        # "Context" section: touching the wallet account here would
+        # corrupt it into something other than a real spendable balance
+        # the moment top-ups exist). No LedgerAccount(wallet=...) row is
+        # ever created by this path at all.
+        assert not LedgerAccount.all_objects.filter(
             business=business,
             passenger=booking.passenger,
             account_type=LedgerAccount.AccountType.WALLET,
+        ).exists()
+        psp_suspense = LedgerAccount.all_objects.get(
+            business=business,
+            psp_provider="paystack",
+            account_type=LedgerAccount.AccountType.PSP_SUSPENSE,
         )
         clearing = LedgerAccount.all_objects.get(
             business=business, account_type=LedgerAccount.AccountType.BUSINESS_CLEARING
@@ -83,12 +94,7 @@ def test_charge_success_pays_the_booking_confirms_seats_and_posts_a_balanced_ent
     assert booking_after.status == Booking.Status.PAID
     assert reservation_after.status == SeatReservation.Status.CONFIRMED
 
-    # Wallet debit is negative — nothing this phase ever credits a
-    # wallet (no top-up, no tap-and-go spend-down), so a passenger's
-    # wallet balance is legitimately negative after every payment. This
-    # is the spec's own literal three-line commission-split shape, not
-    # a bug to "fix".
-    assert wallet.cached_balance == Decimal("-200.00")
+    assert psp_suspense.cached_balance == Decimal("-200.00")
     assert clearing.cached_balance > Decimal("0.00")
 
     event = WebhookEvent.objects.get(reference=intent.psp_reference, event_type="charge.success")

@@ -13,6 +13,18 @@ export const routes: Routes = [
     loadComponent: () => import('./register/register').then((m) => m.Register),
   },
   {
+    path: 'register/invite/:token',
+    loadComponent: () =>
+      import('./register/client-invite-accept/client-invite-accept').then(
+        (m) => m.ClientInviteAccept
+      ),
+  },
+  {
+    path: 'staff/accept/:token',
+    loadComponent: () =>
+      import('./staff/staff-invite-accept/staff-invite-accept').then((m) => m.StaffInviteAccept),
+  },
+  {
     path: '',
     loadComponent: () => import('./app-shell').then((m) => m.AppShell),
     children: [
@@ -107,6 +119,12 @@ export const routes: Routes = [
         data: { permissions: ['fleet.manage'] },
       },
       {
+        path: 'vehicle-types/:id/seats',
+        loadComponent: () => import('./vehicle-types/seat-map/seat-map').then((m) => m.SeatMap),
+        canActivate: [permissionGuard],
+        data: { permissions: ['seating.view'] },
+      },
+      {
         path: 'vehicles',
         loadComponent: () =>
           import('./vehicles/vehicle-list/vehicle-list').then((m) => m.VehicleList),
@@ -184,6 +202,25 @@ export const routes: Routes = [
           import('./bookings/booking-list/booking-list').then((m) => m.BookingList),
         canActivate: [permissionGuard],
         data: { permissions: ['booking.view'] },
+      },
+      {
+        path: 'fares',
+        loadComponent: () => import('./fares/fare-list/fare-list').then((m) => m.FareList),
+        canActivate: [permissionGuard],
+        data: { permissions: ['fares.view'] },
+      },
+      {
+        path: 'fares/new',
+        loadComponent: () => import('./fares/fare-form/fare-form').then((m) => m.FareForm),
+        canActivate: [permissionGuard],
+        data: { permissions: ['fares.manage'] },
+      },
+      {
+        path: 'tap-go',
+        loadComponent: () =>
+          import('./tap-go/fare-journey-list/fare-journey-list').then((m) => m.FareJourneyList),
+        canActivate: [permissionGuard],
+        data: { permissions: ['tapngo.view'] },
       },
       {
         path: 'payments',

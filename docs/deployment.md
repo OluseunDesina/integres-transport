@@ -58,25 +58,34 @@ shape `apps.payments.views.PaystackWebhookView` already established for
 "a real external caller with no Django user behind it." Both are
 `@extend_schema(exclude=True)`, matching that same webhook view's
 precedent for keeping internal-only endpoints out of the generated
-OpenAPI schema.
+OpenAPI schema. **Phase 9 (notifications) added two more of the same
+shape** — `NotificationComplianceSweepView`/`NotificationTicketReminderSweepView`,
+mounted at `.../notification-compliance-sweep/`/
+`.../notification-ticket-reminder-sweep/` — bringing the total to four.
 
-Two GitHub Actions cron workflows call them:
+Four GitHub Actions cron workflows call them:
 
 - `.github/workflows/expire-seat-holds-cron.yml` — every 5 minutes
   (`*/5 * * * *`), standing in for that job's real ~1-minute Celery Beat
   cadence closely enough to behave visibly correctly.
 - `.github/workflows/generate-trips-cron.yml` — once daily, `30 2 * * *`
   UTC.
+- `.github/workflows/notification-compliance-sweep-cron.yml` — once
+  daily, `0 3 * * *` UTC.
+- `.github/workflows/notification-ticket-reminder-sweep-cron.yml` —
+  once daily, `15 3 * * *` UTC (staggered 15 minutes after the
+  compliance sweep, arbitrarily, so they never contend for the same
+  lock/connection burst).
 
-Both read `BACKEND_URL` and `INTERNAL_TASK_SECRET` as GitHub repo
-secrets, set once the real values are known (§4.3). **Neither workflow
-uses Vercel's own native Cron Jobs**, deliberately: Vercel Cron always
-sends a plain `GET` with no custom headers (only its own reserved
+All four read `BACKEND_URL` and `INTERNAL_TASK_SECRET` as GitHub repo
+secrets, set once the real values are known (§4.3). **None of these
+workflows use Vercel's own native Cron Jobs**, deliberately: Vercel Cron
+always sends a plain `GET` with no custom headers (only its own reserved
 `Authorization: Bearer $CRON_SECRET` convention) — these endpoints are
 `POST`-only and check a custom header, so adopting native Vercel Cron
-would mean a second auth convention and a new HTTP method for one
-endpoint. Reusing GitHub Actions for both keeps one mechanism for both
-jobs.
+would mean a second auth convention and a new HTTP method for these
+endpoints. Reusing GitHub Actions for all four keeps one mechanism for
+every job.
 
 ## 2. Pre-deploy code changes required
 

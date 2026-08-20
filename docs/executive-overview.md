@@ -26,14 +26,18 @@ branding and domain — they don't see or know it's a shared platform
 underneath. One backend serves many operators; each operator's data is
 kept strictly separate (§4).
 
-The platform is built around three audiences, each with their own
+The platform is built around four audiences, each with their own
 dedicated app:
 
-- **Passengers** — accounts and booking; wallets are a future phase.
+- **Passengers** — accounts, booking, a digital wallet they can top up
+  and pay from, and digital tickets.
 - **An operator's own staff** — managing their routes, vehicles,
   drivers, schedules, and trips day to day.
 - **Integra's own platform staff** — vetting and onboarding new
   operators, with oversight across all of them.
+- **An operator's on-the-ground conductors** — a fourth, installable
+  app for recording taps and scanning tickets at the point of boarding,
+  standing in for a dedicated mobile app until one is built.
 
 ---
 
@@ -43,106 +47,75 @@ The project is built in phases, and **every phase is independently
 verified before being called done** — not just built and assumed to
 work, but re-checked end-to-end (automated tests, accessibility,
 security review, visual review) with a dated report naming exactly
-what was found. As of today, five phases are complete on that basis:
+what was found. **As of today, the entire original phase plan is
+complete, and three further enhancements have shipped on top of it:**
 
 | Phase | What it delivered | Status |
 |---|---|---|
-| **0 — Foundation** | The underlying scaffolding: the shared backend, the three apps, secure login, and the automated testing setup everything else builds on | ✅ Done |
+| **0 — Foundation** | The underlying scaffolding: the shared backend, the four apps, secure login, and the automated testing setup everything else builds on | ✅ Done |
 | **1 — Identity, Client & Business** | Operators can register, verify their identity and business documents (compliance review), and manage staff with proper role-based access | ✅ Done |
 | **2 — Admin interfaces** | The actual screens operator staff and Integra staff use day to day for everything Phase 1 built | ✅ Done |
 | **3 — Network, Scheduling & Fleet** | Routes, stops, vehicles, drivers, and recurring trip schedules — the full operational picture of "what runs, where, and when" | ✅ Done |
 | **4 — Fares, Seating & Booking** | Pricing, seat maps, and the actual booking flow — a passenger can search, pick a seat, and reserve it, end to end | ✅ Done (see note below) |
-| **5 — Payments, Wallet & Ledger** | Taking payment, passenger wallets, financial record-keeping, paying operators out | ✅ Backend done (§3) — a passenger can pay for a booking end to end, and operators can now be paid out. No passenger/staff-facing screens for any of it yet |
-| **6 — Ticketing** | Digital ticket issuance and validation | ⏳ Not started |
+| **4b — Tap-and-go fare pricing** | For operators without seat reservations (e.g. a metro system): board, tap, ride, tap out, and the fare is worked out automatically from distance travelled | ✅ Done |
+| **5 — Payments, Wallet & Ledger** | Taking payment, financial record-keeping, paying operators out | ✅ Done — a passenger can pay for a booking end to end, and operators are paid out through a real payment partner |
+| **6 — Ticketing** | Digital, tamper-proof tickets, issued automatically on payment and scannable by a conductor even with no live internet connection | ✅ Done |
+| **7 — Passenger Wallet** *(enhancement)* | A passenger can top up a running balance and pay for a booking directly from it, instead of a card checkout every time | ✅ Done |
+| **8 — Seat Map Generation** *(enhancement)* | Operator staff can generate a vehicle's seat layout (rows, columns, an aisle) instead of entering every seat by hand | ✅ Done |
+| **9 — In-App Notifications** *(enhancement)* | A notification bell across every app: warns operator staff before a driver's license or a vehicle's insurance expires, reminds a passenger about an unused ticket, and alerts Integra staff to a new compliance submission waiting on their queue | ✅ Done |
 
-In plain terms: **the foundation, the compliance/onboarding process,
-the admin tooling, the full operational model (routes, fleet,
-schedules), and now the passenger booking flow itself all exist and
-work today.** A passenger can reserve a seat; they cannot yet pay for
-it. That's the next phase.
+In plain terms: **everything originally scoped is built, and so is
+everything asked for since.** The three enhancement phases (7–9)
+weren't part of the original plan — they were scoped and built in
+response to real gaps found once the rest of the system was in use
+(no way to pay from a running balance, no way to build a seat map
+without hand-entering every seat, no way to be notified about
+something before it became a problem). Each went through the same
+spec-first, independently-verified process as everything before it.
 
 **A note on how Phase 4 reached "done"**: most of it shipped normally,
 reviewed slice by slice as it was built. The final piece — the
 passenger-facing booking screens, plus a related fare-pricing
 improvement — was instead built in one continuous pass by an external
-tool, without the usual review pauses in between. It has since been
-caught up to the same verification standard as everything else (see
-`docs/status-report-2026-08-14.md` §2–3 for the full, honest account),
-and nothing wrong was found in the code itself — but it's worth
-stakeholders knowing the process slipped once, even though the outcome
-held up.
+tool, without the usual review pauses in between. It was caught up to
+the same verification standard immediately afterward, and nothing
+wrong was found in the code itself, but it's worth stakeholders
+knowing the process slipped once — every phase since has kept to the
+stop-and-review discipline that slip prompted.
 
 ---
 
 ## 3. What's next, and what it's waiting on
 
-**Phase 4 is done, including the question of how two passengers can't
-both book the same seat at the same time** — the trickiest part of it,
-covering even the case where two passengers want *overlapping but not
-identical* portions of the same trip (one boards at stop 2 and leaves
-at stop 5, another boards at stop 4). That design decision is finalized
-and proven: enforced at the database level, verified by a test that
-fires six simultaneous booking attempts at the same seat and confirms
-exactly one succeeds.
+**There is no open phase right now — the full build plan is
+complete.** Every design decision that once gated a phase (which
+payment partner, how the financial ledger is structured, how a digital
+ticket is made tamper-proof for a scanning device with no live
+internet connection, how two passengers can't book the same seat at
+the same time even for overlapping-but-not-identical portions of a
+trip) was made, documented, and built out. What's next is a business
+decision, not an engineering one: whichever of the items below the
+business wants prioritized, or a new enhancement altogether.
 
-Phase 5 (Payments, Wallet & Ledger) is the next milestone — where the
-platform starts doing what it's ultimately for commercially: taking
-money for a booking, not just holding one. **The two decisions that were
-blocking it are now both made** (2026-08-14):
+What remains **deliberately deferred**, named plainly rather than
+implied to be done:
 
-1. **Payment partner: Paystack.** Confirmed with the product owner.
-   One honest caveat, surfaced before the decision was made rather than
-   after: Paystack doesn't currently operate in Botswana, so the
-   Botswana metro operator will need a second payment partner before it
-   can go live on payments specifically — everything else it does
-   (routes, schedules, bookings) is unaffected. That second decision is
-   deliberately deferred until it's actually needed.
-2. **How money is recorded** — the ledger design (double-entry
-   bookkeeping, so every movement of money is fully traceable and
-   auditable) is now formally finalized, including the handful of
-   remaining modeling questions (how a platform commission is split out
-   of a payment, how payouts to an operator are batched and tracked).
-
-**Phase 5 is now fully planned out, and all three of its build stages
-are done — its backend work is complete.** The underlying accounting
-system — the ledger that records every movement of money, built
-exactly to the finalized design above — was built and verified first.
-The second stage, connecting that ledger to Paystack, made it possible
-for a passenger to pay for a booking and have it actually go through,
-with the money correctly recorded the moment it's confirmed. **The
-third and final stage, just finished, closes the loop**: Integra's own
-staff can now batch up an operator's accumulated earnings for a period
-and trigger a real payout to that operator's bank account through
-Paystack, with the outcome confirmed automatically once Paystack
-reports back. All three stages are independently verified (470
-automated tests passing, up from 383), each one deliberately paused
-for review before the next started — the same disciplined,
-one-stage-at-a-time approach used earlier for seat booking (§2). No
-passenger- or staff-facing screen exists yet for any of this (it's all
-been verified directly against the system, not through the app) —
-building those screens is separate, upcoming work, and is now the
-natural next conversation for this phase.
-
-**A separate, smaller phase — tap-and-go fare pricing — now has both its
-backend and a working staff app built.** This is for operators like the
-Botswana metro that don't use seat reservations: a passenger boards,
-taps in, later taps out, and the system works out what they owe based
-on distance travelled. It's scoped narrowly to *working out the fare*,
-not collecting it — collection still depends on Phase 5. The one open
-design question this needed to answer — what a passenger actually taps
-or scans — is settled: either a QR code or an NFC-enabled phone, card,
-or watch, whichever a given passenger prefers. A conductor can now
-actually record a tap: a fourth, installable phone/tablet app was built
-for exactly that job, standing in for a dedicated validator app until
-one is built as its own later phase. What's still missing is a
-passenger-facing screen to obtain the QR code/NFC credential in the
-first place — a small, deliberately deferred piece, not a blocker to
-demonstrating the rest.
-
-A third decision — how a digital ticket is made tamper-proof, including
-for a scanning device with no live internet connection — still has a
-"documented direction, not yet finalized" status, but only needs to be
-settled before Phase 6 (Ticketing), which comes after Phase 5.
+- **A second payment partner for Botswana.** Paystack, the payment
+  partner Integra uses everywhere else, doesn't operate there. The
+  Botswana metro operator's routes, schedules, and bookings all work
+  today — only taking payment specifically is blocked on this, and
+  it's deferred until actually needed rather than solved speculatively.
+- **A dedicated conductor mobile app.** The installable web app built
+  for Phase 4b stands in for it today and does the same job (recording
+  taps, validating tickets) — a native app is planned as later,
+  separate work, not a current gap in what conductors can do.
+- **Production-grade file storage.** Uploaded compliance documents are
+  stored on local disk today rather than in cloud storage (e.g. Amazon
+  S3) — fine for the current stage, not yet production-hardened.
+- **Operator custom domains.** Each operator's own branding is fully
+  white-labeled inside the product, but the network setup to serve
+  that under the operator's *own* web address isn't deployed yet — see
+  §4.
 
 ---
 
@@ -199,17 +172,24 @@ open-source infrastructure — not exotic or hard-to-staff technology:
   enforces the operator-data-isolation described above.
 - **Redis** — fast temporary storage used for things like rate-limiting
   and background job coordination.
-- **Celery** — runs scheduled background work automatically, e.g. the
-  daily job that turns a recurring schedule ("this route runs every
-  weekday at 7:30am") into that day's actual, concrete trip.
+- **Celery** — runs several pieces of scheduled background work
+  automatically: turning a recurring schedule ("this route runs every
+  weekday at 7:30am") into that day's actual, concrete trip; releasing
+  a seat that was held but never paid for; and the daily checks behind
+  the notification system (§2) that warn staff before a driver's
+  license or a vehicle's insurance actually expires.
 - **Docker Compose** — how the whole stack (database, cache, backend,
-  background workers) runs together today, in development.
-- **AWS** is the intended production deployment target — this is
-  documented as the plan but **has not yet been provisioned**. There is
-  no current infrastructure cost being incurred beyond development
-  environments, and no cost estimate exists yet for production
-  deployment; that will need to be scoped separately when production
-  provisioning is planned.
+  background workers) runs together in development.
+- **The platform is live**, deployed on Vercel (the backend and all 4
+  apps) and Supabase (the database) — chosen over AWS specifically for
+  a fast, low-overhead path to a real, working URL at this stage,
+  rather than the heavier provisioning AWS would require before
+  anything could be reached at all. Specific addresses aren't listed
+  in this document; ask for them directly. There is no meaningful
+  infrastructure cost being incurred beyond this, and no cost estimate
+  exists yet for a hardened production environment (separate
+  staging/production split, custom domains per operator) — that will
+  need to be scoped separately when it's actually needed.
 
 This document deliberately does not include cost figures, staffing
 levels, or a delivery timeline for future phases — none of that exists
@@ -221,30 +201,36 @@ request.
 
 ## 6. Bottom line
 
-Five phases in, Integra AFC has a solid, independently-verified
-foundation: secure multi-tenant infrastructure, a working
-compliance/onboarding process, full admin tooling for operator staff,
-the complete operational model of routes, fleet, and schedules, and now
-a working passenger booking flow, seat-locking design included. Nearly
-every phase has been built to a written spec, reviewed against a fixed
-checklist, and reported on honestly — including what wasn't perfect and
-what was deliberately deferred. The one exception, named plainly rather
+**Integra AFC's full build plan is complete, and the platform is live.**
+Every phase originally scoped — secure multi-tenant infrastructure, a
+working compliance/onboarding process, full admin tooling, the
+complete operational model of routes/fleet/schedules, seat-locking
+booking, tap-and-go fare pricing, real payment collection and operator
+payout through Paystack, and tamper-proof digital ticketing — has been
+built to a written spec, reviewed against a fixed checklist, and
+reported on honestly, including what wasn't perfect and what was
+deliberately deferred. The one process exception, named plainly rather
 than smoothed over: the last piece of Phase 4 skipped its usual review
-pauses and was caught up to the same standard after the fact (§2).
+pauses and was caught up to the same standard immediately after (§2).
+Every phase since has kept to the discipline that slip prompted:
+decide the hard questions before writing code, stop for independent
+review between every build stage, and name what's deferred rather than
+imply it's done. That discipline caught genuine, non-obvious bugs at
+several points along the way — before any of them could reach
+anything real.
 
-Phase 5 is where the platform started doing the thing it exists to do
-commercially — take money for a booking, not just hold one — and it now
-does, all the way through to paying an operator out. Both decisions
-gating it — which payment partner, and how the financial ledger is
-designed — were made up front, and the platform was built out on top of
-them one verified stage at a time: the ledger itself, then the actual
-Paystack connection a passenger uses to pay, then the payout mechanism
-that closes the loop back to the operator. The pause between stages did
-its job every time: deciding both foundational questions before any
-code was written avoided the kind of expensive rework this project's
-process exists to prevent, and stopping for review between each of the
-three build stages caught a genuine, non-obvious bug each time before
-it could reach anything real. What's left for this phase now is not
-backend work at all — it's the passenger- and staff-facing screens for
-money the backend already moves correctly, and a second payment partner
-for the one market (Botswana) the current one doesn't cover.
+**Three further enhancements shipped after the original plan finished**,
+each in direct response to a real gap surfaced by actually using the
+system rather than a gap anyone had originally anticipated: a
+passenger wallet (top up once, pay from balance instead of a full
+checkout every time), seat map generation (build a vehicle's layout
+from a few numbers instead of entering every seat by hand), and
+in-app notifications (staff warned before a compliance document
+expires, a passenger reminded about a ticket they haven't used,
+Integra's own team alerted to a new submission waiting on their
+queue). Each went through the same process as everything before it —
+nothing here was rushed to compensate for being unplanned.
+
+What's left is not engineering work waiting on a decision — it's a
+short, named list of deliberately deferred items (§3) and a business
+choice about what to prioritize next.

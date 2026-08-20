@@ -1,0 +1,30 @@
+name: notification-compliance-sweep cron
+
+# Stands in for Celery Beat's notification_compliance_sweep job on the
+# Vercel deployment target, which runs no persistent beat process — see
+# docs/deployment.md and docs/specs/9-notifications.md. Same mechanism
+# as generate-trips-cron.yml/expire-seat-holds-cron.yml, same reasoning
+# for using GitHub Actions over Vercel's own Cron Jobs (this endpoint
+# is POST-only and checks a custom header, not Vercel Cron's GET +
+# Authorization: Bearer $CRON_SECRET convention).
+#
+# 03:00 UTC daily, matching apps/notifications/migrations/0002's own
+# Celery Beat schedule for the same job under Docker.
+#
+# BACKEND_URL and INTERNAL_TASK_SECRET are the same repo secrets every
+# other internal-task cron workflow uses.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  notification-compliance-sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the notification-compliance-sweep endpoint
+        run: |
+          curl --fail -X POST \
+            "${{ secrets.BACKEND_URL }}/api/v1/internal/tasks/notification-compliance-sweep/" \
+            -H "X-Internal-Task-Secret: ${{ secrets.INTERNAL_TASK_SECRET }}"

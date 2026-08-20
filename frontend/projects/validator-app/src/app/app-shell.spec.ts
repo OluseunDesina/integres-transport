@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { API_CLIENT } from '@api-client';
 import { AuthApiService, AuthStore } from '@auth';
 
 import { AppShell } from './app-shell';
@@ -10,6 +11,14 @@ describe('AppShell', () => {
 
   beforeEach(async () => {
     authApi = jasmine.createSpyObj<AuthApiService>('AuthApiService', ['login', 'logout']);
+    // AppShell now always renders NotificationBell, which fetches on
+    // init and needs both API_CLIENT and AuthStore.accessToken() —
+    // a resolved-empty GET keeps every existing assertion here meaning
+    // what it already meant.
+    const apiClient = {
+      GET: jasmine.createSpy('GET').and.resolveTo({ data: { count: 0, results: [] } }),
+      POST: jasmine.createSpy('POST'),
+    };
 
     await TestBed.configureTestingModule({
       imports: [AppShell],
@@ -18,8 +27,13 @@ describe('AppShell', () => {
         { provide: AuthApiService, useValue: authApi },
         {
           provide: AuthStore,
-          useValue: { user: () => ({ email: 'staff@example.com' }), isAuthenticated: () => true },
+          useValue: {
+            user: () => ({ email: 'staff@example.com' }),
+            isAuthenticated: () => true,
+            accessToken: () => 'test-token',
+          },
         },
+        { provide: API_CLIENT, useValue: apiClient },
       ],
     }).compileComponents();
 

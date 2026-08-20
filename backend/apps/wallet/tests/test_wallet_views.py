@@ -60,7 +60,11 @@ def test_wallet_mine_requires_the_business_query_param() -> None:
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
-def test_wallet_mine_shows_the_negative_balance_after_a_real_payment() -> None:
+def test_wallet_mine_stays_empty_after_a_plain_card_payment() -> None:
+    """Phase 7 (docs/specs/7-passenger-wallet.md): a fresh Paystack card
+    charge for a booking debits `psp_suspense`, not the passenger's
+    wallet — no real balance was ever spent, so the wallet view must
+    stay untouched, not show a spurious negative balance."""
     client = ClientFactory()
     with tenant_context(str(client.id)):
         business = BusinessFactory(client=client)
@@ -88,8 +92,8 @@ def test_wallet_mine_shows_the_negative_balance_after_a_real_payment() -> None:
     )
 
     assert response.status_code == status.HTTP_200_OK
-    assert Decimal(response.data["balance"]) == Decimal("-120.00")
-    assert len(response.data["transactions"]) == 1
+    assert Decimal(response.data["balance"]) == Decimal("0.00")
+    assert len(response.data["transactions"]) == 0
 
 
 def test_wallet_lookup_requires_the_wallet_view_permission() -> None:

@@ -1,6 +1,8 @@
 """Serializers for apps.payments — see
-docs/specs/5-payments-wallet-ledger.md."""
+docs/specs/5-payments-wallet-ledger.md and, for the wallet top-up
+addition, docs/specs/7-passenger-wallet.md."""
 
+from decimal import Decimal
 from typing import Any
 
 from rest_framework import serializers
@@ -53,13 +55,42 @@ class PaystackAccountSerializer(serializers.ModelSerializer[PaystackAccount]):
 # --- POST /payments/ ---------------------------------------------------
 
 
-class PaymentInitiateSerializer(serializers.Serializer):
-    """POST /payments/ body."""
+class WalletTopupInitiateSerializer(serializers.Serializer):
+    """Nested shape for `PaymentInitiateSerializer.wallet_topup` — Phase
+    7. `business_id` names the wallet being funded (there's no Booking
+    to denormalize it from, unlike the booking-payment shape below)."""
 
-    booking_id = serializers.UUIDField()
+    business_id = serializers.UUIDField()
+    amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=Decimal("0.01")
+    )
+
+    def validate_business_id(self, value: Any) -> Business:
+        return _resolve_business(value)
+
+
+class PaymentInitiateSerializer(serializers.Serializer):
+    """POST /payments/ body — exactly one of `booking_id` (pay for a
+    booking via a fresh Paystack charge) or `wallet_topup` (fund the
+    passenger's wallet with no Booking attached). A blend of the two
+    isn't supported — see docs/specs/7-passenger-wallet.md's own
+    non-goals."""
+
+    booking_id = serializers.UUIDField(required=False)
+    wallet_topup = WalletTopupInitiateSerializer(required=False)
 
     def validate_booking_id(self, value: Any) -> Booking:
         return _resolve_booking(value)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        has_booking = "booking_id" in attrs
+        has_topup = "wallet_topup" in attrs
+        if has_booking == has_topup:
+            raise serializers.ValidationError(
+                "Provide exactly one of booking_id or wallet_topup.",
+                code="ambiguous_payment_target",
+            )
+        return attrs
 
 
 class PaymentInitiateResponseSerializer(serializers.ModelSerializer[PaymentIntent]):
@@ -85,7 +116,9 @@ class PaymentIntentSerializer(serializers.ModelSerializer[PaymentIntent]):
         model = PaymentIntent
         fields = [
             "id",
+            "intent_type",
             "booking",
+            "wallet_business",
             "business",
             "passenger",
             "amount",

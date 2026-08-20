@@ -45,14 +45,23 @@ class PaystackAccount(BaseModel):
 
 
 class PaymentIntent(BaseModel):
-    """One attempt to pay for a `Booking`. `psp_reference` is generated
-    server-side *before* calling Paystack (see
+    """One attempt to pay for a `Booking`, or to top up a passenger's
+    wallet (Phase 7 — docs/specs/7-passenger-wallet.md). `psp_reference`
+    is generated server-side *before* calling Paystack (see
     `apps.payments.services.initiate_payment`), so a retry under one
     `Idempotency-Key` can't produce two different Paystack transactions.
     `journal_entry` is set exactly once, on `charge.success` — its own
     OneToOne uniqueness is a concurrency guard in its own right (the
     second of two layers the webhook-replay concurrency spike targets,
-    alongside `WebhookEvent`'s own unique constraint)."""
+    alongside `WebhookEvent`'s own unique constraint).
+
+    `booking`/`wallet_business` are mutually exclusive, gated by
+    `intent_type` — a booking payment has a `Booking` to pay for and no
+    standalone wallet target; a wallet top-up has no `Booking` at all,
+    only the `Business` whose wallet is being funded. `business` itself
+    stays set for both (denormalized from `booking.business` or equal
+    to `wallet_business`) — every existing read path already filters/
+    groups by it."""
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -60,7 +69,19 @@ class PaymentIntent(BaseModel):
         FAILED = "failed", "Failed"
         CANCELLED = "cancelled", "Cancelled"
 
-    booking = models.ForeignKey("booking.Booking", on_delete=models.PROTECT, related_name="+")
+    class IntentType(models.TextChoices):
+        BOOKING_PAYMENT = "booking_payment", "Booking payment"
+        WALLET_TOPUP = "wallet_topup", "Wallet top-up"
+
+    intent_type = models.CharField(
+        max_length=20, choices=IntentType.choices, default=IntentType.BOOKING_PAYMENT
+    )
+    booking = models.ForeignKey(
+        "booking.Booking", on_delete=models.PROTECT, related_name="+", null=True, blank=True
+    )
+    wallet_business = models.ForeignKey(
+        Business, on_delete=models.PROTECT, related_name="+", null=True, blank=True
+    )
     business = models.ForeignKey(Business, on_delete=models.PROTECT, related_name="+")
     passenger = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+")
     amount = models.DecimalField(max_digits=10, decimal_places=2)
@@ -83,6 +104,25 @@ class PaymentIntent(BaseModel):
                 fields=["booking"],
                 condition=Q(status="pending"),
                 name="one_pending_payment_intent_per_booking",
+            ),
+            # `booking IS NULL` for every wallet_topup row, so this
+            # stays silently inert for them (Postgres never treats two
+            # NULLs as conflicting in a unique index) — no
+            # "one pending top-up at a time" rule is needed or implied.
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        intent_type="booking_payment",
+                        booking__isnull=False,
+                        wallet_business__isnull=True,
+                    )
+                    | Q(
+                        intent_type="wallet_topup",
+                        booking__isnull=True,
+                        wallet_business__isnull=False,
+                    )
+                ),
+                name="payment_intent_booking_xor_wallet_business",
             ),
         ]
 

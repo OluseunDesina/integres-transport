@@ -15,4 +15,14 @@ urlpatterns = [
         views.ExpireSeatHoldsView.as_view(),
         name="internal-task-expire-seat-holds",
     ),
+    path(
+        "internal/tasks/notification-compliance-sweep/",
+        views.NotificationComplianceSweepView.as_view(),
+        name="internal-task-notification-compliance-sweep",
+    ),
+    path(
+        "internal/tasks/notification-ticket-reminder-sweep/",
+        views.NotificationTicketReminderSweepView.as_view(),
+        name="internal-task-notification-ticket-reminder-sweep",
+    ),
 ]

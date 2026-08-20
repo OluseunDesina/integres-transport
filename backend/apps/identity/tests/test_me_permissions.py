@@ -61,6 +61,7 @@ def test_staff_client_staff_permissions_array_is_limited() -> None:
         "fleet.view",
         "ledger.view",
         "network.view",
+        "notifications.view",
         "payments.view",
         "scheduling.view",
         "seating.view",

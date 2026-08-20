@@ -18,8 +18,10 @@ from apps.scheduling.tests.factories import TripFactory
 
 from ..models import Seat, SeatReservation
 from ..services import (
+    SeatsInUse,
     SeatUnavailable,
     create_reservation,
+    generate_seat_layout,
     get_availability,
     replace_vehicle_type_seats,
 )
@@ -213,12 +215,13 @@ def test_client_staff_can_replace_a_vehicle_types_seats() -> None:
 
     response = _auth_client(staff).put(
         reverse("vehicle-type-seats", kwargs={"pk": str(vehicle_type.id)}),
-        {"seat_numbers": ["1A", "1B"]},
+        {"seats": [{"seat_number": "1A", "row": 1, "column": 1}, {"seat_number": "1B"}]},
         format="json",
     )
 
     assert response.status_code == status.HTTP_200_OK
     assert [row["seat_number"] for row in response.data] == ["1A", "1B"]
+    assert [row["row"] for row in response.data] == [1, None]
     entry = AuditLog.objects.get(action="vehicle_type.seats_updated")
     assert entry.client_id == client.id
 
@@ -231,7 +234,7 @@ def test_replacing_seats_rejects_duplicates() -> None:
 
     response = _auth_client(staff).put(
         reverse("vehicle-type-seats", kwargs={"pk": str(vehicle_type.id)}),
-        {"seat_numbers": ["1A", "1A"]},
+        {"seats": [{"seat_number": "1A"}, {"seat_number": "1A"}]},
         format="json",
     )
 
@@ -246,7 +249,7 @@ def test_replacing_seats_rejects_exceeding_capacity() -> None:
 
     response = _auth_client(staff).put(
         reverse("vehicle-type-seats", kwargs={"pk": str(vehicle_type.id)}),
-        {"seat_numbers": ["1A", "1B"]},
+        {"seats": [{"seat_number": "1A"}, {"seat_number": "1B"}]},
         format="json",
     )
 
@@ -262,7 +265,7 @@ def test_replacing_seats_replaces_the_previous_set_not_appends() -> None:
 
     response = _auth_client(staff).put(
         reverse("vehicle-type-seats", kwargs={"pk": str(vehicle_type.id)}),
-        {"seat_numbers": ["1A"]},
+        {"seats": [{"seat_number": "1A"}]},
         format="json",
     )
 
@@ -291,7 +294,9 @@ def test_replace_vehicle_type_seats_works_under_platform_staff_bypass() -> None:
 
     with platform_staff_bypass():
         replace_vehicle_type_seats(
-            vehicle_type=vehicle_type, seat_numbers=["1A"], updated_by=staff
+            vehicle_type=vehicle_type,
+            seats=[{"seat_number": "1A", "row": None, "column": None}],
+            updated_by=staff,
         )
 
     with tenant_context(str(client.id)):
@@ -310,7 +315,7 @@ def test_staff_role_user_can_list_but_not_replace_seats() -> None:
     list_response = api.get(reverse("vehicle-type-seats", kwargs={"pk": str(vehicle_type.id)}))
     put_response = api.put(
         reverse("vehicle-type-seats", kwargs={"pk": str(vehicle_type.id)}),
-        {"seat_numbers": ["1A"]},
+        {"seats": [{"seat_number": "1A"}]},
         format="json",
     )
 
@@ -328,6 +333,175 @@ def test_passenger_cannot_list_seats() -> None:
         reverse("vehicle-type-seats", kwargs={"pk": str(vehicle_type.id)})
     )
     assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+# --- generate_seat_layout() (service-level) --------------------------------
+
+
+def test_generate_seat_layout_computes_row_letter_numbering_with_no_aisle() -> None:
+    layout = generate_seat_layout(
+        rows=2, columns=3, aisle_after_column=None, numbering_scheme="row_letter"
+    )
+    assert layout == [
+        {"seat_number": "1A", "row": 1, "column": 1},
+        {"seat_number": "1B", "row": 1, "column": 2},
+        {"seat_number": "1C", "row": 1, "column": 3},
+        {"seat_number": "2A", "row": 2, "column": 1},
+        {"seat_number": "2B", "row": 2, "column": 2},
+        {"seat_number": "2C", "row": 2, "column": 3},
+    ]
+
+
+def test_generate_seat_layout_with_an_aisle_creates_a_column_gap_but_removes_no_seat() -> None:
+    """aisle_after_column models a real physical aisle: the stored
+    `column` integer jumps by 2 across it (so a renderer can detect
+    where to draw the gap), but the row's real seat count is unchanged
+    (docs/specs/8-seat-map-generation.md) — still `rows * columns`
+    seats, still contiguous A/B/C/D seat numbers."""
+    layout = generate_seat_layout(
+        rows=1, columns=4, aisle_after_column=2, numbering_scheme="row_letter"
+    )
+    assert [seat["seat_number"] for seat in layout] == ["1A", "1B", "1C", "1D"]
+    assert [seat["column"] for seat in layout] == [1, 2, 4, 5]
+    assert len(layout) == 4
+
+
+# --- VehicleTypeSeatsGenerateView endpoint ----------------------------------
+
+
+def test_generate_endpoint_creates_seats_with_row_and_column() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        vehicle_type = VehicleTypeFactory(client=client, capacity=6)
+
+    response = _auth_client(staff).post(
+        reverse("vehicle-type-seats-generate", kwargs={"pk": str(vehicle_type.id)}),
+        {"rows": 2, "columns": 3},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["seat_number"] for row in response.data] == [
+        "1A",
+        "1B",
+        "1C",
+        "2A",
+        "2B",
+        "2C",
+    ]
+    assert [row["row"] for row in response.data] == [1, 1, 1, 2, 2, 2]
+    entry = AuditLog.objects.get(action="vehicle_type.seats_updated")
+    assert entry.client_id == client.id
+
+
+def test_generate_endpoint_rejects_capacity_exceeded() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        vehicle_type = VehicleTypeFactory(client=client, capacity=4)
+
+    response = _auth_client(staff).post(
+        reverse("vehicle-type-seats-generate", kwargs={"pk": str(vehicle_type.id)}),
+        {"rows": 2, "columns": 3},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_generate_endpoint_rejects_an_aisle_at_or_past_the_last_column() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        vehicle_type = VehicleTypeFactory(client=client, capacity=8)
+
+    response = _auth_client(staff).post(
+        reverse("vehicle-type-seats-generate", kwargs={"pk": str(vehicle_type.id)}),
+        {"rows": 2, "columns": 4, "aisle_after_column": 4},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_generate_endpoint_requires_seating_manage_permission() -> None:
+    client = ClientFactory()
+    roles = create_default_roles(client)
+    staff_role_user = ClientStaffUserFactory(client=client, role=roles["Staff"])
+    with tenant_context(str(client.id)):
+        vehicle_type = VehicleTypeFactory(client=client, capacity=4)
+
+    response = _auth_client(staff_role_user).post(
+        reverse("vehicle-type-seats-generate", kwargs={"pk": str(vehicle_type.id)}),
+        {"rows": 2, "columns": 2},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_regenerating_seats_with_active_reservations_returns_409_not_500() -> None:
+    """Regression test for the real, previously-unhandled bug this spec
+    fixes: `Seat.all_objects.filter(...).delete()` raised a raw
+    `ProtectedError` (surfacing as a 500) when a Seat being replaced
+    still had a `SeatReservation` against it
+    (docs/specs/8-seat-map-generation.md's "Edge cases" §1)."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client, capacity=2)
+    with tenant_context(str(client.id)):
+        seat = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number="1A")
+        booking = BookingFactory(client=client, trip=trip, business=trip.business)
+        create_reservation(
+            trip=trip,
+            seat=seat,
+            from_stop=stop_a,
+            to_stop=stop_b,
+            booking=booking,
+            hold_minutes=15,
+            **fare_pricing_for(client=client, route=trip.route, business=trip.business),
+        )
+
+    response = _auth_client(staff).post(
+        reverse("vehicle-type-seats-generate", kwargs={"pk": str(vehicle_type.id)}),
+        {"rows": 1, "columns": 2},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+    assert "1 seat(s)" in response.data["detail"]
+    with tenant_context(str(client.id)):
+        remaining = list(Seat.objects.filter(vehicle_type=vehicle_type))
+    assert [remaining_seat.seat_number for remaining_seat in remaining] == ["1A"]
+
+
+def test_replace_vehicle_type_seats_raises_seats_in_use_at_the_service_layer() -> None:
+    """Same regression as above, called directly at the service layer —
+    proves the SeatsInUse contract independent of the view's exception
+    mapping."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client, capacity=1)
+    with tenant_context(str(client.id)):
+        seat = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number="1A")
+        booking = BookingFactory(client=client, trip=trip, business=trip.business)
+        create_reservation(
+            trip=trip,
+            seat=seat,
+            from_stop=stop_a,
+            to_stop=stop_b,
+            booking=booking,
+            hold_minutes=15,
+            **fare_pricing_for(client=client, route=trip.route, business=trip.business),
+        )
+
+        with pytest.raises(SeatsInUse):
+            replace_vehicle_type_seats(
+                vehicle_type=vehicle_type,
+                seats=[{"seat_number": "1B", "row": None, "column": None}],
+                updated_by=staff,
+            )
 
 
 # --- TripAvailabilityView endpoint -----------------------------------------

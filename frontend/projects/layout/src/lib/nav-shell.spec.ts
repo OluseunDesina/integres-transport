@@ -3,6 +3,7 @@ import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Router, provideRouter } from '@angular/router';
+import { API_CLIENT } from '@api-client';
 import { AuthApiService, AuthStore } from '@auth';
 import type { AuthUser } from '@auth';
 import { of } from 'rxjs';
@@ -63,6 +64,13 @@ async function setup(matches = false): Promise<{
   authApi: jasmine.SpyObj<AuthApiService>;
 }> {
   const authApi = jasmine.createSpyObj<AuthApiService>('AuthApiService', ['login', 'logout']);
+  // NavShell now always renders NotificationBell in its header, which
+  // fetches on init — a resolved-empty GET keeps every existing
+  // assertion in this file meaning what it already meant.
+  const apiClient = {
+    GET: jasmine.createSpy('GET').and.resolveTo({ data: { count: 0, results: [] } }),
+    POST: jasmine.createSpy('POST'),
+  };
 
   await TestBed.configureTestingModule({
     imports: [HostComponent],
@@ -70,6 +78,7 @@ async function setup(matches = false): Promise<{
       provideRouter([{ path: 'home', children: [] }]),
       { provide: AuthApiService, useValue: authApi },
       { provide: BreakpointObserver, useValue: fakeBreakpointObserver(matches) },
+      { provide: API_CLIENT, useValue: apiClient },
     ],
   }).compileComponents();
 
@@ -83,9 +92,22 @@ function findButtonByText(fixture: ComponentFixture<HostComponent>, text: string
     .find((el) => (el.nativeElement.textContent as string).includes(text));
 }
 
+// NotificationBell's own trigger also carries aria-haspopup="menu" —
+// distinguish by its fixed "Notifications" aria-label, since the
+// profile trigger's own aria-label varies (null when expanded, the
+// user's email when collapsed).
+function profileTrigger(fixture: ComponentFixture<HostComponent>) {
+  const trigger = fixture.debugElement
+    .queryAll(By.css('[aria-haspopup="menu"]'))
+    .find((el) => el.nativeElement.getAttribute('aria-label') !== 'Notifications');
+  if (!trigger) {
+    throw new Error('Profile trigger not found');
+  }
+  return trigger;
+}
+
 function openProfileMenu(fixture: ComponentFixture<HostComponent>): void {
-  const trigger = fixture.debugElement.query(By.css('[aria-haspopup="menu"]'));
-  trigger.nativeElement.click();
+  profileTrigger(fixture).nativeElement.click();
   fixture.detectChanges();
 }
 
@@ -204,7 +226,7 @@ describe('NavShell', () => {
       });
 
       it('opens on trigger click and sets aria-expanded', () => {
-        const trigger = fixture.debugElement.query(By.css('[aria-haspopup="menu"]'));
+        const trigger = profileTrigger(fixture);
         expect(trigger.nativeElement.getAttribute('aria-expanded')).toBe('false');
 
         openProfileMenu(fixture);
@@ -222,8 +244,7 @@ describe('NavShell', () => {
         fixture.detectChanges();
 
         expect(fixture.debugElement.query(By.css('[role="menu"]'))).toBeNull();
-        const trigger = fixture.debugElement.query(By.css('[aria-haspopup="menu"]'));
-        expect(document.activeElement).toBe(trigger.nativeElement);
+        expect(document.activeElement).toBe(profileTrigger(fixture).nativeElement);
       });
 
       it('closes when clicking outside the menu', () => {
@@ -321,7 +342,7 @@ describe('NavShell', () => {
       // Sign out is no longer independently reachable without opening
       // the menu first — the collapsed trigger's aria-label carries the
       // email (there's no visible text to fall back on).
-      const trigger = fixture.debugElement.query(By.css('[aria-haspopup="menu"]'));
+      const trigger = profileTrigger(fixture);
       expect(trigger.nativeElement.getAttribute('aria-label')).toBe('owner@example.com');
 
       openProfileMenu(fixture);

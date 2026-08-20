@@ -1,11 +1,13 @@
 """Fat-service layer for Seat inventory and seat reservations — see
 docs/specs/4-fares-seating-booking.md §4 and docs/adr/0004."""
 
+import string
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any, TypedDict
 
 from django.db import IntegrityError, OperationalError, transaction
+from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from psycopg.types.range import Range
 
@@ -28,18 +30,33 @@ class SeatUnavailable(Exception):
     constraint exists to close."""
 
 
+class SeatsInUse(Exception):
+    """Raised when replacing a VehicleType's seats would delete a Seat
+    that still has a SeatReservation against it (held, confirmed,
+    expired, or released — `on_delete=PROTECT` doesn't distinguish
+    status). Mapped to a 409 by the view layer — see
+    docs/specs/8-seat-map-generation.md's "Edge cases" §1."""
+
+
 class SeatAvailability(TypedDict):
     seat: Seat
     is_available: bool
 
 
+class SeatSpec(TypedDict):
+    seat_number: str
+    row: int | None
+    column: int | None
+
+
 def replace_vehicle_type_seats(
-    *, vehicle_type: VehicleType, seat_numbers: list[str], updated_by: User
+    *, vehicle_type: VehicleType, seats: list[SeatSpec], updated_by: User
 ) -> list[Seat]:
     """Bulk replace — mirrors apps.network.services.set_route_stops's
-    hard-delete-and-recreate shape. `seat_numbers` is already validated
-    non-duplicate and within vehicle_type.capacity by the serializer
-    (mirroring RouteStopsUpdateSerializer's own validate_stops).
+    hard-delete-and-recreate shape. `seats` is already validated
+    non-duplicate (by seat_number) and within vehicle_type.capacity by
+    the serializer (mirroring RouteStopsUpdateSerializer's own
+    validate_stops).
 
     Deletes via `all_objects`, not `.objects`, for the exact reason
     `set_route_stops`'s own docstring documents: `apps.core.rls.platform_staff_bypass()`
@@ -53,22 +70,72 @@ def replace_vehicle_type_seats(
     inspection, not live, since `seed_e2e_users`' own call site already
     guards around it (skips reseeding a VehicleType that already has
     Seats, to avoid cascading away real SeatReservations) — that guard
-    stays regardless of this fix, it protects a different concern."""
+    stays regardless of this fix, it protects a different concern.
+
+    A Seat with a real SeatReservation against it can't be deleted
+    (`SeatReservation.seat` is `on_delete=PROTECT`) — raises `SeatsInUse`
+    instead of letting a raw `ProtectedError` surface as an unhandled
+    500 (docs/specs/8-seat-map-generation.md's "Edge cases" §1)."""
     with transaction.atomic():
-        Seat.all_objects.filter(vehicle_type=vehicle_type).delete()
+        try:
+            Seat.all_objects.filter(vehicle_type=vehicle_type).delete()
+        except ProtectedError as exc:
+            in_use_count = len(exc.protected_objects)
+            raise SeatsInUse(
+                "This vehicle type's seats can't be regenerated: "
+                f"{in_use_count} seat(s) have reservations against them"
+            ) from exc
         created = [
             Seat.objects.create(
-                client=vehicle_type.client, vehicle_type=vehicle_type, seat_number=seat_number
+                client=vehicle_type.client,
+                vehicle_type=vehicle_type,
+                seat_number=seat["seat_number"],
+                row=seat["row"],
+                column=seat["column"],
             )
-            for seat_number in seat_numbers
+            for seat in seats
         ]
     record_audit_event(
         actor=updated_by,
         action="vehicle_type.seats_updated",
         target=vehicle_type,
-        seat_numbers=seat_numbers,
+        seat_numbers=[seat["seat_number"] for seat in seats],
     )
     return created
+
+
+def generate_seat_layout(
+    *,
+    rows: int,
+    columns: int,
+    aisle_after_column: int | None,
+    numbering_scheme: str,
+) -> list[SeatSpec]:
+    """Computes a full rows x columns seat layout —
+    docs/specs/8-seat-map-generation.md. `aisle_after_column` models a
+    real physical aisle: it consumes one column *slot* (so the stored
+    `column` integer jumps by 2 across it, e.g. 1,2,4,5) without
+    reducing the row's real seat count — `rows * columns` is still the
+    exact number of seats produced, capacity validation is unaffected.
+    `seat_number` numbers seats sequentially by position (still
+    contiguous A,B,C,D...); only the persisted `column` integer carries
+    the gap, which is what lets a renderer detect where to draw the
+    aisle. `numbering_scheme="row_letter"` is the only scheme v1
+    builds — validated by the serializer, not re-checked here."""
+    column_letters = string.ascii_uppercase
+    layout: list[SeatSpec] = []
+    for row in range(1, rows + 1):
+        column = 0
+        for seat_index in range(1, columns + 1):
+            column += 1
+            if aisle_after_column is not None and column == aisle_after_column + 1:
+                column += 1
+            layout.append(
+                SeatSpec(
+                    seat_number=f"{row}{column_letters[seat_index - 1]}", row=row, column=column
+                )
+            )
+    return layout
 
 
 def _segment_sequence_range(*, route_id: Any, from_stop: Stop, to_stop: Stop) -> tuple[int, int]:

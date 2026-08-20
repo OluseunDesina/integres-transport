@@ -18,6 +18,7 @@ import { Icon, type IconName } from '@shared-ui';
 import { map } from 'rxjs';
 
 import { NavCollapseStore } from './nav-collapse-store';
+import { NotificationBell, type NotificationRouteResolver } from './notification-bell';
 
 export interface NavItem {
   label: string;
@@ -76,19 +77,20 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
   selector: 'app-nav-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex min-h-screen bg-slate-50' },
-  imports: [RouterLink, RouterLinkActive, RouterOutlet, Icon],
+  imports: [RouterLink, RouterLinkActive, RouterOutlet, Icon, NotificationBell],
   template: `
     <aside
       class="flex shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] duration-150 motion-reduce:transition-none"
       [class.w-64]="!effectiveCollapsed()"
       [class.w-16]="effectiveCollapsed()"
     >
-      <div class="flex h-14 items-center border-b border-slate-200 px-3">
+      <div class="flex h-14 items-center justify-between gap-2 border-b border-slate-200 px-3">
         @if (!effectiveCollapsed()) {
           <span class="truncate text-sm font-semibold text-slate-900">{{ appName() }}</span>
         } @else {
           <span class="sr-only">{{ appName() }}</span>
         }
+        <app-notification-bell align="left" [resolveRoute]="resolveNotificationRoute()" />
       </div>
 
       <nav
@@ -225,6 +227,12 @@ export class NavShell {
   readonly businesses = input<readonly BusinessSwitcherItem[]>([]);
   readonly activeBusinessId = input<string | null>(null);
   readonly businessSelected = output<string>();
+  // Passed straight through to NotificationBell — NavShell has no
+  // content-projection slot, so it renders the bell itself in its own
+  // header rather than each caller (client-admin-app/super-admin-app)
+  // duplicating that placement. Defaults to NotificationBell's own
+  // "mark read, never navigate" behavior when a caller doesn't pass one.
+  readonly resolveNotificationRoute = input<NotificationRouteResolver>(() => null);
 
   protected readonly authStore = inject(AuthStore);
   protected readonly collapseStore = inject(NavCollapseStore);

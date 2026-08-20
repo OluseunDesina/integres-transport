@@ -52,28 +52,32 @@
           class="flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-4"
         >
           @for (seatRow of seatRows(); track seatRow.row) {
-            <div class="flex flex-wrap gap-2">
-              @for (entry of seatRow.seats; track entry.seat.id) {
-                <button
-                  type="button"
-                  [disabled]="!entry.is_available || fareError() !== null"
-                  [attr.aria-pressed]="isSelected(entry.seat.id)"
-                  [attr.aria-label]="seatLabel(entry)"
-                  (click)="toggleSeat(entry)"
-                  class="inline-flex min-h-11 min-w-11 items-center justify-center rounded border px-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
-                  [class.border-slate-900]="isSelected(entry.seat.id)"
-                  [class.bg-slate-900]="isSelected(entry.seat.id)"
-                  [class.text-white]="isSelected(entry.seat.id)"
-                  [class.border-slate-300]="entry.is_available && !isSelected(entry.seat.id)"
-                  [class.bg-white]="entry.is_available && !isSelected(entry.seat.id)"
-                  [class.text-slate-900]="entry.is_available && !isSelected(entry.seat.id)"
-                  [class.border-slate-200]="!entry.is_available"
-                  [class.bg-slate-100]="!entry.is_available"
-                  [class.text-slate-400]="!entry.is_available"
-                  [class.cursor-not-allowed]="!entry.is_available"
-                >
-                  {{ entry.seat.seat_number }}
-                </button>
+            <div class="flex flex-wrap items-center gap-6">
+              @for (segment of seatRow.segments; track $index) {
+                <div class="flex flex-wrap gap-2">
+                  @for (entry of segment; track entry.seat.id) {
+                    <button
+                      type="button"
+                      [disabled]="!entry.is_available || fareError() !== null"
+                      [attr.aria-pressed]="isSelected(entry.seat.id)"
+                      [attr.aria-label]="seatLabel(entry)"
+                      (click)="toggleSeat(entry)"
+                      class="inline-flex min-h-11 min-w-11 items-center justify-center rounded border px-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+                      [class.border-slate-900]="isSelected(entry.seat.id)"
+                      [class.bg-slate-900]="isSelected(entry.seat.id)"
+                      [class.text-white]="isSelected(entry.seat.id)"
+                      [class.border-slate-300]="entry.is_available && !isSelected(entry.seat.id)"
+                      [class.bg-white]="entry.is_available && !isSelected(entry.seat.id)"
+                      [class.text-slate-900]="entry.is_available && !isSelected(entry.seat.id)"
+                      [class.border-slate-200]="!entry.is_available"
+                      [class.bg-slate-100]="!entry.is_available"
+                      [class.text-slate-400]="!entry.is_available"
+                      [class.cursor-not-allowed]="!entry.is_available"
+                    >
+                      {{ entry.seat.seat_number }}
+                    </button>
+                  }
+                </div>
               }
             </div>
           }

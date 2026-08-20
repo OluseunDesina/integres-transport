@@ -1,7 +1,23 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import { NavShell, type NavItem } from '@layout';
+import { NavShell, type NavItem, type NotificationRouteResolver } from '@layout';
 
 import { SelectedBusinessStore } from './shared/data/store/selected-business.store';
+
+// docs/specs/9-notifications.md: this app's own recipients are
+// Driver/Vehicle compliance-expiry notifications — both routes already
+// exist (fleet.manage-gated, same as navigating there any other way).
+// Anything else (this app has no other trigger type today) falls
+// through to "mark read, don't navigate."
+const resolveNotificationRoute: NotificationRouteResolver = (type, id) => {
+  switch (type) {
+    case 'Driver':
+      return ['/drivers', id, 'edit'];
+    case 'Vehicle':
+      return ['/vehicles', id, 'edit'];
+    default:
+      return null;
+  }
+};
 
 @Component({
   selector: 'app-shell',
@@ -13,11 +29,13 @@ import { SelectedBusinessStore } from './shared/data/store/selected-business.sto
       [navItems]="navItems"
       [businesses]="businesses()"
       [activeBusinessId]="selectedBusinessStore.selectedBusinessId()"
+      [resolveNotificationRoute]="resolveNotificationRoute"
       (businessSelected)="onBusinessSelected($event)"
     />
   `,
 })
 export class AppShell {
+  protected readonly resolveNotificationRoute = resolveNotificationRoute;
   protected readonly selectedBusinessStore = inject(SelectedBusinessStore);
 
   protected readonly businesses = computed(() =>
@@ -45,6 +63,8 @@ export class AppShell {
     },
     { label: 'Trips', path: '/trips', icon: 'clock', permissions: ['scheduling.view'] },
     { label: 'Bookings', path: '/bookings', icon: 'document-check', permissions: ['booking.view'] },
+    { label: 'Fares', path: '/fares', icon: 'tag', permissions: ['fares.view'] },
+    { label: 'Tap & Go', path: '/tap-go', icon: 'bolt', permissions: ['tapngo.view'] },
     { label: 'Payments', path: '/payments', icon: 'banknotes', permissions: ['payments.view'] },
     { label: 'Ledger', path: '/ledger', icon: 'book-open', permissions: ['ledger.view'] },
     {

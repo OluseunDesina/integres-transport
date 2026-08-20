@@ -59,4 +59,22 @@ describe('Icon', () => {
     const path = fixture.debugElement.query(By.css('path'));
     expect(path.nativeElement.getAttribute('d')).toContain('M2.25 8.25h19.5');
   });
+
+  it('renders the tag icon added for the Fares nav item', async () => {
+    await render('tag');
+    const path = fixture.debugElement.query(By.css('path'));
+    expect(path.nativeElement.getAttribute('d')).toContain('M9.568 3H5.25');
+  });
+
+  it('renders the bolt icon added for the Tap & Go nav item', async () => {
+    await render('bolt');
+    const path = fixture.debugElement.query(By.css('path'));
+    expect(path.nativeElement.getAttribute('d')).toContain('M3.75 13.5');
+  });
+
+  it('renders the bell icon added for the notification bell', async () => {
+    await render('bell');
+    const path = fixture.debugElement.query(By.css('path'));
+    expect(path.nativeElement.getAttribute('d')).toContain('M14.857 17.082');
+  });
 });

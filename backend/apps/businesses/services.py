@@ -10,6 +10,7 @@ from django.utils import timezone
 from apps.clients.models import Client
 from apps.core.audit import record_audit_event
 from apps.identity.models import User
+from apps.notifications.services import notify_kyb_submitted
 
 from .models import Business, KybDocument
 
@@ -90,6 +91,9 @@ def submit_kyb_document(
         action="business.kyb_document_submitted",
         target=document,
         document_type=document_type,
+    )
+    notify_kyb_submitted(
+        client_id=business.client_id, business_name=business.name, document_id=document.id
     )
     return document
 

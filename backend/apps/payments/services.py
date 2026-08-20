@@ -30,12 +30,13 @@ from apps.core.idempotency import IdempotencyKeyConflict, hash_request
 from apps.core.models import IdempotencyKey
 from apps.core.rls import platform_staff_bypass
 from apps.identity.models import User
-from apps.ledger.models import JournalEntry, SettlementRun
+from apps.ledger.models import JournalEntry, LedgerAccount, SettlementRun
 from apps.ledger.services import (
     JournalLineInput,
     claim_settlement_run,
     get_or_create_business_clearing_account,
     get_or_create_commission_account,
+    get_or_create_psp_suspense_account,
     get_or_create_wallet_account,
     post_journal_entry,
 )
@@ -66,6 +67,13 @@ class PaymentAlreadyPending(Exception):
 class BookingNotPayable(Exception):
     """`booking.status != PENDING_PAYMENT` at `initiate_payment()` call
     time — mapped to 409."""
+
+
+class InsufficientWalletBalance(Exception):
+    """The passenger's wallet balance is less than the booking's
+    `total_amount` — mapped to 409. Checked under a row lock on the
+    wallet's `LedgerAccount` (see `pay_booking_from_wallet`), never a
+    stale pre-check."""
 
 
 class PayoutDestinationNotConfigured(Exception):
@@ -188,6 +196,177 @@ def initiate_payment(*, booking: Booking, passenger: User, idempotency_key: str)
 
     record_audit_event(
         actor=passenger, action="payment.initiated", target=intent, amount=str(intent.amount)
+    )
+    return intent
+
+
+def initiate_wallet_topup(
+    *, business: Business, passenger: User, amount: Decimal, idempotency_key: str
+) -> PaymentIntent:
+    """Phase 7 — docs/specs/7-passenger-wallet.md. Mirrors
+    `initiate_payment()`'s exact idempotency/Paystack-call-before-write
+    shape, keyed on `(business, passenger, amount)` instead of a
+    booking id — a retry under the same key with a *different* amount
+    is a genuinely different request, same as a different booking
+    would be for `initiate_payment()`.
+
+    No `PaymentAlreadyPending`-style precondition: a top-up isn't
+    fighting over a single scarce resource the way a booking's seat
+    hold is, so multiple concurrent top-ups for the same passenger are
+    simply allowed (each becomes its own `PaymentIntent`, its own
+    Paystack checkout)."""
+    request_hash = hash_request(
+        {"business_id": str(business.id), "passenger": str(passenger.id), "amount": str(amount)}
+    )
+    client_id = str(business.client_id)
+
+    existing = IdempotencyKey.objects.filter(
+        client_id=client_id, endpoint=_IDEMPOTENCY_ENDPOINT, key=idempotency_key
+    ).first()
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise IdempotencyKeyConflict(
+                "This Idempotency-Key was already used for a different request."
+            )
+        return _payment_intent_from_idempotency_record(existing)
+
+    if not PaystackAccount.objects.filter(business=business, is_active=True).exists():
+        raise PspNotConfigured("This Business has no active Paystack account configured.")
+
+    reference = _generate_psp_reference()
+    with transaction.atomic():
+        # Same "call Paystack before writing any row" discipline as
+        # initiate_payment() — a PSP failure here leaves nothing to
+        # roll back, so a retry under the same Idempotency-Key is clean.
+        init_data = initialize_transaction(
+            email=passenger.email,
+            amount=amount,
+            currency=business.currency,
+            reference=reference,
+            callback_url=f"{settings.CUSTOMER_APP_URL}/wallet",
+        )
+        intent = PaymentIntent.objects.create(
+            client=business.client,
+            intent_type=PaymentIntent.IntentType.WALLET_TOPUP,
+            wallet_business=business,
+            business=business,
+            passenger=passenger,
+            amount=amount,
+            currency=business.currency,
+            status=PaymentIntent.Status.PENDING,
+            psp_provider="paystack",
+            psp_reference=reference,
+            psp_authorization_url=init_data.get("authorization_url", ""),
+        )
+        IdempotencyKey.objects.create(
+            client_id=client_id,
+            endpoint=_IDEMPOTENCY_ENDPOINT,
+            key=idempotency_key,
+            request_hash=request_hash,
+            response_status=201,
+            response_body={"payment_intent_id": str(intent.id)},
+        )
+
+    record_audit_event(
+        actor=passenger, action="payment.topup_initiated", target=intent, amount=str(intent.amount)
+    )
+    return intent
+
+
+def pay_booking_from_wallet(*, booking: Booking, passenger: User) -> PaymentIntent:
+    """Phase 7 — docs/specs/7-passenger-wallet.md. Pays a booking
+    entirely from the passenger's existing wallet balance: no Paystack
+    round-trip, no webhook, the `PaymentIntent` is created already
+    `succeeded`. Reuses the exact 3-line entry shape
+    `_apply_booking_payment` writes for a card payment (wallet debit,
+    clearing credit, commission credit) — this is the one path where
+    debiting the wallet account is actually correct, since real
+    balance is being spent.
+
+    Locks the `Booking` row *before* checking the wallet balance, and
+    holds that lock for the whole transaction — this is what makes two
+    concurrent wallet-pay attempts for the *same* booking safe (the
+    second sees it already `paid` and fails cleanly, § edge case in the
+    spec) and what makes racing against a Paystack webhook for the same
+    booking safe (`mark_booking_paid()`'s own `select_for_update()`
+    call below re-locks the same, already-held row — whichever call
+    reaches it first wins, matching `_apply_booking_payment`'s own
+    existing race handling exactly, just now reachable from a second
+    direction). Because this function holds the booking lock
+    continuously from before the wallet-balance check through the
+    `mark_booking_paid()` call, that call's own status check can never
+    see anything but `PENDING_PAYMENT` here — unlike the webhook path,
+    there is no `requires_manual_refund` branch to handle."""
+    if booking.passenger_id != passenger.id:
+        raise BookingNotPayable("You cannot pay for another passenger's booking.")
+
+    business = booking.business
+    with transaction.atomic():
+        locked_booking = Booking.all_objects.select_for_update().get(pk=booking.pk)
+        if locked_booking.status != Booking.Status.PENDING_PAYMENT:
+            raise BookingNotPayable("This booking cannot be paid for in its current state.")
+
+        wallet_account = get_or_create_wallet_account(
+            client=business.client, business=business, passenger=passenger
+        )
+        wallet_account = LedgerAccount.all_objects.select_for_update().get(pk=wallet_account.pk)
+        balance = wallet_account.cached_balance or Decimal("0.00")
+        if balance < locked_booking.total_amount:
+            raise InsufficientWalletBalance(
+                "Your wallet balance is not enough to pay for this booking."
+            )
+
+        business_share, commission_share = _split_commission(locked_booking.total_amount)
+        clearing_account = get_or_create_business_clearing_account(
+            client=business.client, business=business
+        )
+        commission_account = get_or_create_commission_account()
+        entry = post_journal_entry(
+            business=business,
+            entry_type=JournalEntry.EntryType.PAYMENT,
+            lines=[
+                JournalLineInput(
+                    account=wallet_account,
+                    amount=-locked_booking.total_amount,
+                    currency=locked_booking.currency,
+                ),
+                JournalLineInput(
+                    account=clearing_account,
+                    amount=business_share,
+                    currency=locked_booking.currency,
+                ),
+                JournalLineInput(
+                    account=commission_account,
+                    amount=commission_share,
+                    currency=locked_booking.currency,
+                ),
+            ],
+            external_reference=f"wallet-{locked_booking.id}",
+            memo=f"Wallet payment for booking {locked_booking.id}",
+        )
+        intent = PaymentIntent.objects.create(
+            client=locked_booking.client,
+            intent_type=PaymentIntent.IntentType.BOOKING_PAYMENT,
+            booking=locked_booking,
+            business=business,
+            passenger=passenger,
+            amount=locked_booking.total_amount,
+            currency=locked_booking.currency,
+            status=PaymentIntent.Status.SUCCEEDED,
+            psp_provider="wallet",
+            psp_reference=f"wallet-{locked_booking.id}-{uuid.uuid4().hex}",
+            succeeded_at=timezone.now(),
+            journal_entry=entry,
+        )
+        # did_transition is always True here — this function has held
+        # the booking's row lock continuously since before its own
+        # PENDING_PAYMENT check above, so nothing else could have
+        # raced ahead of it (see this function's own docstring).
+        _booking, did_transition = mark_booking_paid(booking=locked_booking)
+        assert did_transition
+
+    record_audit_event(
+        actor=passenger, action="payment.wallet_paid", target=intent, amount=str(intent.amount)
     )
     return intent
 
@@ -359,11 +538,101 @@ def _dispatch_webhook_event(*, event: WebhookEvent, reference: str) -> None:
         )
 
 
+def _apply_booking_payment(intent: PaymentIntent) -> None:
+    """A fresh Paystack card charge for a booking. Debits `psp_suspense`
+    (money the PSP has acknowledged but this platform hasn't yet
+    reconciled/settled — exactly that account type's documented
+    purpose, first written to here), not the passenger's wallet: unlike
+    `pay_booking_from_wallet()`, no real wallet balance is ever spent
+    on this path, so touching that account here would corrupt it into
+    something other than a real spendable balance the moment top-ups
+    exist (Phase 7's own reason for this change — see
+    docs/specs/7-passenger-wallet.md's "Context" section)."""
+    business = intent.business
+    business_share, commission_share = _split_commission(intent.amount)
+    psp_suspense_account = get_or_create_psp_suspense_account(
+        client=business.client, business=business, provider=intent.psp_provider
+    )
+    clearing_account = get_or_create_business_clearing_account(
+        client=business.client, business=business
+    )
+    commission_account = get_or_create_commission_account()
+    entry = post_journal_entry(
+        business=business,
+        entry_type=JournalEntry.EntryType.PAYMENT,
+        lines=[
+            JournalLineInput(
+                account=psp_suspense_account, amount=-intent.amount, currency=intent.currency
+            ),
+            JournalLineInput(
+                account=clearing_account, amount=business_share, currency=intent.currency
+            ),
+            JournalLineInput(
+                account=commission_account, amount=commission_share, currency=intent.currency
+            ),
+        ],
+        external_reference=intent.psp_reference,
+        memo=f"Payment for booking {intent.booking_id}",
+    )
+    intent.status = PaymentIntent.Status.SUCCEEDED
+    intent.succeeded_at = timezone.now()
+    intent.journal_entry = entry
+    intent.save(update_fields=["status", "succeeded_at", "journal_entry"])
+
+    assert intent.booking is not None
+    _booking, did_transition = mark_booking_paid(booking=intent.booking)
+    if not did_transition:
+        # Either edge case 6's residual case (the booking's seat hold
+        # had already expired/been cancelled by the time this webhook
+        # landed) or, as of Phase 7, a different PaymentIntent
+        # (`pay_booking_from_wallet`) already paid this booking first —
+        # `mark_booking_paid`'s own `did_transition` flag is what tells
+        # these two apart from "this payment is what paid it", both
+        # otherwise looking identical as `booking.status == PAID`. Real
+        # money moved either way (ADR-0006's own "keep our own record
+        # regardless of what the PSP reports"); flagged for manual
+        # attention rather than silently dropped.
+        intent.requires_manual_refund = True
+        intent.save(update_fields=["requires_manual_refund"])
+
+
+def _apply_wallet_topup(intent: PaymentIntent) -> None:
+    """A successful Paystack charge for a standalone wallet top-up —
+    Phase 7. Two-line entry: wallet credit, `psp_suspense` debit. No
+    `Booking` involvement at all."""
+    business = intent.wallet_business
+    assert business is not None
+    wallet_account = get_or_create_wallet_account(
+        client=business.client, business=business, passenger=intent.passenger
+    )
+    psp_suspense_account = get_or_create_psp_suspense_account(
+        client=business.client, business=business, provider=intent.psp_provider
+    )
+    entry = post_journal_entry(
+        business=business,
+        entry_type=JournalEntry.EntryType.TOPUP,
+        lines=[
+            JournalLineInput(
+                account=wallet_account, amount=intent.amount, currency=intent.currency
+            ),
+            JournalLineInput(
+                account=psp_suspense_account, amount=-intent.amount, currency=intent.currency
+            ),
+        ],
+        external_reference=intent.psp_reference,
+        memo=f"Wallet top-up for passenger {intent.passenger_id}",
+    )
+    intent.status = PaymentIntent.Status.SUCCEEDED
+    intent.succeeded_at = timezone.now()
+    intent.journal_entry = entry
+    intent.save(update_fields=["status", "succeeded_at", "journal_entry"])
+
+
 def _handle_charge_success(*, event: WebhookEvent, reference: str) -> None:
     try:
-        intent = PaymentIntent.all_objects.select_related("booking", "business", "passenger").get(
-            psp_reference=reference
-        )
+        intent = PaymentIntent.all_objects.select_related(
+            "booking", "business", "wallet_business", "passenger"
+        ).get(psp_reference=reference)
     except PaymentIntent.DoesNotExist:
         WebhookEvent.objects.filter(pk=event.pk).update(
             processing_status=WebhookEvent.ProcessingStatus.IGNORED, processed_at=timezone.now()
@@ -383,46 +652,10 @@ def _handle_charge_success(*, event: WebhookEvent, reference: str) -> None:
             )
             return
 
-        business = intent.business
-        business_share, commission_share = _split_commission(intent.amount)
-        wallet_account = get_or_create_wallet_account(
-            client=business.client, business=business, passenger=intent.passenger
-        )
-        clearing_account = get_or_create_business_clearing_account(
-            client=business.client, business=business
-        )
-        commission_account = get_or_create_commission_account()
-        entry = post_journal_entry(
-            business=business,
-            entry_type=JournalEntry.EntryType.PAYMENT,
-            lines=[
-                JournalLineInput(
-                    account=wallet_account, amount=-intent.amount, currency=intent.currency
-                ),
-                JournalLineInput(
-                    account=clearing_account, amount=business_share, currency=intent.currency
-                ),
-                JournalLineInput(
-                    account=commission_account, amount=commission_share, currency=intent.currency
-                ),
-            ],
-            external_reference=intent.psp_reference,
-            memo=f"Payment for booking {intent.booking_id}",
-        )
-        intent.status = PaymentIntent.Status.SUCCEEDED
-        intent.succeeded_at = timezone.now()
-        intent.journal_entry = entry
-        intent.save(update_fields=["status", "succeeded_at", "journal_entry"])
-
-        booking = mark_booking_paid(booking=intent.booking)
-        if booking.status != Booking.Status.PAID:
-            # The booking's seat hold had already expired/been
-            # cancelled by the time this webhook landed — edge case 6's
-            # residual case. Real money moved (ADR-0006's own "keep our
-            # own record regardless of what the PSP reports"); flagged
-            # for manual attention rather than silently dropped.
-            intent.requires_manual_refund = True
-            intent.save(update_fields=["requires_manual_refund"])
+        if intent.intent_type == PaymentIntent.IntentType.WALLET_TOPUP:
+            _apply_wallet_topup(intent)
+        else:
+            _apply_booking_payment(intent)
 
     WebhookEvent.objects.filter(pk=event.pk).update(
         payment_intent=intent,

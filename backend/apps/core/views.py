@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.serializers import HealthSerializer, ReadinessSerializer
+from apps.notifications.services import sweep_expiring_compliance, sweep_unused_tickets
 from apps.scheduling.tasks import generate_trips
 from apps.seating.tasks import expire_seat_holds
 
@@ -74,4 +75,22 @@ class ExpireSeatHoldsView(_InternalTaskView):
         if not self._secret_is_valid(request):
             return Response(status=403)
         expire_seat_holds()
+        return Response(status=200)
+
+
+@extend_schema(exclude=True)
+class NotificationComplianceSweepView(_InternalTaskView):
+    def post(self, request: Request) -> Response:
+        if not self._secret_is_valid(request):
+            return Response(status=403)
+        sweep_expiring_compliance()
+        return Response(status=200)
+
+
+@extend_schema(exclude=True)
+class NotificationTicketReminderSweepView(_InternalTaskView):
+    def post(self, request: Request) -> Response:
+        if not self._secret_is_valid(request):
+            return Response(status=403)
+        sweep_unused_tickets()
         return Response(status=200)

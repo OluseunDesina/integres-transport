@@ -52,6 +52,12 @@ export const routes: Routes = [
         data: { permissions: ['super-admin:access'] },
       },
       {
+        path: 'businesses/:id/seat-hold',
+        loadComponent: () => import('./businesses/seat-hold/seat-hold').then((m) => m.SeatHold),
+        canActivate: [permissionGuard],
+        data: { permissions: ['super-admin:access'] },
+      },
+      {
         path: 'invite-client',
         loadComponent: () =>
           import('./client-invite/client-invite').then((m) => m.ClientInvite),

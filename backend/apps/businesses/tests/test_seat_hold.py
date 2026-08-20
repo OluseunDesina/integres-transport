@@ -30,6 +30,36 @@ def _auth_client(user: User, *, platform_staff: bool = False) -> APIClient:
     return client
 
 
+def test_platform_staff_can_read_current_seat_hold_minutes() -> None:
+    """GET is what closes the UI gap — a way to see the current value
+    before editing it, mirroring PaystackAccountConfigView's own
+    GET-before-PATCH precedent."""
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+    platform_staff = PlatformStaffUserFactory()
+
+    response = _auth_client(platform_staff, platform_staff=True).get(
+        reverse("business-seat-hold", kwargs={"pk": str(business.id)})
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data == {"id": str(business.id), "seat_hold_minutes": 15}
+
+
+def test_client_admin_staff_cannot_read_seat_hold_minutes() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+
+    response = _auth_client(staff).get(
+        reverse("business-seat-hold", kwargs={"pk": str(business.id)})
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
 def test_platform_staff_can_update_seat_hold_minutes() -> None:
     client = ClientFactory()
     with tenant_context(str(client.id)):

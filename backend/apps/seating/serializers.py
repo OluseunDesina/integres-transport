@@ -1,5 +1,6 @@
 """Serializers for apps.seating — see
-docs/specs/4-fares-seating-booking.md §3."""
+docs/specs/4-fares-seating-booking.md §3 and
+docs/specs/8-seat-map-generation.md."""
 
 from typing import Any
 
@@ -8,6 +9,7 @@ from rest_framework import serializers
 from apps.network.models import Stop
 
 from .models import Seat
+from .services import SeatSpec
 
 
 def _resolve_stop(value: Any) -> Stop:
@@ -32,19 +34,29 @@ class SeatSerializer(serializers.ModelSerializer[Seat]):
         read_only_fields = fields
 
 
+class SeatSpecSerializer(serializers.Serializer):
+    """One seat within VehicleTypeSeatsUpdateSerializer's `seats` list —
+    `row`/`column` are optional, matching Seat's own nullable fields: a
+    manual PUT doesn't have to supply grid geometry, only generate/
+    always does."""
+
+    seat_number = serializers.CharField(max_length=10)
+    row = serializers.IntegerField(min_value=1, required=False, allow_null=True, default=None)
+    column = serializers.IntegerField(min_value=1, required=False, allow_null=True, default=None)
+
+
 class VehicleTypeSeatsUpdateSerializer(serializers.Serializer):
-    """Body: {"seat_numbers": ["1A", "1B", ...]} — mirrors
-    apps.network.serializers.RouteStopsUpdateSerializer's
+    """Body: {"seats": [{"seat_number": "1A", "row": 1, "column": 1}, ...]}
+    — mirrors apps.network.serializers.RouteStopsUpdateSerializer's
     replace-the-set shape. `vehicle_type` (already resolved by the
     view from the URL) is passed in via context, not a field."""
 
-    seat_numbers = serializers.ListField(
-        child=serializers.CharField(max_length=10), allow_empty=True
-    )
+    seats = SeatSpecSerializer(many=True)
 
-    def validate_seat_numbers(self, value: list[str]) -> list[str]:
+    def validate_seats(self, value: list[SeatSpec]) -> list[SeatSpec]:
         vehicle_type = self.context["vehicle_type"]
-        if len(set(value)) != len(value):
+        seat_numbers = [seat["seat_number"] for seat in value]
+        if len(set(seat_numbers)) != len(seat_numbers):
             raise serializers.ValidationError(
                 "Duplicate seat numbers are not allowed.", code="duplicate_seat_numbers"
             )
@@ -55,6 +67,35 @@ class VehicleTypeSeatsUpdateSerializer(serializers.Serializer):
                 code="exceeds_capacity",
             )
         return value
+
+
+class VehicleTypeSeatsGenerateSerializer(serializers.Serializer):
+    """Body for POST /vehicle-types/{id}/seats/generate/ —
+    docs/specs/8-seat-map-generation.md. `vehicle_type` is passed in
+    via context, same as VehicleTypeSeatsUpdateSerializer above."""
+
+    rows = serializers.IntegerField(min_value=1)
+    columns = serializers.IntegerField(min_value=1)
+    aisle_after_column = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+    numbering_scheme = serializers.ChoiceField(choices=["row_letter"], default="row_letter")
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        vehicle_type = self.context["vehicle_type"]
+        rows = attrs["rows"]
+        columns = attrs["columns"]
+        if rows * columns > vehicle_type.capacity:
+            raise serializers.ValidationError(
+                f"Cannot configure more than {vehicle_type.capacity} seats "
+                "(the vehicle type's capacity).",
+                code="exceeds_capacity",
+            )
+        aisle_after_column = attrs.get("aisle_after_column")
+        if aisle_after_column is not None and aisle_after_column >= columns:
+            raise serializers.ValidationError(
+                "aisle_after_column must be less than columns.",
+                code="invalid_aisle_position",
+            )
+        return attrs
 
 
 class TripAvailabilityQuerySerializer(serializers.Serializer):

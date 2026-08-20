@@ -190,24 +190,37 @@ def cancel_booking(*, booking: Booking, cancelled_by: User, reason: str) -> Book
     return booking
 
 
-def mark_booking_paid(*, booking: Booking) -> Booking:
-    """Called only from `apps.payments.services._handle_charge_success`
-    — the Paystack webhook path, which (unlike `cancel_booking`) has no
+def mark_booking_paid(*, booking: Booking) -> tuple[Booking, bool]:
+    """Called from `apps.payments.services._apply_booking_payment` (the
+    Paystack webhook path, which — unlike `cancel_booking` — has no
     authenticated request behind it and therefore no tenancy context
-    `TenancyMiddleware` would otherwise have set. Unlike `cancel_booking`,
-    this must open its own `platform_staff_bypass()` for that reason —
+    `TenancyMiddleware` would otherwise have set) and from
+    `apps.payments.services.pay_booking_from_wallet` (Phase 7). Unlike
+    `cancel_booking`, this must open its own `platform_staff_bypass()`,
     same "a webhook has no ambient tenancy context" reasoning
     `apps.ledger.services` already documents.
 
-    Guard-and-no-op on the wrong status, not an exception: the caller
-    inspects the returned `Booking.status` afterward to decide whether
-    to flag `PaymentIntent.requires_manual_refund` (the booking's seat
-    hold may have already expired/been cancelled by the time a
-    successful payment webhook arrives — see the spec's edge case 6)."""
+    Guard-and-no-op on the wrong status, not an exception. Returns
+    `(booking, did_transition)` — **not** just `booking` — so a caller
+    can tell "I just paid this" apart from "this was already paid by
+    someone else" without both looking identical (`booking.status ==
+    PAID` either way). That distinction matters as of Phase 7: with two
+    independent ways to reach `PAID` (a Paystack webhook, or
+    `pay_booking_from_wallet`'s synchronous path) racing for the same
+    booking, `booking.status != PAID` alone can no longer tell a caller
+    whether *it* performed the transition — a real gap this return
+    value closes, found by this phase's own mandatory concurrency spike
+    (`apps/payments/tests/test_wallet_payment_concurrency.py`). The
+    pre-Phase-7 caller only ever needed the "expired/cancelled by the
+    time payment landed" case (the spec's edge case 6); `did_transition
+    is False` now also covers "a different PaymentIntent already paid
+    this booking first" the same way, since both are equally "real
+    money moved but this payment didn't get to pay for anything" and
+    equally worth flagging for manual attention."""
     with platform_staff_bypass(), transaction.atomic():
         booking = Booking.all_objects.select_for_update().get(pk=booking.pk)
         if booking.status != Booking.Status.PENDING_PAYMENT:
-            return booking
+            return booking, False
         booking.status = Booking.Status.PAID
         booking.save(update_fields=["status"])
         # Fetched before the bulk .update() below, since .update() does
@@ -226,4 +239,4 @@ def mark_booking_paid(*, booking: Booking) -> Booking:
         record_audit_event(
             actor=None, action="booking.paid", target=booking, client_id=str(booking.client_id)
         )
-    return booking
+    return booking, True

@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { API_CLIENT } from '@api-client';
 import { AuthApiService } from '@auth';
 
 import { AppShell } from './app-shell';
@@ -10,10 +11,21 @@ describe('AppShell', () => {
 
   beforeEach(async () => {
     const authApiSpy = jasmine.createSpyObj<AuthApiService>('AuthApiService', ['login', 'logout']);
+    // AppShell now always renders NotificationBell, which fetches on
+    // init — a resolved-empty GET keeps every existing assertion here
+    // meaning what it already meant.
+    const apiClient = {
+      GET: jasmine.createSpy('GET').and.resolveTo({ data: { count: 0, results: [] } }),
+      POST: jasmine.createSpy('POST'),
+    };
 
     await TestBed.configureTestingModule({
       imports: [AppShell],
-      providers: [provideRouter([]), { provide: AuthApiService, useValue: authApiSpy }],
+      providers: [
+        provideRouter([]),
+        { provide: AuthApiService, useValue: authApiSpy },
+        { provide: API_CLIENT, useValue: apiClient },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(AppShell);
@@ -33,11 +45,17 @@ describe('AppShell', () => {
       'Search trips',
       'My bookings',
       'Tap & Go',
+      'Journeys',
+      'Payments',
+      'Wallet',
     ]);
     expect(links.map((a) => a.getAttribute('href'))).toEqual([
       '/search',
       '/my-bookings',
       '/credentials',
+      '/journeys',
+      '/payments',
+      '/wallet',
     ]);
   });
 

@@ -1,0 +1,43 @@
+<app-auth-layout>
+  @if (loading()) {
+    <p class="text-sm text-slate-500">Loading invitation…</p>
+  } @else if (invalidMessage(); as message) {
+    <h1 class="mb-1 text-lg font-semibold text-slate-900">Invitation unavailable</h1>
+    <p class="text-sm text-slate-500">
+      {{ message }}
+      <a routerLink="/login" class="font-medium text-slate-900 underline">Back to sign in</a>
+    </p>
+  } @else {
+    <h1 class="mb-1 text-lg font-semibold text-slate-900">Join {{ invitationName() }}</h1>
+    <p class="mb-6 text-sm text-slate-500">
+      Set a password for {{ invitationEmail() }} to finish creating your account.
+    </p>
+
+    @if (errorMessage(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+      <ui-text-field label="Phone" autocomplete="tel" formControlName="phone" />
+      <ui-text-field
+        label="Password"
+        type="password"
+        autocomplete="new-password"
+        formControlName="password"
+        [invalid]="!!fieldError('password')"
+        [errorMessage]="fieldError('password')"
+      />
+      <ui-text-field
+        label="Confirm password"
+        type="password"
+        autocomplete="new-password"
+        formControlName="confirmPassword"
+        [invalid]="!!fieldError('confirmPassword')"
+        [errorMessage]="fieldError('confirmPassword')"
+      />
+      <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+        Create account
+      </ui-button>
+    </form>
+  }
+</app-auth-layout>

@@ -1,0 +1,47 @@
+<div class="mx-auto max-w-lg">
+  <h1 class="mb-6 text-lg font-semibold text-slate-900">New fare</h1>
+
+  @if (errorMessage(); as message) {
+    <ui-alert class="mb-4">{{ message }}</ui-alert>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+    <ui-select
+      label="Business"
+      [options]="businessOptionsList()"
+      formControlName="business"
+      [invalid]="!!fieldError('business')"
+      [errorMessage]="fieldError('business')"
+    />
+    <ui-select
+      label="Route"
+      [options]="routeOptionsList()"
+      formControlName="route"
+      [invalid]="!!fieldError('route')"
+      [errorMessage]="fieldError('route')"
+    />
+
+    @if (isPerSegment()) {
+      <ui-select label="From stop" [options]="stopOptionsList()" formControlName="from_stop" />
+      <ui-select label="To stop" [options]="stopOptionsList()" formControlName="to_stop" />
+    }
+
+    <ui-text-field
+      label="Amount"
+      formControlName="amount"
+      [invalid]="!!fieldError('amount')"
+      [errorMessage]="fieldError('amount')"
+    />
+
+    <div class="mt-2 flex gap-3">
+      <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+        Create fare
+      </ui-button>
+      <a
+        routerLink="/fares"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+        >Cancel</a
+      >
+    </div>
+  </form>
+</div>

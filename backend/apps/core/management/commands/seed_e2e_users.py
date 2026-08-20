@@ -31,7 +31,7 @@ from apps.network.services import create_route, create_stop, set_route_stops
 from apps.scheduling.models import Trip
 from apps.scheduling.services import create_manual_trip
 from apps.seating.models import Seat
-from apps.seating.services import replace_vehicle_type_seats
+from apps.seating.services import generate_seat_layout, replace_vehicle_type_seats
 from apps.tapngo.models import TapCredential
 
 E2E_PASSWORD = "e2e-test-password-123"  # noqa: S105
@@ -285,11 +285,17 @@ class Command(BaseCommand):
             )
         # replace_vehicle_type_seats() hard-deletes and recreates, which
         # would cascade away any SeatReservation from an earlier run —
-        # so only seed seats when there are none.
+        # so only seed seats when there are none. 3 rows x 2 columns
+        # under the row_letter scheme produces exactly
+        # BOOKABLE_SEAT_NUMBERS ("1A".."3B") — real geometry now, not a
+        # flat list, so this fixture also exercises row/column.
         if not Seat.all_objects.filter(vehicle_type=vehicle_type).exists():
+            layout = generate_seat_layout(
+                rows=3, columns=2, aisle_after_column=None, numbering_scheme="row_letter"
+            )
             replace_vehicle_type_seats(
                 vehicle_type=vehicle_type,
-                seat_numbers=BOOKABLE_SEAT_NUMBERS,
+                seats=layout,
                 updated_by=actor,
             )
 

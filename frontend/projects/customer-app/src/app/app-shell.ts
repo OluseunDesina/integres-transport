@@ -1,6 +1,23 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthApiService, AuthStore } from '@auth';
+import { NotificationBell, type NotificationRouteResolver } from '@layout';
+
+// docs/specs/9-notifications.md: this app's own recipient type is
+// ticket_unused_reminder (related_object_type "Ticket"). There is no
+// route reachable from a Ticket's own id alone — the only
+// ticket-viewing screen, my-bookings/:id/tickets, is keyed by Booking
+// id, which Notification doesn't carry (confirmed before this slice
+// was built) — so this resolves to the general bookings list, not a
+// deep link to the specific ticket.
+const resolveNotificationRoute: NotificationRouteResolver = (type) => {
+  switch (type) {
+    case 'Ticket':
+      return ['/my-bookings'];
+    default:
+      return null;
+  }
+};
 
 /**
  * Authenticated chrome for the passenger app — see
@@ -24,7 +41,7 @@ import { AuthApiService, AuthStore } from '@auth';
   selector: 'app-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'flex min-h-screen flex-col bg-slate-50' },
-  imports: [RouterLink, RouterLinkActive, RouterOutlet],
+  imports: [RouterLink, RouterLinkActive, RouterOutlet, NotificationBell],
   template: `
     <header class="border-b border-slate-200 bg-white">
       <div class="mx-auto flex h-14 max-w-4xl items-center gap-6 px-4">
@@ -63,15 +80,45 @@ import { AuthApiService, AuthStore } from '@auth';
           >
             Tap &amp; Go
           </a>
+          <a
+            routerLink="/journeys"
+            routerLinkActive="bg-slate-100 text-slate-900 font-medium"
+            #journeysLink="routerLinkActive"
+            [attr.aria-current]="journeysLink.isActive ? 'page' : null"
+            class="inline-flex min-h-11 items-center rounded-md px-3 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          >
+            Journeys
+          </a>
+          <a
+            routerLink="/payments"
+            routerLinkActive="bg-slate-100 text-slate-900 font-medium"
+            #paymentsLink="routerLinkActive"
+            [attr.aria-current]="paymentsLink.isActive ? 'page' : null"
+            class="inline-flex min-h-11 items-center rounded-md px-3 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          >
+            Payments
+          </a>
+          <a
+            routerLink="/wallet"
+            routerLinkActive="bg-slate-100 text-slate-900 font-medium"
+            #walletLink="routerLinkActive"
+            [attr.aria-current]="walletLink.isActive ? 'page' : null"
+            class="inline-flex min-h-11 items-center rounded-md px-3 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          >
+            Wallet
+          </a>
         </nav>
 
-        <button
-          type="button"
-          (click)="signOut()"
-          class="inline-flex min-h-11 shrink-0 items-center rounded-md px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
-        >
-          Sign out
-        </button>
+        <div class="flex shrink-0 items-center gap-1">
+          <app-notification-bell [resolveRoute]="resolveNotificationRoute" />
+          <button
+            type="button"
+            (click)="signOut()"
+            class="inline-flex min-h-11 shrink-0 items-center rounded-md px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     </header>
 
@@ -81,6 +128,7 @@ import { AuthApiService, AuthStore } from '@auth';
   `,
 })
 export class AppShell {
+  protected readonly resolveNotificationRoute = resolveNotificationRoute;
   protected readonly authStore = inject(AuthStore);
   private readonly authApi = inject(AuthApiService);
   private readonly router = inject(Router);

@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
 from rest_framework.views import APIView
 
+from apps.booking.models import Booking
 from apps.businesses.models import Business
 from apps.core.idempotency import IdempotencyKeyConflict
 from apps.core.permissions import HasPermission, IsPlatformStaff
@@ -33,11 +34,14 @@ from .serializers import (
 )
 from .services import (
     BookingNotPayable,
+    InsufficientWalletBalance,
     PaymentAlreadyPending,
     PayoutDestinationNotConfigured,
     PspNotConfigured,
     configure_paystack_account,
     initiate_payment,
+    initiate_wallet_topup,
+    pay_booking_from_wallet,
     process_paystack_webhook,
     trigger_settlement_run,
 )
@@ -159,18 +163,27 @@ class PaymentListCreateView(generics.ListCreateAPIView[PaymentIntent]):
             )
         serializer = PaymentInitiateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        booking = serializer.validated_data["booking_id"]
+        booking = serializer.validated_data.get("booking_id")
+        wallet_topup = serializer.validated_data.get("wallet_topup")
         user = request.user
         assert isinstance(user, User)
-        if booking.passenger_id != user.id:
-            return Response(
-                {"detail": "You cannot pay for another passenger's booking."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
         try:
-            intent = initiate_payment(
-                booking=booking, passenger=user, idempotency_key=idempotency_key
-            )
+            if booking is not None:
+                if booking.passenger_id != user.id:
+                    return Response(
+                        {"detail": "You cannot pay for another passenger's booking."},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                intent = initiate_payment(
+                    booking=booking, passenger=user, idempotency_key=idempotency_key
+                )
+            else:
+                intent = initiate_wallet_topup(
+                    business=wallet_topup["business_id"],
+                    passenger=user,
+                    amount=wallet_topup["amount"],
+                    idempotency_key=idempotency_key,
+                )
         except PspNotConfigured as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
         except (PaymentAlreadyPending, BookingNotPayable, IdempotencyKeyConflict) as exc:
@@ -259,6 +272,34 @@ class SettlementRunListCreateView(generics.ListCreateAPIView[SettlementRun]):
         except PaystackAPIError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(SettlementRunSerializer(run).data, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(request=None, responses=PaymentIntentSerializer)
+class PayBookingFromWalletView(APIView):
+    """POST /bookings/{id}/pay-from-wallet/ — Phase 7. Passenger, own
+    booking only; no request body (the booking id in the path is the
+    whole request). Mirrors `BookingCancelView`'s own
+    404-not-found/403-not-yours split, since both operate on a specific
+    passenger's own booking by id."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request: Request, pk: str) -> Response:
+        booking = get_object_or_404(Booking.objects.all(), pk=pk)
+        user = request.user
+        assert isinstance(user, User)
+        if booking.passenger_id != user.id:
+            return Response(
+                {"detail": "You cannot pay for another passenger's booking."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            intent = pay_booking_from_wallet(booking=booking, passenger=user)
+        except BookingNotPayable as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except InsufficientWalletBalance as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(PaymentIntentSerializer(intent).data, status=status.HTTP_201_CREATED)
 
 
 @extend_schema(exclude=True)

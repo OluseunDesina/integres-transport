@@ -50,6 +50,15 @@
                   Pay now
                 </ui-button>
               }
+              @if (canPayFromWallet(booking)) {
+                <ui-button
+                  variant="secondary"
+                  [loading]="payingFromWalletBookingIds().has(booking.id)"
+                  (pressed)="payFromWallet(booking)"
+                >
+                  Pay from wallet
+                </ui-button>
+              }
               @if (canViewTickets(booking)) {
                 <ui-button variant="secondary" (pressed)="viewTickets(booking)">
                   View tickets

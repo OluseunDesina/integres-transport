@@ -73,6 +73,56 @@ describe('AuthApiService', () => {
     expect(authStore.isAuthenticated()).toBeFalse();
   });
 
+  it('acceptClientInvitation() completes the invitation and stores the session on success', async () => {
+    apiClient.POST.and.resolveTo({ data: { access: 'access-1', refresh: 'refresh-1' } });
+    apiClient.GET.and.resolveTo({
+      data: {
+        id: 'user-1',
+        email: 'owner@acme.example.com',
+        first_name: 'Ada',
+        last_name: 'Lovelace',
+        client: 'client-1',
+        is_platform_staff: false,
+        is_client_staff: true,
+        permissions: ['client-admin:access'],
+      },
+    });
+
+    const result = await service.acceptClientInvitation('tok-1', '+2348012345678', 'secret');
+
+    expect(apiClient.POST).toHaveBeenCalledWith('/api/v1/client-invitations/{token}/complete/', {
+      params: { path: { token: 'tok-1' } },
+      body: { phone: '+2348012345678', password: 'secret' },
+    });
+    expect(result).toEqual({ ok: true });
+    expect(authStore.isAuthenticated()).toBeTrue();
+  });
+
+  it('acceptStaffInvitation() accepts the invitation and stores the session on success', async () => {
+    apiClient.POST.and.resolveTo({ data: { access: 'access-1', refresh: 'refresh-1' } });
+    apiClient.GET.and.resolveTo({
+      data: {
+        id: 'user-1',
+        email: 'staff@acme.example.com',
+        first_name: 'Ada',
+        last_name: 'Lovelace',
+        client: 'client-1',
+        is_platform_staff: false,
+        is_client_staff: true,
+        permissions: ['client-admin:access'],
+      },
+    });
+
+    const result = await service.acceptStaffInvitation('tok-1', 'secret');
+
+    expect(apiClient.POST).toHaveBeenCalledWith('/api/v1/staff/invitations/{token}/accept/', {
+      params: { path: { token: 'tok-1' } },
+      body: { password: 'secret' },
+    });
+    expect(result).toEqual({ ok: true });
+    expect(authStore.isAuthenticated()).toBeTrue();
+  });
+
   it('logout() clears the session', () => {
     spyOn(authStore, 'clear');
 

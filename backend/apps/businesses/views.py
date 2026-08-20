@@ -90,13 +90,24 @@ class KybDocumentUploadView(generics.GenericAPIView[Business]):
 class BusinessSeatHoldView(generics.GenericAPIView[Business]):
     """Super-admin-only — docs/adr/0004. Deliberately not part of
     BusinessUpdateView's client-admin PATCH path; see
-    Business.seat_hold_minutes's own docstring for why."""
+    Business.seat_hold_minutes's own docstring for why.
+
+    GET added alongside the original PATCH-only shape (a UI gap: no way
+    to read the current value before editing it) — same precedent
+    `PaystackAccountConfigView` already set. Unlike that view, no
+    404-for-unconfigured branch is needed: `seat_hold_minutes` is a
+    plain non-nullable field with a model default, so every Business
+    always has a value, never an "unconfigured" state."""
 
     permission_classes = [IsPlatformStaff]
-    http_method_names = ["patch"]
+    http_method_names = ["get", "patch"]
 
     def get_queryset(self) -> QuerySet[Business]:
         return Business.all_objects.all()
+
+    def get(self, request: Request, pk: str) -> Response:
+        business = get_object_or_404(self.get_queryset(), pk=pk)
+        return Response(BusinessSeatHoldSerializer(business).data)
 
     def patch(self, request: Request, pk: str) -> Response:
         business = get_object_or_404(self.get_queryset(), pk=pk)

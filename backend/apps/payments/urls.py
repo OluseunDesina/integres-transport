@@ -6,6 +6,11 @@ urlpatterns = [
     path("payments/", views.PaymentListCreateView.as_view(), name="payment-list-create"),
     path("payments/mine/", views.PaymentIntentMineView.as_view(), name="payment-mine"),
     path("payments/<uuid:pk>/", views.PaymentIntentDetailView.as_view(), name="payment-detail"),
+    path(
+        "bookings/<uuid:pk>/pay-from-wallet/",
+        views.PayBookingFromWalletView.as_view(),
+        name="booking-pay-from-wallet",
+    ),
     path("webhooks/paystack/", views.PaystackWebhookView.as_view(), name="paystack-webhook"),
     path(
         "settlement-runs/",

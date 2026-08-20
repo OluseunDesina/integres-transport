@@ -14,7 +14,33 @@ type SeatAvailability = components['schemas']['SeatAvailability'];
 
 interface SeatRow {
   row: number | null;
-  seats: SeatAvailability[];
+  segments: SeatAvailability[][];
+}
+
+/**
+ * Splits a row's seats (already sorted by column) into segments
+ * wherever the stored `column` integer jumps by more than 1 — the
+ * signal `apps.seating.services.generate_seat_layout`'s physical-layout
+ * aisle model leaves behind (docs/specs/8-seat-map-generation.md's Edge
+ * case §5). A row with no aisle is just one segment.
+ */
+function splitAtAisleGaps(seats: SeatAvailability[]): SeatAvailability[][] {
+  const segments: SeatAvailability[][] = [];
+  let current: SeatAvailability[] = [];
+  let previousColumn: number | null = null;
+  for (const entry of seats) {
+    const column = entry.seat.column;
+    if (previousColumn !== null && column !== null && column - previousColumn > 1) {
+      segments.push(current);
+      current = [];
+    }
+    current.push(entry);
+    previousColumn = column;
+  }
+  if (current.length > 0) {
+    segments.push(current);
+  }
+  return segments;
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -81,7 +107,7 @@ export class SeatPicker implements OnInit {
   protected readonly seatRows = computed<SeatRow[]>(() => {
     const seats = this.availability();
     if (seats.every((entry) => entry.seat.row === null)) {
-      return [{ row: null, seats }];
+      return [{ row: null, segments: [seats] }];
     }
     const byRow = new Map<number | null, SeatAvailability[]>();
     for (const entry of seats) {
@@ -90,12 +116,10 @@ export class SeatPicker implements OnInit {
     }
     return [...byRow.entries()]
       .sort((a, b) => (a[0] ?? Number.MAX_SAFE_INTEGER) - (b[0] ?? Number.MAX_SAFE_INTEGER))
-      .map(([row, rowSeats]) => ({
-        row,
-        seats: [...rowSeats].sort(
-          (a, b) => (a.seat.column ?? 0) - (b.seat.column ?? 0)
-        ),
-      }));
+      .map(([row, rowSeats]) => {
+        const sorted = [...rowSeats].sort((a, b) => (a.seat.column ?? 0) - (b.seat.column ?? 0));
+        return { row, segments: splitAtAisleGaps(sorted) };
+      });
   });
 
   protected readonly selectedCount = computed(() => this.selectedSeatIds().size);

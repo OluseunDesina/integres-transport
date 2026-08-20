@@ -89,7 +89,10 @@ export class PaymentList {
     return `${payment.currency} ${payment.amount}`;
   }
 
-  protected truncatedId(id: string): string {
-    return `${id.slice(0, 8)}…`;
+  // Phase 7: a wallet-top-up PaymentIntent has no booking at all — the
+  // "Booking" column shows a plain dash rather than crashing on a
+  // null id or, worse, silently rendering "null…".
+  protected truncatedId(id: string | null): string {
+    return id ? `${id.slice(0, 8)}…` : '—';
   }
 }

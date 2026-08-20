@@ -15,6 +15,7 @@ from apps.core.audit import record_audit_event
 from apps.core.rls import platform_staff_bypass
 from apps.identity.models import User
 from apps.identity.services import create_default_roles
+from apps.notifications.services import notify_kyc_submitted
 
 from .models import Client, ClientInvitation, KycDocument, WhiteLabelConfig
 from .tasks import send_client_invitation_email
@@ -70,6 +71,7 @@ def submit_kyc_document(
         target=document,
         document_type=document_type,
     )
+    notify_kyc_submitted(client_id=client.id, client_name=client.name, document_id=document.id)
     return document
 
 

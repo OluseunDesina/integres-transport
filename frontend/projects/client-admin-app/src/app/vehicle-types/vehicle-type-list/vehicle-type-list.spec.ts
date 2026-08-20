@@ -85,7 +85,11 @@ describe('VehicleTypeList', () => {
     }).compileComponents();
 
     authStore = TestBed.inject(AuthStore);
-    authStore.setSession('a', 'r', makeUser({ permissions: ['client-admin:access', 'fleet.view'] }));
+    authStore.setSession(
+      'a',
+      'r',
+      makeUser({ permissions: ['client-admin:access', 'fleet.view', 'seating.view'] })
+    );
 
     fixture = TestBed.createComponent(VehicleTypeList);
     fixture.detectChanges();
@@ -111,6 +115,27 @@ describe('VehicleTypeList', () => {
     const rows = fixture.debugElement.queryAll(By.css('tbody tr'));
     expect(rows.length).toBe(2);
     expect(rows[0].nativeElement.textContent).toContain('33-seater coaster');
+  });
+
+  it('shows a "Seat map" link with seating.view permission', () => {
+    store.items.set([makeVehicleType()]);
+    fixture.detectChanges();
+
+    const links = fixture.debugElement
+      .queryAll(By.css('a'))
+      .map((el) => (el.nativeElement.textContent as string).trim());
+    expect(links).toContain('Seat map');
+  });
+
+  it('hides the "Seat map" link without seating.view permission', () => {
+    authStore.setSession('a', 'r', makeUser({ permissions: ['client-admin:access'] }));
+    store.items.set([makeVehicleType()]);
+    fixture.detectChanges();
+
+    const links = fixture.debugElement
+      .queryAll(By.css('a'))
+      .map((el) => (el.nativeElement.textContent as string).trim());
+    expect(links).not.toContain('Seat map');
   });
 
   it('hides the "New vehicle type" button without fleet.manage permission', () => {

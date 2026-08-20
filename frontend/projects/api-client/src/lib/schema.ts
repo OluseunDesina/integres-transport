@@ -165,6 +165,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/pay-from-wallet/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description POST /bookings/{id}/pay-from-wallet/ — Phase 7. Passenger, own
+         *     booking only; no request body (the booking id in the path is the
+         *     whole request). Mirrors `BookingCancelView`'s own
+         *     404-not-found/403-not-yours split, since both operate on a specific
+         *     passenger's own booking by id.
+         */
+        post: operations["bookings_pay_from_wallet_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings/mine/": {
         parameters: {
             query?: never;
@@ -518,6 +541,60 @@ export interface paths {
         get: operations["ledger_entries_list"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/{id}/read/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["notifications_read_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/mine/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /notifications/mine/?unread_only= — the authenticated user's
+         *     own notifications. `IsAuthenticated` only, matching
+         *     `apps.booking.views.BookingMineView`'s shape — a passenger has no
+         *     Role (ADR-0003) and still needs this for the ticket-reminder case.
+         */
+        get: operations["notifications_mine_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/read-all/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["notifications_read_all_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -954,7 +1031,19 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * @description Super-admin-only — docs/adr/0004. Deliberately not part of
+         *     BusinessUpdateView's client-admin PATCH path; see
+         *     Business.seat_hold_minutes's own docstring for why.
+         *
+         *     GET added alongside the original PATCH-only shape (a UI gap: no way
+         *     to read the current value before editing it) — same precedent
+         *     `PaystackAccountConfigView` already set. Unlike that view, no
+         *     404-for-unconfigured branch is needed: `seat_hold_minutes` is a
+         *     plain non-nullable field with a model default, so every Business
+         *     always has a value, never an "unconfigured" state.
+         */
+        get: operations["super_admin_businesses_seat_hold_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -964,6 +1053,13 @@ export interface paths {
          * @description Super-admin-only — docs/adr/0004. Deliberately not part of
          *     BusinessUpdateView's client-admin PATCH path; see
          *     Business.seat_hold_minutes's own docstring for why.
+         *
+         *     GET added alongside the original PATCH-only shape (a UI gap: no way
+         *     to read the current value before editing it) — same precedent
+         *     `PaystackAccountConfigView` already set. Unlike that view, no
+         *     404-for-unconfigured branch is needed: `seat_hold_minutes` is a
+         *     plain non-nullable field with a model default, so every Business
+         *     always has a value, never an "unconfigured" state.
          */
         patch: operations["super_admin_businesses_seat_hold_partial_update"];
         trace?: never;
@@ -1389,6 +1485,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vehicle-types/{id}/seats/generate/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description POST /vehicle-types/{id}/seats/generate/ — the UI-facing seat-map
+         *     builder endpoint (docs/specs/8-seat-map-generation.md). Computes a
+         *     full rows x columns layout and writes it via the same
+         *     replace_vehicle_type_seats() the lower-level PUT above uses.
+         */
+        post: operations["vehicle_types_seats_generate_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vehicles/": {
         parameters: {
             query?: never;
@@ -1805,9 +1923,10 @@ export interface components {
          * @description * `payment` - Payment
          *     * `refund` - Refund
          *     * `concession` - Concession
+         *     * `topup` - Wallet top-up
          * @enum {string}
          */
-        EntryTypeEnum: "payment" | "refund" | "concession";
+        EntryTypeEnum: "payment" | "refund" | "concession" | "topup";
         FareJourney: {
             /** Format: uuid */
             readonly id: string;
@@ -1932,6 +2051,12 @@ export interface components {
         Health: {
             status: string;
         };
+        /**
+         * @description * `booking_payment` - Booking payment
+         *     * `wallet_topup` - Wallet top-up
+         * @enum {string}
+         */
+        IntentTypeEnum: "booking_payment" | "wallet_topup";
         InvitationCreatedResponse: {
             /** Format: uuid */
             id: string;
@@ -2069,6 +2194,38 @@ export interface components {
             readonly role_name: string | null;
             readonly client_name: string | null;
         };
+        Notification: {
+            /** Format: uuid */
+            readonly id: string;
+            readonly notification_type: components["schemas"]["NotificationTypeEnum"];
+            readonly title: string;
+            readonly body: string;
+            readonly related_object_type: string;
+            /** Format: uuid */
+            readonly related_object_id: string | null;
+            /** Format: date-time */
+            readonly read_at: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        NotificationReadAllResponse: {
+            marked_read: number;
+        };
+        /**
+         * @description * `license_expiring` - Driver license expiring
+         *     * `insurance_expiring` - Vehicle insurance expiring
+         *     * `roadworthiness_expiring` - Roadworthiness expiring
+         *     * `ticket_unused_reminder` - Unused ticket reminder
+         *     * `kyc_document_submitted` - New KYC document submitted
+         *     * `kyb_document_submitted` - New KYB document submitted
+         * @enum {string}
+         */
+        NotificationTypeEnum: "license_expiring" | "insurance_expiring" | "roadworthiness_expiring" | "ticket_unused_reminder" | "kyc_document_submitted" | "kyb_document_submitted";
+        /**
+         * @description * `row_letter` - row_letter
+         * @enum {string}
+         */
+        NumberingSchemeEnum: "row_letter";
         PaginatedBookingList: {
             /** @example 123 */
             count: number;
@@ -2234,6 +2391,21 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["LedgerAccount"][];
         };
+        PaginatedNotificationList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=400&limit=100
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=200&limit=100
+             */
+            previous?: string | null;
+            results: components["schemas"]["Notification"][];
+        };
         PaginatedPaymentIntentList: {
             /** @example 123 */
             count: number;
@@ -2308,21 +2480,6 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["Schedule"][];
-        };
-        PaginatedSeatList: {
-            /** @example 123 */
-            count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?offset=400&limit=100
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?offset=200&limit=100
-             */
-            previous?: string | null;
-            results: components["schemas"]["Seat"][];
         };
         PaginatedSettlementRunList: {
             /** @example 123 */
@@ -2638,10 +2795,17 @@ export interface components {
             email_sender_address?: string;
             terms_url?: string;
         };
-        /** @description POST /payments/ body. */
+        /**
+         * @description POST /payments/ body — exactly one of `booking_id` (pay for a
+         *     booking via a fresh Paystack charge) or `wallet_topup` (fund the
+         *     passenger's wallet with no Booking attached). A blend of the two
+         *     isn't supported — see docs/specs/7-passenger-wallet.md's own
+         *     non-goals.
+         */
         PaymentInitiate: {
             /** Format: uuid */
-            booking_id: string;
+            booking_id?: string;
+            wallet_topup?: components["schemas"]["WalletTopupInitiate"];
         };
         /**
          * @description Response shape for POST /payments/ — narrower than the full read
@@ -2659,8 +2823,11 @@ export interface components {
         PaymentIntent: {
             /** Format: uuid */
             readonly id: string;
+            readonly intent_type: components["schemas"]["IntentTypeEnum"];
             /** Format: uuid */
-            readonly booking: string;
+            readonly booking: string | null;
+            /** Format: uuid */
+            readonly wallet_business: string | null;
             /** Format: uuid */
             readonly business: string;
             /** Format: uuid */
@@ -2853,6 +3020,17 @@ export interface components {
         SeatAvailability: {
             seat: components["schemas"]["Seat"];
             is_available: boolean;
+        };
+        /**
+         * @description One seat within VehicleTypeSeatsUpdateSerializer's `seats` list —
+         *     `row`/`column` are optional, matching Seat's own nullable fields: a
+         *     manual PUT doesn't have to supply grid geometry, only generate/
+         *     always does.
+         */
+        SeatSpec: {
+            seat_number: string;
+            row?: number | null;
+            column?: number | null;
         };
         SettlementRun: {
             /** Format: uuid */
@@ -3250,13 +3428,25 @@ export interface components {
             capacity: number;
         };
         /**
-         * @description Body: {"seat_numbers": ["1A", "1B", ...]} — mirrors
-         *     apps.network.serializers.RouteStopsUpdateSerializer's
+         * @description Body for POST /vehicle-types/{id}/seats/generate/ —
+         *     docs/specs/8-seat-map-generation.md. `vehicle_type` is passed in
+         *     via context, same as VehicleTypeSeatsUpdateSerializer above.
+         */
+        VehicleTypeSeatsGenerate: {
+            rows: number;
+            columns: number;
+            aisle_after_column?: number | null;
+            /** @default row_letter */
+            numbering_scheme: components["schemas"]["NumberingSchemeEnum"];
+        };
+        /**
+         * @description Body: {"seats": [{"seat_number": "1A", "row": 1, "column": 1}, ...]}
+         *     — mirrors apps.network.serializers.RouteStopsUpdateSerializer's
          *     replace-the-set shape. `vehicle_type` (already resolved by the
          *     view from the URL) is passed in via context, not a field.
          */
         VehicleTypeSeatsUpdate: {
-            seat_numbers: string[];
+            seats: components["schemas"]["SeatSpec"][];
         };
         /**
          * @description * `shuttle` - Shuttle
@@ -3270,6 +3460,17 @@ export interface components {
             balance: string;
             currency: string;
             transactions: components["schemas"]["WalletTransaction"][];
+        };
+        /**
+         * @description Nested shape for `PaymentInitiateSerializer.wallet_topup` — Phase
+         *     7. `business_id` names the wallet being funded (there's no Booking
+         *     to denormalize it from, unlike the booking-payment shape below).
+         */
+        WalletTopupInitiate: {
+            /** Format: uuid */
+            business_id: string;
+            /** Format: decimal */
+            amount: string;
         };
         WalletTransaction: {
             /** Format: uuid */
@@ -3536,6 +3737,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Booking"];
+                };
+            };
+        };
+    };
+    bookings_pay_from_wallet_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentIntent"];
                 };
             };
         };
@@ -4145,6 +4367,72 @@ export interface operations {
             };
         };
     };
+    notifications_read_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Notification"];
+                };
+            };
+        };
+    };
+    notifications_mine_list: {
+        parameters: {
+            query?: {
+                /** @description Number of results to return per page. */
+                limit?: number;
+                /** @description The initial index from which to return the results. */
+                offset?: number;
+                /** @description When true, only unread notifications are returned. */
+                unread_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedNotificationList"];
+                };
+            };
+        };
+    };
+    notifications_read_all_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationReadAllResponse"];
+                };
+            };
+        };
+    };
     payments_list: {
         parameters: {
             query?: {
@@ -4183,7 +4471,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": components["schemas"]["PaymentInitiate"];
                 "application/x-www-form-urlencoded": components["schemas"]["PaymentInitiate"];
@@ -4825,6 +5113,27 @@ export interface operations {
             };
         };
     };
+    super_admin_businesses_seat_hold_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BusinessSeatHold"];
+                };
+            };
+        };
+    };
     super_admin_businesses_seat_hold_partial_update: {
         parameters: {
             query?: never;
@@ -5419,12 +5728,7 @@ export interface operations {
     };
     vehicle_types_seats_list: {
         parameters: {
-            query?: {
-                /** @description Number of results to return per page. */
-                limit?: number;
-                /** @description The initial index from which to return the results. */
-                offset?: number;
-            };
+            query?: never;
             header?: never;
             path: {
                 id: string;
@@ -5438,19 +5742,14 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedSeatList"];
+                    "application/json": components["schemas"]["Seat"][];
                 };
             };
         };
     };
     vehicle_types_seats_update: {
         parameters: {
-            query?: {
-                /** @description Number of results to return per page. */
-                limit?: number;
-                /** @description The initial index from which to return the results. */
-                offset?: number;
-            };
+            query?: never;
             header?: never;
             path: {
                 id: string;
@@ -5470,7 +5769,34 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedSeatList"];
+                    "application/json": components["schemas"]["Seat"][];
+                };
+            };
+        };
+    };
+    vehicle_types_seats_generate_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VehicleTypeSeatsGenerate"];
+                "application/x-www-form-urlencoded": components["schemas"]["VehicleTypeSeatsGenerate"];
+                "multipart/form-data": components["schemas"]["VehicleTypeSeatsGenerate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Seat"][];
                 };
             };
         };

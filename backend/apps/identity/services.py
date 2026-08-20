@@ -51,6 +51,7 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | None] = {
         "payments.view",
         "wallet.view",
         "ticketing.validate",
+        "notifications.view",
     ],
     "Staff": [
         "client.view",
@@ -66,6 +67,7 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | None] = {
         "payments.view",
         "wallet.view",
         "ticketing.validate",
+        "notifications.view",
     ],
 }
 

@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "apps.payments",
     "apps.wallet",
     "apps.ticketing",
+    "apps.notifications",
 ]
 
 MIDDLEWARE = [
@@ -229,6 +230,17 @@ CELERY_TIMEZONE = "UTC"
 # docs/specs/3-network-scheduling-fleet.md §4. A setting, not hardcoded
 # in the task, so it's tunable via ops without a deploy.
 TRIP_GENERATION_HORIZON_DAYS = 14
+
+# apps.notifications (docs/specs/9-notifications.md). How many days
+# before a Driver/Vehicle compliance date the first warning fires
+# (and the same window is used to catch already-past dates too), how
+# often an unresolved one is re-nagged, and how many hours before a
+# Trip's departure an unused Ticket gets a reminder — all plain tunable
+# constants, same "a setting, not hardcoded in the task" reasoning as
+# TRIP_GENERATION_HORIZON_DAYS above, not confirmed operator input yet.
+LICENSE_EXPIRY_WARNING_DAYS = 30
+LICENSE_EXPIRY_RENOTIFY_DAYS = 7
+TICKET_UNUSED_REMINDER_HOURS_BEFORE_DEPARTURE = 2
 
 # --- Email ---
 # Console backend: first real use of Django's mail framework in this

@@ -49,6 +49,46 @@ export class AuthApiService {
     return { ok: true };
   }
 
+  async acceptClientInvitation(
+    token: string,
+    phone: string,
+    password: string
+  ): Promise<LoginResult> {
+    const { data, error } = await this.api.POST('/api/v1/client-invitations/{token}/complete/', {
+      params: { path: { token } },
+      body: { phone, password },
+    });
+    if (!data) {
+      return { ok: false, message: extractFirstErrorMessage(error) };
+    }
+
+    const user = await this.fetchCurrentUser(data.access);
+    if (!user) {
+      return { ok: false, message: 'Registered, but could not load your account. Try again.' };
+    }
+
+    this.authStore.setSession(data.access, data.refresh, user);
+    return { ok: true };
+  }
+
+  async acceptStaffInvitation(token: string, password: string): Promise<LoginResult> {
+    const { data, error } = await this.api.POST('/api/v1/staff/invitations/{token}/accept/', {
+      params: { path: { token } },
+      body: { password },
+    });
+    if (!data) {
+      return { ok: false, message: extractFirstErrorMessage(error) };
+    }
+
+    const user = await this.fetchCurrentUser(data.access);
+    if (!user) {
+      return { ok: false, message: 'Registered, but could not load your account. Try again.' };
+    }
+
+    this.authStore.setSession(data.access, data.refresh, user);
+    return { ok: true };
+  }
+
   async login(email: string, password: string, client?: string): Promise<LoginResult> {
     switch (this.audience) {
       case 'customer':

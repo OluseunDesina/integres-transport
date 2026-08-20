@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthApiService, AuthStore } from '@auth';
+import { NotificationBell } from '@layout';
 import { Button } from '@shared-ui';
 
 /**
@@ -20,7 +21,7 @@ import { Button } from '@shared-ui';
 @Component({
   selector: 'app-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, Button],
+  imports: [RouterOutlet, RouterLink, RouterLinkActive, Button, NotificationBell],
   host: { class: 'flex min-h-screen flex-col bg-slate-50' },
   template: `
     <header
@@ -49,6 +50,14 @@ import { Button } from '@shared-ui';
         <span class="hidden truncate text-sm text-slate-500 sm:inline">{{
           authStore.user()?.email
         }}</span>
+        <!-- No resolveRoute passed, deliberately: this app signs in via
+             the client-admin JWT audience, so a validator-app user
+             could legitimately receive a Driver/Vehicle
+             compliance-expiry notification if they hold a Role at that
+             Client — but this app has no Driver/Vehicle screens at
+             all. Every notification here is mark-read-only, per
+             docs/specs/9-notifications.md's Slice B plan. -->
+        <app-notification-bell />
         <ui-button variant="secondary" (pressed)="signOut()">Sign out</ui-button>
       </div>
     </header>

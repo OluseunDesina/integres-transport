@@ -1,0 +1,95 @@
+<div class="flex flex-col gap-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-lg font-semibold text-slate-900">Fares</h1>
+    <ui-button *appHasPermission="'fares.manage'" (pressed)="goToNewFare()">New fare</ui-button>
+  </div>
+
+  @if (isPerSegment()) {
+    @if (fareSegmentRuleStore.error()) {
+      <ui-alert>{{ fareSegmentRuleStore.error() }}</ui-alert>
+    } @else if (fareSegmentRuleStore.isEmpty()) {
+      <ui-empty-state
+        title="No fares yet"
+        description="This business prices routes per segment — add a fare for a stop pair to start quoting."
+      >
+        <ui-button *appHasPermission="'fares.manage'" (pressed)="goToNewFare()">New fare</ui-button>
+      </ui-empty-state>
+    } @else {
+      <ui-table [loading]="fareSegmentRuleStore.loading()">
+        <thead>
+          <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+            <th class="px-4 py-2">Route</th>
+            <th class="px-4 py-2">Segment</th>
+            <th class="px-4 py-2">Amount</th>
+            <th class="px-4 py-2">Effective</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (fare of fareSegmentRuleStore.items(); track fare.id) {
+            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <td class="px-4 py-2 font-medium text-slate-900">
+                {{ routeNames().get(fare.route) ?? fare.route }}
+              </td>
+              <td class="px-4 py-2">
+                {{ stopNames().get(fare.from_stop) ?? fare.from_stop }} →
+                {{ stopNames().get(fare.to_stop) ?? fare.to_stop }}
+              </td>
+              <td class="px-4 py-2">{{ fare.amount }}</td>
+              <td class="px-4 py-2">
+                {{ fare.effective_from | date: 'short' }}{{
+                  fare.effective_to ? ' – ' + (fare.effective_to | date: 'short') : '+'
+                }}
+              </td>
+            </tr>
+          }
+        </tbody>
+      </ui-table>
+      <ui-paginator
+        [total]="fareSegmentRuleStore.total()"
+        [page]="fareSegmentRuleStore.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
+  } @else {
+    @if (fareRuleStore.error()) {
+      <ui-alert>{{ fareRuleStore.error() }}</ui-alert>
+    } @else if (fareRuleStore.isEmpty()) {
+      <ui-empty-state
+        title="No fares yet"
+        description="This business prices routes with a single flat fare — add one to start quoting."
+      >
+        <ui-button *appHasPermission="'fares.manage'" (pressed)="goToNewFare()">New fare</ui-button>
+      </ui-empty-state>
+    } @else {
+      <ui-table [loading]="fareRuleStore.loading()">
+        <thead>
+          <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+            <th class="px-4 py-2">Route</th>
+            <th class="px-4 py-2">Amount</th>
+            <th class="px-4 py-2">Effective</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (fare of fareRuleStore.items(); track fare.id) {
+            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+              <td class="px-4 py-2 font-medium text-slate-900">
+                {{ routeNames().get(fare.route) ?? fare.route }}
+              </td>
+              <td class="px-4 py-2">{{ fare.amount }}</td>
+              <td class="px-4 py-2">
+                {{ fare.effective_from | date: 'short' }}{{
+                  fare.effective_to ? ' – ' + (fare.effective_to | date: 'short') : '+'
+                }}
+              </td>
+            </tr>
+          }
+        </tbody>
+      </ui-table>
+      <ui-paginator
+        [total]="fareRuleStore.total()"
+        [page]="fareRuleStore.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
+  }
+</div>
