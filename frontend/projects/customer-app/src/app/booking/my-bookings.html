@@ -43,21 +43,34 @@
             </td>
             <td class="px-4 py-2 text-right">
               @if (canPay(booking)) {
-                <ui-button
-                  [loading]="payingBookingIds().has(booking.id)"
-                  (pressed)="payNow(booking)"
-                >
-                  Pay now
-                </ui-button>
-              }
-              @if (canPayFromWallet(booking)) {
-                <ui-button
-                  variant="secondary"
-                  [loading]="payingFromWalletBookingIds().has(booking.id)"
-                  (pressed)="payFromWallet(booking)"
-                >
-                  Pay from wallet
-                </ui-button>
+                <div class="flex flex-col items-end gap-1">
+                  @if (canUseWalletBalance(booking)) {
+                    <label class="flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        [checked]="isUsingWalletBalance(booking)"
+                        (change)="toggleUseWalletBalance(booking, $any($event.target).checked)"
+                      />
+                      Use wallet balance
+                    </label>
+                    @if (isUsingWalletBalance(booking) && walletBreakdown(booking); as breakdown) {
+                      <p class="text-xs text-slate-500">
+                        @if (breakdown.fullyCovered) {
+                          Fully covered by wallet — no card charge needed
+                        } @else {
+                          {{ breakdown.walletPortion }} from wallet, {{ breakdown.remainder }} via
+                          Paystack
+                        }
+                      </p>
+                    }
+                  }
+                  <ui-button
+                    [loading]="payingBookingIds().has(booking.id)"
+                    (pressed)="payNow(booking)"
+                  >
+                    Pay now
+                  </ui-button>
+                </div>
               }
               @if (canViewTickets(booking)) {
                 <ui-button variant="secondary" (pressed)="viewTickets(booking)">

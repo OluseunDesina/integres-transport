@@ -1,7 +1,22 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
+  <div class="flex flex-wrap items-center justify-between gap-3">
     <h1 class="text-lg font-semibold text-slate-900">Fares</h1>
-    <ui-button *appHasPermission="'fares.manage'" (pressed)="goToNewFare()">New fare</ui-button>
+    <div class="flex items-center gap-3">
+      @if (isPerSegment()) {
+        <!-- Deliberately to the route list rather than a route picker
+             here: a grid belongs to one route, and this screen only
+             holds the first page of routes (it loads them for the name
+             column). A bounded picker would silently hide every route
+             past that page — the exact failure the ListStore paging
+             lookup exists to end. -->
+        <a
+          routerLink="/routes"
+          class="inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+          >Price by stop pair</a
+        >
+      }
+      <ui-button *appHasPermission="'fares.manage'" (pressed)="goToNewFare()">New fare</ui-button>
+    </div>
   </div>
 
   @if (isPerSegment()) {
@@ -10,9 +25,13 @@
     } @else if (fareSegmentRuleStore.isEmpty()) {
       <ui-empty-state
         title="No fares yet"
-        description="This business prices routes per segment — add a fare for a stop pair to start quoting."
+        description="This business prices routes per segment, so every stop pair needs its own fare. Open a route's fare grid to price them all together."
       >
-        <ui-button *appHasPermission="'fares.manage'" (pressed)="goToNewFare()">New fare</ui-button>
+        <a
+          routerLink="/routes"
+          class="inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+          >Price by stop pair</a
+        >
       </ui-empty-state>
     } @else {
       <ui-table [loading]="fareSegmentRuleStore.loading()">

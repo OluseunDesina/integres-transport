@@ -45,4 +45,18 @@ export class BusinessStore extends ListStore<Business> {
     }
     return { items: data.results, total: data.count };
   }
+
+  /**
+   * Resolves a single Business by id for `business-form.ts` (edit mode)
+   * and `business-kyb.ts`, neither of which has a single-Business GET to
+   * call — there is no `GET /businesses/{id}/`.
+   *
+   * The paging, the early exit and the "never touch browse state" rule
+   * all live in `ListStore.findByIdPaged` — this store only supplies the
+   * scope. `GET /businesses/` is already Client-scoped server-side and
+   * takes no filter of its own, so the scope is the empty query.
+   */
+  findById(id: string): Promise<Business | null> {
+    return this.findByIdPaged(id, {});
+  }
 }

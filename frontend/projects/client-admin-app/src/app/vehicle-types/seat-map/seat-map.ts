@@ -6,7 +6,7 @@ import type { components } from '@api-client';
 import { AuthStore, HasPermissionDirective } from '@auth';
 import { Alert, Button, EmptyState, TextField } from '@shared-ui';
 
-import { VehicleTypeStore } from '../../shared/data/store/vehicle-type.store';
+import { VehicleTypeStore, type VehicleType } from '../../shared/data/store/vehicle-type.store';
 
 type Seat = components['schemas']['Seat'];
 
@@ -122,9 +122,17 @@ export class SeatMap implements OnInit {
 
   private readonly vehicleTypeId = this.route.snapshot.paramMap.get('id') ?? '';
   protected readonly notFound = signal(false);
-  protected readonly vehicleType = computed(
-    () => this.store.items().find((vt) => vt.id === this.vehicleTypeId) ?? null
-  );
+  /**
+   * Resolved once in `ngOnInit`, not `computed()` over `store.items()`.
+   *
+   * Two defects in the computed form. It only ever saw whatever page the
+   * store happened to hold, so a refresh or a pasted link to a vehicle
+   * type past row 25 rendered not-found. And because `VehicleTypeStore`
+   * is `providedIn: 'root'` and shared, any *other* screen paginating it
+   * would have made this screen's own vehicle type silently become
+   * `null` mid-session — the capacity check below reads it.
+   */
+  protected readonly vehicleType = signal<VehicleType | null>(null);
 
   protected readonly existingSeats = signal<Seat[]>([]);
   protected readonly loadingSeats = signal(false);
@@ -183,9 +191,7 @@ export class SeatMap implements OnInit {
       this.notFound.set(true);
       return;
     }
-    if (!this.vehicleType()) {
-      await this.store.getAll();
-    }
+    this.vehicleType.set(await this.store.findById(this.vehicleTypeId));
     if (!this.vehicleType()) {
       this.notFound.set(true);
       return;

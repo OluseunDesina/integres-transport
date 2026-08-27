@@ -14,11 +14,20 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
       [class.border-emerald-200]="variant() === 'success'"
       [class.bg-emerald-50]="variant() === 'success'"
       [class.text-emerald-700]="variant() === 'success'"
+      [class.border-amber-200]="variant() === 'warning'"
+      [class.bg-amber-50]="variant() === 'warning'"
+      [class.text-amber-800]="variant() === 'warning'"
     >
       <ng-content />
     </div>
   `,
 })
 export class Alert {
-  readonly variant = input<'error' | 'success'>('error');
+  /**
+   * `warning` is for a state the user can act on that is not itself a
+   * failure — a Business priced flat while looking at its per-segment
+   * fare grid, say. Distinct from `error` because nothing has gone
+   * wrong yet; colouring it red would train people to ignore red.
+   */
+  readonly variant = input<'error' | 'success' | 'warning'>('error');
 }

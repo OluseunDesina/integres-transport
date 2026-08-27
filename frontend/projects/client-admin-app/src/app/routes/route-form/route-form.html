@@ -14,13 +14,6 @@
     }
 
     <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-select
-        label="Business"
-        [options]="businessOptionsList()"
-        formControlName="business"
-        [invalid]="!!fieldError('business')"
-        [errorMessage]="fieldError('business')"
-      />
       <ui-text-field
         label="Route name"
         formControlName="name"
@@ -30,12 +23,10 @@
       <ui-text-field label="Code" formControlName="code" />
       <ui-text-field label="Description" formControlName="description" />
 
-      @if (editing()) {
-        <label class="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" formControlName="is_active" class="h-4 w-4 rounded border-slate-300" />
-          Active
-        </label>
-      }
+      <!-- No Active checkbox: activating/deactivating is a one-click
+           switch on the Routes table now, so it doesn't need a form
+           round-trip. `is_active` is still sent unchanged on save (see
+           the form group) so editing details can't silently reset it. -->
 
       <div class="mt-2 flex items-center gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">

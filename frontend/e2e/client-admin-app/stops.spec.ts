@@ -30,7 +30,6 @@ async function selectActiveBusiness(page: Page, name: string): Promise<void> {
 
 async function createStop(page: Page, name: string): Promise<void> {
   await page.goto('/stops/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Stop name').fill(name);
   await page.getByLabel('Address').fill('12 Awolowo Rd, Ikeja');
   await page.getByRole('button', { name: 'Create stop' }).click();
@@ -54,7 +53,6 @@ test.describe('client-admin-app stops', () => {
     await signIn(page);
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await page.goto('/stops/new');
-    await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
     await page.getByLabel('Stop name').fill(uniqueStopName());
     await page.getByRole('button', { name: 'Create stop' }).click();
 
@@ -85,7 +83,6 @@ test.describe('client-admin-app stops', () => {
     await signIn(page);
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await page.goto('/stops/new');
-    await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
     await page.getByLabel('Stop name').fill(name);
     await page.getByLabel('Latitude').fill('6.524379');
     await page.getByLabel('Longitude').fill('3.379206');
@@ -112,7 +109,6 @@ test.describe('client-admin-app stops', () => {
       .click();
     await expect(page.getByRole('heading', { name: 'Edit stop' })).toBeVisible();
     await expect(page.getByLabel('Stop name')).toHaveValue(originalName);
-    await expect(page.getByLabel('Business')).toBeDisabled();
 
     await page.getByLabel('Stop name').fill(updatedName);
     await page.getByRole('button', { name: 'Save changes' }).click();

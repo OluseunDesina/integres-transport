@@ -1,0 +1,221 @@
+<div class="mx-auto max-w-2xl">
+  @if (notFound()) {
+    <p class="text-sm text-slate-500">
+      That business couldn't be found.
+      <a routerLink="/businesses" class="font-medium text-slate-900 underline">Back to businesses</a>
+    </p>
+  } @else if (loading()) {
+    <p class="text-sm text-slate-500">Loading…</p>
+  } @else {
+    <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-lg font-semibold text-slate-900">
+          Business verification (KYB)
+        </h1>
+        @if (business(); as b) {
+          <p class="mt-1 text-sm text-slate-500">{{ b.name }}</p>
+        }
+      </div>
+      @if (business(); as b) {
+        <ui-status-pill [label]="b.kyb_status" [tone]="kybStatusTone(b.kyb_status)" />
+      }
+    </div>
+
+    <p class="mb-6 text-sm text-slate-600">
+      Supply the documents below so we can verify this business. You can come back at any time —
+      each section shows what has already been supplied. Uploading a document after approval adds
+      it to the record without changing the decision.
+    </p>
+
+    @if (errorMessage(); as message) {
+      <ui-alert class="mb-4">{{ message }}</ui-alert>
+    }
+
+    <!-- 1. Directors ------------------------------------------------------ -->
+    <section class="mb-10">
+      <h2 class="mb-1 text-sm font-semibold text-slate-900">Directors</h2>
+      <p class="mb-4 text-sm text-slate-500">
+        Add every director named on the business's CAC filing, then upload each one's ID.
+      </p>
+
+      @if (activeDirectors().length === 0) {
+        <!-- `ui-empty-state`, not a hand-rolled dashed box: this screen
+             was reproducing that component's own styling by hand, which
+             is exactly the drift the shared library exists to prevent. -->
+        <ui-empty-state
+          class="mb-4"
+          title="No directors added yet"
+          description="Add each director named on the business's CAC filing below."
+        />
+      } @else {
+        <ul class="mb-4 flex flex-col gap-3">
+          @for (director of activeDirectors(); track director.id) {
+            <li class="rounded-md border border-slate-200 p-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <!-- `min-w-0 flex-1`: without it a long name wrapped the
+                     Remove button onto its own line for some directors and
+                     not others, so a list of four rendered four different
+                     header layouts. -->
+                <div class="min-w-0 flex-1 wrap-anywhere">
+                  <p class="text-sm font-medium text-slate-900">{{ director.full_name }}</p>
+                  <p class="text-sm text-slate-500">
+                    {{ idTypeLabel(director.id_type)
+                    }}{{ director.id_number ? ' · ' + director.id_number : '' }}
+                  </p>
+                </div>
+                <ui-button
+                  *appHasPermission="'business.manage'"
+                  variant="secondary"
+                  [ariaLabel]="'Remove ' + director.full_name"
+                  (pressed)="removeDirector(director)"
+                >
+                  Remove
+                </ui-button>
+              </div>
+
+              @if (documentsForDirector(director.id).length > 0) {
+                <ul class="mt-3 flex flex-col gap-1">
+                  @for (doc of documentsForDirector(director.id); track doc.id) {
+                    <li class="flex items-center gap-2 text-sm text-slate-600">
+                      <ui-status-pill [label]="doc.status" [tone]="kybStatusTone(doc.status)" />
+                      <span>{{ fileName(doc) }}</span>
+                    </li>
+                  }
+                </ul>
+              } @else {
+                <p class="mt-3 text-sm text-amber-700">No ID uploaded yet.</p>
+              }
+
+              <div *appHasPermission="'kyb.submit'" class="mt-3 flex flex-wrap items-end gap-3">
+                <!-- `min-w-0 flex-1 sm:max-w-sm` on the wrapper, `w-full`
+                     on the input: without them a `flex flex-col` block
+                     sizes to its widest child, which here is the label —
+                     so the file input's width tracked the director's name
+                     length. Four directors rendered four differently
+                     sized inputs on one screen, and a long enough name
+                     both wrapped the Upload button onto its own row and
+                     clipped the label off-screen at 390px. -->
+                <div class="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-sm">
+                  <label
+                    [attr.for]="'director-file-' + director.id"
+                    class="wrap-anywhere text-sm font-medium text-slate-700"
+                  >
+                    {{ director.full_name }}'s ID document
+                  </label>
+                  <input
+                    [id]="'director-file-' + director.id"
+                    type="file"
+                    accept="application/pdf,image/*"
+                    (change)="onFileSelected('director:' + director.id, $event)"
+                    class="min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+                  />
+                </div>
+                <ui-button
+                  [loading]="uploading() === 'director:' + director.id"
+                  [disabled]="!hasPendingFile('director:' + director.id)"
+                  [ariaLabel]="'Upload ' + director.full_name + '\'s ID'"
+                  (pressed)="upload('director:' + director.id, 'directors_id', director.id)"
+                >
+                  Upload
+                </ui-button>
+              </div>
+            </li>
+          }
+        </ul>
+      }
+
+      <!-- `bg-slate-50`: the add form and a director row were the same
+           border, radius and padding on the same white ground, so the
+           form read as one more entry in the list rather than as the
+           control that creates them. -->
+      <div
+        *appHasPermission="'business.manage'"
+        class="rounded-md border border-slate-200 bg-slate-50 p-4"
+      >
+        <h3 class="mb-3 text-sm font-medium text-slate-700">Add a director</h3>
+        <form [formGroup]="directorForm" (ngSubmit)="addDirector()" class="flex flex-col gap-4" novalidate>
+          <ui-text-field
+            label="Full name"
+            formControlName="full_name"
+            [invalid]="!!fieldError('full_name')"
+            [errorMessage]="fieldError('full_name')"
+          />
+          <ui-select
+            label="ID type"
+            [options]="idTypeOptions"
+            formControlName="id_type"
+            [invalid]="!!fieldError('id_type')"
+            [errorMessage]="fieldError('id_type')"
+          />
+          @if (idGuidance(); as guidance) {
+            <p class="-mt-2 text-sm text-slate-500">{{ guidance }} {{ idGeneralGuidance }}</p>
+          }
+          <ui-text-field label="ID number (optional)" formControlName="id_number" />
+          <div>
+            <ui-button type="submit" [loading]="addingDirector()" [disabled]="addingDirector()">
+              Add director
+            </ui-button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- 2-5. Company-level documents -------------------------------------- -->
+    @for (section of companySections; track section.type) {
+      <section class="mb-8 border-t border-slate-200 pt-6">
+        <h2 class="mb-1 text-sm font-semibold text-slate-900">{{ section.title }}</h2>
+        <p class="mb-3 text-sm text-slate-500">{{ section.guidance }}</p>
+
+        @if (documentsFor(section.type).length > 0) {
+          <ul class="mb-3 flex flex-col gap-1">
+            @for (doc of documentsFor(section.type); track doc.id) {
+              <li class="flex items-center gap-2 text-sm text-slate-600">
+                <ui-status-pill [label]="doc.status" [tone]="kybStatusTone(doc.status)" />
+                <span>{{ fileName(doc) }}</span>
+              </li>
+            }
+          </ul>
+        } @else {
+          <p class="mb-3 text-sm text-amber-700">Not supplied yet.</p>
+        }
+
+        <div *appHasPermission="'kyb.submit'" class="flex flex-wrap items-end gap-3">
+          <!-- Same width treatment as the director rows above, so every
+               file input on the screen renders at one width rather than
+               at its own intrinsic size. -->
+          <div class="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-sm">
+            <!-- Distinct from the Upload button's own aria-label, so the
+                 file input and the button that submits it aren't two
+                 controls announced by the same name. -->
+            <label [attr.for]="'file-' + section.type" class="sr-only">
+              {{ section.title }} file
+            </label>
+            <input
+              [id]="'file-' + section.type"
+              type="file"
+              accept="application/pdf,image/*"
+              (change)="onFileSelected(section.type, $event)"
+              class="min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+            />
+          </div>
+          <ui-button
+            [loading]="uploading() === section.type"
+            [disabled]="!hasPendingFile(section.type)"
+            [ariaLabel]="'Upload ' + section.title"
+            (pressed)="upload(section.type, section.type)"
+          >
+            Upload
+          </ui-button>
+        </div>
+      </section>
+    }
+
+    <div class="mt-8 border-t border-slate-200 pt-6">
+      <a
+        routerLink="/businesses"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+        >Back to businesses</a
+      >
+    </div>
+  }
+</div>

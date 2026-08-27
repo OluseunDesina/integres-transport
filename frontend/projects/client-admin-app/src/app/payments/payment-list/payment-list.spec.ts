@@ -15,6 +15,9 @@ function makePaymentIntent(overrides: Partial<PaymentIntent> = {}): PaymentInten
     business: 'biz-1',
     passenger: 'user-1',
     amount: '1500.00',
+    // The wallet-funded slice of a blended wallet + Paystack payment;
+    // '0.00' for an ordinary card-only intent like this fixture.
+    wallet_component_amount: '0.00',
     currency: 'NGN',
     status: 'succeeded',
     psp_provider: 'paystack',

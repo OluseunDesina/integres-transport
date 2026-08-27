@@ -240,7 +240,7 @@ describe('MyBookings', () => {
       '/api/v1/payments/',
       jasmine.objectContaining({
         params: { header: { 'Idempotency-Key': jasmine.any(String) } },
-        body: { booking_id: 'booking-1' },
+        body: { booking_id: 'booking-1', use_wallet_balance: false },
       })
     );
     expect(redirect).toHaveBeenCalledWith('https://paystack.test/pay/x');
@@ -293,27 +293,43 @@ describe('MyBookings', () => {
       '/api/v1/wallet/mine/',
       jasmine.objectContaining({ params: { query: { business: 'biz-1' } } })
     );
-    expect(component['canPayFromWallet'](makeBooking() as never)).toBeTrue();
+    expect(component['canUseWalletBalance'](makeBooking() as never)).toBeTrue();
   });
 
-  it('does not offer pay-from-wallet when the balance is short', async () => {
+  it('does not offer the wallet-balance checkbox on a zero balance', async () => {
     apiClient.GET.and.callFake((path: string) => {
       if (path === '/api/v1/wallet/mine/') {
-        return Promise.resolve({ data: { balance: '10.00', currency: 'NGN', transactions: [] } });
+        return Promise.resolve({ data: { balance: '0.00', currency: 'NGN', transactions: [] } });
       }
       return Promise.resolve({ data: { count: 1, results: [makeBooking()] } });
     });
 
     await createComponent();
 
-    expect(component['canPayFromWallet'](makeBooking() as never)).toBeFalse();
-    const actions = (fixture.nativeElement as HTMLElement).querySelectorAll(
-      'tbody tr td:last-child ui-button'
-    );
-    expect(Array.from(actions).some((btn) => btn.textContent?.trim() === 'Pay from wallet')).toBeFalse();
+    expect(component['canUseWalletBalance'](makeBooking() as never)).toBeFalse();
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('tbody tr td:last-child input[type=checkbox]')
+    ).toBeNull();
   });
 
-  it('pays from wallet and refetches the list on success', async () => {
+  it('offers the checkbox on a balance that only partly covers the total', async () => {
+    apiClient.GET.and.callFake((path: string) => {
+      if (path === '/api/v1/wallet/mine/') {
+        return Promise.resolve({ data: { balance: '50.00', currency: 'NGN', transactions: [] } });
+      }
+      return Promise.resolve({ data: { count: 1, results: [makeBooking({ total_amount: '750.00' })] } });
+    });
+
+    await createComponent();
+
+    expect(component['canUseWalletBalance'](makeBooking() as never)).toBeTrue();
+    const breakdown = component['walletBreakdown'](makeBooking({ total_amount: '750.00' }) as never);
+    expect(breakdown?.fullyCovered).toBeFalse();
+    expect(breakdown?.walletPortion).toBe('NGN 50.00');
+    expect(breakdown?.remainder).toBe('NGN 700.00');
+  });
+
+  it('checking the wallet-balance box sends use_wallet_balance and refetches on a succeeded response', async () => {
     apiClient.GET.and.callFake((path: string) => {
       if (path === '/api/v1/wallet/mine/') {
         return Promise.resolve({ data: { balance: '2000.00', currency: 'NGN', transactions: [] } });
@@ -321,20 +337,49 @@ describe('MyBookings', () => {
       return Promise.resolve({ data: { count: 1, results: [makeBooking()] } });
     });
     await createComponent();
-    apiClient.POST.and.resolveTo({ data: makeBooking({ status: 'paid' }) });
+    apiClient.POST.and.resolveTo({
+      data: { id: 'intent-1', status: 'succeeded', authorization_url: '', reference: 'wallet-ref-1' },
+    });
     apiClient.GET.calls.reset();
 
-    await component['payFromWallet'](makeBooking() as never);
+    component['toggleUseWalletBalance'](makeBooking() as never, true);
+    await component['payNow'](makeBooking() as never);
 
     expect(apiClient.POST).toHaveBeenCalledWith(
-      '/api/v1/bookings/{id}/pay-from-wallet/',
-      jasmine.objectContaining({ params: { path: { id: 'booking-1' } } })
+      '/api/v1/payments/',
+      jasmine.objectContaining({
+        body: { booking_id: 'booking-1', use_wallet_balance: true },
+      })
     );
     expect(apiClient.GET).toHaveBeenCalledWith('/api/v1/bookings/mine/', jasmine.anything());
     expect(component['paymentError']()).toBeNull();
   });
 
-  it('shows the server message when paying from wallet fails', async () => {
+  it('redirects for the remainder when the wallet balance only partly covers a blended payment', async () => {
+    apiClient.GET.and.callFake((path: string) => {
+      if (path === '/api/v1/wallet/mine/') {
+        return Promise.resolve({ data: { balance: '50.00', currency: 'NGN', transactions: [] } });
+      }
+      return Promise.resolve({ data: { count: 1, results: [makeBooking({ total_amount: '750.00' })] } });
+    });
+    await createComponent();
+    apiClient.POST.and.resolveTo({
+      data: {
+        id: 'intent-1',
+        status: 'pending',
+        authorization_url: 'https://paystack.test/pay/remainder',
+        reference: 'ref-2',
+      },
+    });
+    const redirect = spyOn(component as unknown as WithRedirect, 'redirectToPaystack');
+
+    component['toggleUseWalletBalance'](makeBooking({ total_amount: '750.00' }) as never, true);
+    await component['payNow'](makeBooking({ total_amount: '750.00' }) as never);
+
+    expect(redirect).toHaveBeenCalledWith('https://paystack.test/pay/remainder');
+  });
+
+  it('shows the server message when a blended payment fails', async () => {
     apiClient.GET.and.callFake((path: string) => {
       if (path === '/api/v1/wallet/mine/') {
         return Promise.resolve({ data: { balance: '2000.00', currency: 'NGN', transactions: [] } });
@@ -346,7 +391,8 @@ describe('MyBookings', () => {
       error: { detail: 'Your wallet balance is not enough to pay for this booking.' },
     });
 
-    await component['payFromWallet'](makeBooking() as never);
+    component['toggleUseWalletBalance'](makeBooking() as never, true);
+    await component['payNow'](makeBooking() as never);
 
     expect(component['paymentError']()).toBe(
       'Your wallet balance is not enough to pay for this booking.'

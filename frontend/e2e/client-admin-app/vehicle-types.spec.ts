@@ -27,7 +27,6 @@ async function selectActiveBusiness(page: Page, name: string): Promise<void> {
 
 async function createVehicleType(page: Page, name: string, capacity: string): Promise<void> {
   await page.goto('/vehicle-types/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Name').fill(name);
   await page.getByLabel('Capacity (seats)').fill(capacity);
   await page.getByRole('button', { name: 'Create vehicle type' }).click();
@@ -51,7 +50,6 @@ test.describe('client-admin-app vehicle types', () => {
     await signIn(page);
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await page.goto('/vehicle-types/new');
-    await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
     await page.getByLabel('Capacity (seats)').fill('20');
     await page.getByRole('button', { name: 'Create vehicle type' }).click();
 
@@ -88,7 +86,6 @@ test.describe('client-admin-app vehicle types', () => {
       .click();
     await expect(page.getByRole('heading', { name: 'Edit vehicle type' })).toBeVisible();
     await expect(page.getByLabel('Name')).toHaveValue(originalName);
-    await expect(page.getByLabel('Business')).toBeDisabled();
 
     await page.getByLabel('Name').fill(updatedName);
     await page.getByRole('button', { name: 'Save changes' }).click();

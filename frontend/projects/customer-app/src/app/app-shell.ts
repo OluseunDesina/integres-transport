@@ -1,7 +1,12 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { AuthApiService, AuthStore } from '@auth';
-import { NotificationBell, type NotificationRouteResolver } from '@layout';
+import { ChangeDetectionStrategy, Component, inject } from "@angular/core";
+import {
+  Router,
+  RouterLink,
+  RouterLinkActive,
+  RouterOutlet,
+} from "@angular/router";
+import { AuthApiService, AuthStore } from "@auth";
+import { NotificationBell, type NotificationRouteResolver } from "@layout";
 
 // docs/specs/9-notifications.md: this app's own recipient type is
 // ticket_unused_reminder (related_object_type "Ticket"). There is no
@@ -12,8 +17,8 @@ import { NotificationBell, type NotificationRouteResolver } from '@layout';
 // deep link to the specific ticket.
 const resolveNotificationRoute: NotificationRouteResolver = (type) => {
   switch (type) {
-    case 'Ticket':
-      return ['/my-bookings'];
+    case "Ticket":
+      return ["/my-bookings"];
     default:
       return null;
   }
@@ -38,9 +43,9 @@ const resolveNotificationRoute: NotificationRouteResolver = (type) => {
  * child route keeps its own `canActivate: [permissionGuard]`.
  */
 @Component({
-  selector: 'app-shell',
+  selector: "app-shell",
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'flex min-h-screen flex-col bg-slate-50' },
+  host: { class: "flex min-h-screen flex-col bg-slate-50" },
   imports: [RouterLink, RouterLinkActive, RouterOutlet, NotificationBell],
   template: `
     <header class="border-b border-slate-200 bg-white">
@@ -52,7 +57,11 @@ const resolveNotificationRoute: NotificationRouteResolver = (type) => {
           Integra Travel
         </a>
 
-        <nav role="navigation" aria-label="Primary" class="flex min-w-0 flex-1 items-center gap-1">
+        <nav
+          role="navigation"
+          aria-label="Primary"
+          class="flex min-w-0 flex-1 items-center gap-1"
+        >
           <a
             routerLink="/search"
             routerLinkActive="bg-slate-100 text-slate-900 font-medium"
@@ -135,6 +144,6 @@ export class AppShell {
 
   protected async signOut(): Promise<void> {
     this.authApi.logout();
-    await this.router.navigate(['/login']);
+    await this.router.navigate(["/login"]);
   }
 }

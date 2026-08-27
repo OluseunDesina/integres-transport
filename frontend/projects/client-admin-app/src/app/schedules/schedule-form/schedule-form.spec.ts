@@ -25,6 +25,15 @@ function makeSchedule(overrides: Partial<Schedule> = {}): Schedule {
 class FakeScheduleStore {
   items = signal<Schedule[]>([]);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
+  /** Mirrors `ListStore.findByIdPaged`: match the loaded rows, else
+   * null. The component must never read `items()` and `.find()` for
+   * itself — doing so is what made any record past the store's
+   * current page report "not found" on a refresh. */
+  findById = jasmine
+    .createSpy('findById')
+    .and.callFake((id: string) =>
+      Promise.resolve(this.items().find((item) => item.id === id) ?? null)
+    );
 }
 
 class FakeBusinessOptions {
@@ -52,7 +61,11 @@ async function setup(paramId: string | null, existing: Schedule[] = []) {
       { provide: BusinessOptionsService, useValue: businessOptions },
       {
         provide: ActivatedRoute,
-        useValue: { snapshot: { paramMap: convertToParamMap(paramId ? { id: paramId } : {}) } },
+        useValue: {
+          snapshot: {
+            paramMap: convertToParamMap(paramId ? { id: paramId } : {}),
+          },
+        },
       },
     ],
   }).compileComponents();
@@ -85,7 +98,7 @@ describe('ScheduleForm', () => {
         '/api/v1/routes/',
         jasmine.objectContaining({
           params: { query: { limit: 100, offset: 0, business: 'biz-1' } },
-        })
+        }),
       );
     });
 
@@ -114,7 +127,6 @@ describe('ScheduleForm', () => {
         departure_time: '07:30',
         effective_from: '2026-01-01',
         effective_until: '',
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -134,7 +146,6 @@ describe('ScheduleForm', () => {
         departure_time: '07:30',
         effective_from: '2026-01-01',
         effective_until: '',
-        is_active: true,
       });
       fixture.componentInstance['toggleDay'](1);
 
@@ -143,8 +154,11 @@ describe('ScheduleForm', () => {
       expect(apiClient.POST).toHaveBeenCalledWith(
         '/api/v1/schedules/',
         jasmine.objectContaining({
-          body: jasmine.objectContaining({ route: 'route-1', days_of_week: [1] }),
-        })
+          body: jasmine.objectContaining({
+            route: 'route-1',
+            days_of_week: [1],
+          }),
+        }),
       );
       expect(navigateSpy).toHaveBeenCalledWith(['/schedules']);
     });
@@ -159,7 +173,6 @@ describe('ScheduleForm', () => {
         departure_time: '07:30',
         effective_from: '2026-01-01',
         effective_until: '',
-        is_active: true,
       });
       fixture.componentInstance['toggleDay'](1);
 
@@ -199,7 +212,7 @@ describe('ScheduleForm', () => {
 
       expect(apiClient.PATCH).toHaveBeenCalledWith(
         '/api/v1/schedules/{id}/',
-        jasmine.objectContaining({ params: { path: { id: 'sch-1' } } })
+        jasmine.objectContaining({ params: { path: { id: 'sch-1' } } }),
       );
     });
 

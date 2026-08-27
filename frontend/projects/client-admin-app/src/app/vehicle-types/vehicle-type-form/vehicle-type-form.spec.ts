@@ -22,6 +22,15 @@ function makeVehicleType(overrides: Partial<VehicleType> = {}): VehicleType {
 class FakeVehicleTypeStore {
   items = signal<VehicleType[]>([]);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
+  /** Mirrors `ListStore.findByIdPaged`: match the loaded rows, else
+   * null. The component must never read `items()` and `.find()` for
+   * itself — doing so is what made any record past the store's
+   * current page report "not found" on a refresh. */
+  findById = jasmine
+    .createSpy('findById')
+    .and.callFake((id: string) =>
+      Promise.resolve(this.items().find((item) => item.id === id) ?? null)
+    );
 }
 
 class FakeBusinessOptions {
@@ -49,7 +58,11 @@ async function setup(paramId: string | null, existing: VehicleType[] = []) {
       { provide: BusinessOptionsService, useValue: businessOptions },
       {
         provide: ActivatedRoute,
-        useValue: { snapshot: { paramMap: convertToParamMap(paramId ? { id: paramId } : {}) } },
+        useValue: {
+          snapshot: {
+            paramMap: convertToParamMap(paramId ? { id: paramId } : {}),
+          },
+        },
       },
     ],
   }).compileComponents();
@@ -88,7 +101,6 @@ describe('VehicleTypeForm', () => {
         business: 'biz-1',
         name: '33-seater coaster',
         capacity: 33,
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -96,19 +108,23 @@ describe('VehicleTypeForm', () => {
       expect(apiClient.POST).toHaveBeenCalledWith(
         '/api/v1/vehicle-types/',
         jasmine.objectContaining({
-          body: jasmine.objectContaining({ business: 'biz-1', name: '33-seater coaster' }),
-        })
+          body: jasmine.objectContaining({
+            business: 'biz-1',
+            name: '33-seater coaster',
+          }),
+        }),
       );
       expect(navigateSpy).toHaveBeenCalledWith(['/vehicle-types']);
     });
 
     it('shows the server error message on failure', async () => {
-      apiClient.POST.and.resolveTo({ error: { business: ['Unknown business.'] } });
+      apiClient.POST.and.resolveTo({
+        error: { business: ['Unknown business.'] },
+      });
       fixture.componentInstance['form'].setValue({
         business: 'biz-1',
         name: 'X',
         capacity: 1,
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -145,7 +161,7 @@ describe('VehicleTypeForm', () => {
 
       expect(apiClient.PATCH).toHaveBeenCalledWith(
         '/api/v1/vehicle-types/{id}/',
-        jasmine.objectContaining({ params: { path: { id: 'vt-1' } } })
+        jasmine.objectContaining({ params: { path: { id: 'vt-1' } } }),
       );
     });
 

@@ -14,6 +14,7 @@ function makePaymentIntent(overrides: Partial<PaymentIntent> = {}): PaymentInten
     business: 'biz-1',
     passenger: 'user-1',
     amount: '750.00',
+    wallet_component_amount: '0.00',
     currency: 'NGN',
     status: 'succeeded',
     psp_provider: 'paystack',

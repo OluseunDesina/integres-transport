@@ -4,6 +4,14 @@
     <ui-button *appHasPermission="'network.manage'" (pressed)="goToNewRoute()">New route</ui-button>
   </div>
 
+  <!-- A failed activate/deactivate is transient and must not replace the
+       table — the row it came from still needs to be visible, and its
+       switch has already rolled back. A load error still does replace
+       it, as before. -->
+  @if (activeError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
   } @else if (store.isEmpty()) {
@@ -19,9 +27,8 @@
         <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
           <th class="px-4 py-2">Name</th>
           <th class="px-4 py-2">Code</th>
-          <th class="px-4 py-2">Business</th>
           <th class="px-4 py-2">Stops</th>
-          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Active</th>
           <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -30,22 +37,46 @@
           <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
             <td class="px-4 py-2 font-medium text-slate-900">{{ route.name }}</td>
             <td class="px-4 py-2">{{ route.code || '—' }}</td>
-            <td class="px-4 py-2">{{ businessNames().get(route.business) ?? route.business }}</td>
             <td class="px-4 py-2">{{ route.stops.length }}</td>
             <td class="px-4 py-2">
-              @if (route.is_active) {
+              <!-- The switch is a write, so it's gated the same way the
+                   Edit link below already is — but a viewer without
+                   network.manage still needs to *see* the state, hence
+                   the read-only pill rather than an empty cell. -->
+              @if (canManage()) {
+                <!-- `?? true` mirrors the model default: is_active is
+                     optional in the generated schema because it has one. -->
+                <ui-toggle
+                  [checked]="route.is_active ?? true"
+                  [pending]="pendingId() === route.id"
+                  [label]="((route.is_active ?? true) ? 'Deactivate ' : 'Activate ') + route.name"
+                  (toggled)="onToggleActive(route, $event)"
+                />
+              } @else if (route.is_active) {
                 <ui-status-pill tone="positive" label="Active" />
               } @else {
                 <ui-status-pill tone="neutral" label="Inactive" />
               }
             </td>
             <td class="px-4 py-2 text-right">
-              <a
-                *appHasPermission="'network.manage'"
-                [routerLink]="['/routes', route.id, 'edit']"
-                class="text-sm font-medium text-slate-700 hover:text-slate-900"
-                >Edit</a
-              >
+              <div class="flex items-center justify-end gap-4">
+                <!-- The fare grid is per-route, so a route's own row is
+                     its natural entry point — docs/specs/12-fare-matrix.md.
+                     Gated on fares.view, not network.manage: reading
+                     what a route charges is not a network edit. -->
+                <a
+                  *appHasPermission="'fares.view'"
+                  [routerLink]="['/fares/fare-matrix', route.id]"
+                  class="text-sm font-medium text-slate-700 hover:text-slate-900"
+                  >Fares</a
+                >
+                <a
+                  *appHasPermission="'network.manage'"
+                  [routerLink]="['/routes', route.id, 'edit']"
+                  class="text-sm font-medium text-slate-700 hover:text-slate-900"
+                  >Edit</a
+                >
+              </div>
             </td>
           </tr>
         }

@@ -83,6 +83,7 @@ describe('ValidateTicket', () => {
         from_stop: 'Ikeja',
         to_stop: 'CMS',
         trip_departure_at: '2026-09-01T06:30:00Z',
+        booking_status: 'paid',
       },
     });
     const component = fixture.componentInstance;

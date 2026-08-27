@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Router, provideRouter } from '@angular/router';
+import { API_CLIENT } from '@api-client';
 import { AuthStore } from '@auth';
 import type { AuthUser } from '@auth';
 
@@ -65,6 +66,12 @@ class FakeSelectedBusinessStore {
   selectedBusinessId = signal<string | null>('biz-1');
 }
 
+const apiClientStub = {
+  GET: jasmine.createSpy('GET').and.resolveTo({ data: { count: 0, results: [] } }),
+  POST: jasmine.createSpy('POST').and.resolveTo({ data: {} }),
+  PATCH: jasmine.createSpy('PATCH').and.resolveTo({ data: {} }),
+};
+
 describe('VehicleTypeList', () => {
   let fixture: ComponentFixture<VehicleTypeList>;
   let store: FakeVehicleTypeStore;
@@ -78,9 +85,13 @@ describe('VehicleTypeList', () => {
       imports: [VehicleTypeList],
       providers: [
         provideRouter([]),
+        { provide: API_CLIENT, useValue: apiClientStub },
         { provide: VehicleTypeStore, useValue: store },
         { provide: BusinessStore, useValue: new FakeBusinessStore() },
-        { provide: SelectedBusinessStore, useValue: new FakeSelectedBusinessStore() },
+        {
+          provide: SelectedBusinessStore,
+          useValue: new FakeSelectedBusinessStore(),
+        },
       ],
     }).compileComponents();
 
@@ -88,7 +99,9 @@ describe('VehicleTypeList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'fleet.view', 'seating.view'] })
+      makeUser({
+        permissions: ['client-admin:access', 'fleet.view', 'seating.view'],
+      }),
     );
 
     fixture = TestBed.createComponent(VehicleTypeList);
@@ -149,7 +162,9 @@ describe('VehicleTypeList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'fleet.view', 'fleet.manage'] })
+      makeUser({
+        permissions: ['client-admin:access', 'fleet.view', 'fleet.manage'],
+      }),
     );
     fixture.detectChanges();
 
@@ -163,7 +178,9 @@ describe('VehicleTypeList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'fleet.view', 'fleet.manage'] })
+      makeUser({
+        permissions: ['client-admin:access', 'fleet.view', 'fleet.manage'],
+      }),
     );
     fixture.detectChanges();
     const router = TestBed.inject(Router);

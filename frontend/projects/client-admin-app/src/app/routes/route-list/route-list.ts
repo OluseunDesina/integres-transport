@@ -1,19 +1,20 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  OnInit,
   computed,
   effect,
   inject,
+  signal,
   untracked,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { HasPermissionDirective } from '@auth';
-import { Alert, Button, EmptyState, Paginator, StatusPill, Table } from '@shared-ui';
+import { API_CLIENT } from '@api-client';
+import { AuthStore, HasPermissionDirective, PermissionsService } from '@auth';
+import { Alert, Button, EmptyState, Paginator, StatusPill, Table, Toggle } from '@shared-ui';
 
-import { BusinessStore } from '../../shared/data/store/business.store';
-import { RouteStore } from '../../shared/data/store/route.store';
+import { RouteStore, type Route } from '../../shared/data/store/route.store';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
+import { extractFirstErrorMessage } from '../../shared/error-message';
 
 @Component({
   selector: 'app-route-list',
@@ -27,18 +28,24 @@ import { SelectedBusinessStore } from '../../shared/data/store/selected-business
     Paginator,
     StatusPill,
     Table,
+    Toggle,
   ],
   templateUrl: './route-list.html',
 })
-export class RouteList implements OnInit {
+export class RouteList {
   protected readonly store = inject(RouteStore);
-  private readonly businessStore = inject(BusinessStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
+  private readonly permissions = inject(PermissionsService);
+  private readonly api = inject(API_CLIENT);
+  private readonly authStore = inject(AuthStore);
   private readonly router = inject(Router);
 
-  protected readonly businessNames = computed(
-    () => new Map(this.businessStore.items().map((business) => [business.id, business.name]))
-  );
+  protected readonly canManage = computed(() => this.permissions.has('network.manage'));
+
+  /** The row whose activate/deactivate is in flight, so only that row's
+   * switch goes into its pending state rather than the whole table. */
+  protected readonly pendingId = signal<string | null>(null);
+  protected readonly activeError = signal<string | null>(null);
 
   // AppShell's constructor already kicked off SelectedBusinessStore's
   // one-shot load for the whole session; this effect just reacts to
@@ -61,6 +68,13 @@ export class RouteList implements OnInit {
   // remains a real dependency. `allowSignalWrites` is still required
   // alongside it since the write itself is still a write, just no
   // longer a *tracked* one.
+  //
+  // This is the *only* fetch trigger on this screen — there is no
+  // ngOnInit calling getAll(), deliberately: an unscoped fetch there
+  // would race this scoped one and the table would briefly show every
+  // Route across every Business. BusinessStore isn't loaded here any
+  // more either, since the Business column it fed is gone — the list is
+  // scoped to one Business, so every row repeated the same value.
   private readonly syncBusinessFilter = effect(
     () => {
       const businessId = this.selectedBusinessStore.selectedBusinessId();
@@ -68,16 +82,8 @@ export class RouteList implements OnInit {
         untracked(() => void this.store.updateQuery({ business: businessId }));
       }
     },
-    { allowSignalWrites: true }
+    { allowSignalWrites: true },
   );
-
-  ngOnInit(): void {
-    void this.businessStore.getAll();
-    // Deliberately no store.getAll() here — the effect above fires the
-    // first scoped fetch once SelectedBusinessStore resolves an id, via
-    // updateQuery(). Calling getAll() here too would race an unscoped
-    // fetch (every Route across every Business) against the scoped one.
-  }
 
   protected onPageChange(offset: number): void {
     void this.store.changePage(offset);
@@ -85,5 +91,37 @@ export class RouteList implements OnInit {
 
   protected async goToNewRoute(): Promise<void> {
     await this.router.navigate(['/routes/new']);
+  }
+
+  /**
+   * Activate/deactivate in place. Deliberately *not* optimistic — the
+   * switch renders straight off `route.is_active` and only moves once
+   * the refetch lands, so a rejected write can't leave the table
+   * showing a state the server never accepted. The per-row `pendingId`
+   * covers the gap.
+   */
+  protected async onToggleActive(route: Route, next: boolean): Promise<void> {
+    this.pendingId.set(route.id);
+    this.activeError.set(null);
+
+    const { error } = await this.api.PATCH('/api/v1/routes/{id}/', {
+      params: { path: { id: route.id } },
+      body: { is_active: next },
+      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+    });
+
+    if (error) {
+      this.activeError.set(
+        extractFirstErrorMessage(
+          error,
+          `Could not ${next ? 'activate' : 'deactivate'} ${route.name}.`,
+        ),
+      );
+      this.pendingId.set(null);
+      return;
+    }
+
+    await this.store.getAll();
+    this.pendingId.set(null);
   }
 }

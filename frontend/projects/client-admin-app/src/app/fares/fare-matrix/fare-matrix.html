@@ -1,0 +1,190 @@
+<div class="flex flex-col gap-6">
+  @if (notFound()) {
+    <p class="text-sm text-slate-500">
+      That route couldn't be found.
+      <a routerLink="/routes" class="font-medium text-slate-900 underline">Back to routes</a>
+    </p>
+  } @else {
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="min-w-0">
+        <h1 class="text-lg font-semibold text-slate-900">Fare grid</h1>
+        <!-- The route name is its own line rather than appended to the
+             heading after a dash: real route names carry their own
+             separators ("Ikeja → CMS", "Lagos - Abeokuta"), and
+             concatenating produced headings with two different dashes
+             in them. -->
+        @if (route(); as loaded) {
+          <p class="mt-1 text-sm font-medium text-slate-700">{{ loaded.name }}</p>
+        }
+        <p class="mt-1 text-sm text-slate-500">
+          A fare for every stop pair a passenger can book. Rows are boarding stops, columns are
+          alighting stops.
+        </p>
+      </div>
+      <a
+        routerLink="/fares"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+        >Back to fares</a
+      >
+    </div>
+
+    @if (loadError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+
+    @if (!loading() && !loadError()) {
+      @if (!isPerSegment()) {
+        <!-- Said before any effort is spent rather than as a 409 after
+             a save: get_fare() picks the rule type from this setting at
+             lookup time, so segment fares saved under `flat` would be
+             stored and then never read. -->
+        <ui-alert variant="warning">
+          This business prices fares flat, so a fare per stop pair wouldn't be used. Change its
+          <strong>fare pricing mode</strong> to per-segment to edit this grid.
+          @if (route(); as loaded) {
+            <a
+              [routerLink]="['/businesses', loaded.business, 'edit']"
+              class="ml-1 font-medium underline"
+              >Open business settings</a
+            >
+          }
+        </ui-alert>
+      }
+
+      @if (!hasGrid()) {
+        <ui-empty-state
+          title="This route needs at least two stops"
+          description="A fare prices the journey between two stops, so there is nothing to price yet. Add stops to the route first."
+        >
+          @if (route(); as loaded) {
+            <a
+              [routerLink]="['/routes', loaded.id, 'edit']"
+              class="inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+            >
+              Edit route stops
+            </a>
+          }
+        </ui-empty-state>
+      } @else {
+        @if (saveError(); as message) {
+          <ui-alert>{{ message }}</ui-alert>
+        }
+        @if (saveSummary(); as message) {
+          <ui-alert variant="success">{{ message }}</ui-alert>
+        }
+
+        <!-- The grid scrolls inside its own container: a 15-stop route
+             is 14 columns wide and must not make the whole page scroll
+             sideways. -->
+        <div class="overflow-x-auto rounded-lg border border-slate-200">
+          <table class="w-full border-collapse text-sm">
+            <caption class="sr-only">
+              Fares for
+              {{ route()?.name }}
+              in
+              {{ currency() }}. Each row is a boarding stop and each column an alighting stop; a
+              blank cell means the segment has no fare and cannot be booked.
+            </caption>
+            <thead>
+              <tr class="bg-slate-50">
+                <!-- The corner cell carries the grid's unit. Every cell
+                     is a price in the same currency, so naming it once
+                     here beats an adornment repeated 45 times, and it
+                     stays on screen while the grid scrolls. -->
+                <td
+                  class="sticky left-0 z-10 bg-slate-50 px-3 py-2 text-xs font-medium uppercase tracking-wide text-slate-500"
+                >
+                  <span class="sr-only">Boarding stop. Amounts in </span>{{ currency() }}
+                </td>
+                @for (stop of columnStops(); track stop.id) {
+                  <th
+                    scope="col"
+                    class="min-w-28 border-l border-slate-200 px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-slate-500"
+                  >
+                    {{ stop.name }}
+                  </th>
+                }
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of grid(); track row.stop.id) {
+                <tr class="border-t border-slate-200">
+                  <th
+                    scope="row"
+                    class="sticky left-0 z-10 whitespace-nowrap bg-white px-3 py-2 text-left font-medium text-slate-900"
+                  >
+                    {{ row.stop.name }}
+                  </th>
+                  @for (cell of row.cells; track cell.key) {
+                    @if (cell.editable) {
+                      <td class="border-l border-slate-200 p-1">
+                        <input
+                          [id]="cellId(cell.rowIndex, cell.columnIndex)"
+                          type="text"
+                          inputmode="decimal"
+                          autocomplete="off"
+                          [attr.aria-label]="cell.label"
+                          [attr.aria-invalid]="isInvalid(cell.key) || null"
+                          [value]="cellValue(cell.key)"
+                          [disabled]="cellsDisabled()"
+                          (input)="onCellInput(cell.key, $event)"
+                          (keydown)="onCellKeydown($event, cell.rowIndex, cell.columnIndex)"
+                          class="min-h-11 w-full rounded-md border px-2 py-1 text-right text-sm tabular-nums focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:bg-slate-50 disabled:text-slate-500"
+                          [class.border-red-500]="isInvalid(cell.key)"
+                          [class.border-amber-400]="isDirty(cell.key) && !isInvalid(cell.key)"
+                          [class.bg-amber-50]="isDirty(cell.key) && !isInvalid(cell.key)"
+                          [class.border-slate-300]="!isDirty(cell.key) && !isInvalid(cell.key)"
+                        />
+                      </td>
+                    } @else {
+                      <!-- A backward pair. Inert rather than disabled:
+                           a passenger cannot book it, so there is no
+                           price to show or withhold. -->
+                      <td class="border-l border-slate-200 bg-slate-50 px-3 py-2 text-center text-slate-400">
+                        <span aria-hidden="true">—</span>
+                      </td>
+                    }
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-4">
+          @if (canManage() && isPerSegment()) {
+            <ui-button [disabled]="!canSave()" [loading]="saving()" (pressed)="onSave()">
+              Save fares
+            </ui-button>
+          }
+          <!-- aria-live so a keyboard/screen-reader user editing deep in
+               the grid hears the count change without leaving the cell. -->
+          <p class="text-sm text-slate-600" aria-live="polite">
+            @if (invalidKeys().size > 0) {
+              <span class="font-medium text-red-600">
+                {{ invalidKeys().size === 1 ? '1 cell needs' : invalidKeys().size + ' cells need' }}
+                a fare greater than zero.
+              </span>
+            } @else if (dirtyKeys().size > 0) {
+              {{ dirtyKeys().size }} unsaved change{{ dirtyKeys().size === 1 ? '' : 's' }}.
+            } @else {
+              No unsaved changes. Amounts are in {{ currency() }}.
+            }
+          </p>
+        </div>
+      }
+    }
+  }
+</div>
+
+<ng-template #closeBody>
+  <p class="text-sm text-slate-600">
+    Clearing a fare stops that segment being sold. Passengers trying to book it will be told no fare
+    is configured, until you price it again.
+  </p>
+  <ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-900">
+    @for (cell of closingCells(); track cell.key) {
+      <li>{{ cell.fromStop.name }} → {{ cell.toStop.name }}</li>
+    }
+  </ul>
+</ng-template>

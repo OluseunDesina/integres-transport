@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
@@ -6,7 +13,6 @@ import { AuthStore } from '@auth';
 import { Alert, Button, Select, TextField } from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
-import { BusinessOptionsService } from '../../shared/business-options.service';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 import { VehicleStore } from '../../shared/data/store/vehicle.store';
 
@@ -46,7 +52,6 @@ export class VehicleForm implements OnInit {
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
   private readonly authStore = inject(AuthStore);
-  private readonly businessOptions = inject(BusinessOptionsService);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   protected readonly store = inject(VehicleStore);
 
@@ -54,27 +59,25 @@ export class VehicleForm implements OnInit {
   protected readonly editing = computed(() => this.vehicleId() !== null);
   protected readonly notFound = signal(false);
 
-  protected readonly businessOptionsList = signal<SelectOption[]>([]);
   protected readonly vehicleTypeOptionsList = signal<SelectOption[]>([]);
   protected readonly submitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
 
+  // `business` has no field in the template any more — it's resolved
+  // from whichever Business is active in the header switcher.
+  // Re-asking was redundant (it was pre-filled from this same value)
+  // and let a user create a record under a Business other than the one
+  // every other screen was showing them. The control stays purely as
+  // the value carrier for create.
   protected readonly form = this.fb.nonNullable.group({
     business: ['', Validators.required],
     vehicle_type: ['', Validators.required],
     registration_number: ['', Validators.required],
     insurance_expires_at: [''],
     roadworthiness_expires_at: [''],
-    is_active: [true],
   });
 
   async ngOnInit(): Promise<void> {
-    try {
-      this.businessOptionsList.set(await this.businessOptions.loadOptions());
-    } catch (err) {
-      this.errorMessage.set(err instanceof Error ? err.message : 'Failed to load businesses.');
-    }
-
     const id = this.route.snapshot.paramMap.get('id');
     if (!id) {
       // Business stays user-changeable on create, so the vehicle-type
@@ -86,19 +89,21 @@ export class VehicleForm implements OnInit {
         void this.onBusinessChange(businessId);
       });
       const activeBusinessId = this.selectedBusinessStore.selectedBusinessId();
-      if (activeBusinessId) {
-        this.form.patchValue({ business: activeBusinessId });
-        await this.loadVehicleTypeOptions(activeBusinessId);
+      if (!activeBusinessId) {
+        this.errorMessage.set('Select a business from the header before creating a vehicle.');
+        return;
       }
+      this.form.patchValue({ business: activeBusinessId });
+      await this.loadVehicleTypeOptions(activeBusinessId);
       return;
     }
     this.vehicleId.set(id);
 
-    let vehicle = this.store.items().find((v) => v.id === id) ?? null;
-    if (!vehicle) {
-      await this.store.getAll();
-      vehicle = this.store.items().find((v) => v.id === id) ?? null;
-    }
+    // Paged full-list lookup, not one bounded page plus `.find()`:
+    // the bounded form reported "not found" for any record outside
+    // the store's current page, which on a refresh or a pasted link
+    // is page 1. See `ListStore.findByIdPaged`.
+    const vehicle = await this.store.findById(id);
 
     if (!vehicle) {
       this.notFound.set(true);
@@ -112,7 +117,6 @@ export class VehicleForm implements OnInit {
       registration_number: vehicle.registration_number,
       insurance_expires_at: vehicle.insurance_expires_at ?? '',
       roadworthiness_expires_at: vehicle.roadworthiness_expires_at ?? '',
-      is_active: vehicle.is_active ?? true,
     });
     this.form.controls.business.disable();
     this.form.controls.vehicle_type.disable();
@@ -133,7 +137,10 @@ export class VehicleForm implements OnInit {
       headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.vehicleTypeOptionsList.set(
-      (data?.results ?? []).map((vt) => ({ value: vt.id, label: `${vt.name} (${vt.capacity} seats)` }))
+      (data?.results ?? []).map((vt) => ({
+        value: vt.id,
+        label: `${vt.name} (${vt.capacity} seats)`,
+      })),
     );
   }
 
@@ -146,7 +153,9 @@ export class VehicleForm implements OnInit {
     this.submitting.set(true);
     this.errorMessage.set(null);
     const values = this.form.getRawValue();
-    const authHeader = { Authorization: `Bearer ${this.authStore.accessToken()}` };
+    const authHeader = {
+      Authorization: `Bearer ${this.authStore.accessToken()}`,
+    };
     const id = this.vehicleId();
 
     const { data, error } = id
@@ -156,7 +165,6 @@ export class VehicleForm implements OnInit {
             registration_number: values.registration_number,
             insurance_expires_at: values.insurance_expires_at || null,
             roadworthiness_expires_at: values.roadworthiness_expires_at || null,
-            is_active: values.is_active,
           },
           headers: authHeader,
         })
@@ -177,8 +185,8 @@ export class VehicleForm implements OnInit {
       this.errorMessage.set(
         extractFirstErrorMessage(
           error,
-          'Could not save this vehicle. Check your details and try again.'
-        )
+          'Could not save this vehicle. Check your details and try again.',
+        ),
       );
       return;
     }

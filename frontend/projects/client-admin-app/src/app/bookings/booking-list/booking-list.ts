@@ -1,5 +1,13 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { API_CLIENT } from '@api-client';
 import { AuthStore } from '@auth';
@@ -7,6 +15,7 @@ import { Alert, EmptyState, Paginator, Select, StatusPill, Table } from '@shared
 import type { SelectOption, StatusPillTone } from '@shared-ui';
 
 import { BookingStore, type Booking } from '../../shared/data/store/booking.store';
+import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 
 type BookingStatus = Booking['status'];
 
@@ -28,6 +37,7 @@ const STATUS_FILTER_OPTIONS: SelectOption[] = [
 const STATUS_TONE: Record<BookingStatus, StatusPillTone> = {
   pending_payment: 'warning',
   paid: 'positive',
+  completed: 'positive',
   cancelled: 'negative',
   expired: 'neutral',
 };
@@ -35,6 +45,7 @@ const STATUS_TONE: Record<BookingStatus, StatusPillTone> = {
 const STATUS_LABEL: Record<BookingStatus, string> = {
   pending_payment: 'Pending payment',
   paid: 'Paid',
+  completed: 'Completed',
   cancelled: 'Cancelled',
   expired: 'Expired',
 };
@@ -64,6 +75,7 @@ export class BookingList implements OnInit {
   protected readonly store = inject(BookingStore);
   private readonly api = inject(API_CLIENT);
   private readonly authStore = inject(AuthStore);
+  private readonly selectedBusinessStore = inject(SelectedBusinessStore);
 
   protected readonly statusTone = STATUS_TONE;
   protected readonly statusLabel = STATUS_LABEL;
@@ -72,8 +84,21 @@ export class BookingList implements OnInit {
 
   ngOnInit(): void {
     void this.store.getAll();
-    void this.loadTripOptions();
   }
+
+  // The Bookings table itself stays Client-scoped — `GET /bookings/` has
+  // no `business` param and a Booking isn't owned by a Business — but the
+  // Trip dropdown that filters it is scoped, same `effect()`/`untracked()`
+  // pattern as `trip-list`'s own filter options.
+  private readonly syncTripOptions = effect(
+    () => {
+      const businessId = this.selectedBusinessStore.selectedBusinessId();
+      if (businessId) {
+        untracked(() => void this.loadTripOptions(businessId));
+      }
+    },
+    { allowSignalWrites: true },
+  );
 
   protected onPageChange(offset: number): void {
     void this.store.changePage(offset);
@@ -97,13 +122,26 @@ export class BookingList implements OnInit {
     return `${booking.currency} ${booking.total_amount}`;
   }
 
-  /** Unlike `trip-list`'s route/schedule filters, this one is not scoped
-   * to the selected Business: `GET /trips/` has no `business` param to
-   * scope it with, and the Bookings list it filters isn't business-scoped
-   * either. Client-level scoping still applies server-side. */
-  private async loadTripOptions(): Promise<void> {
+  /** Scoped to the selected Business, like every other filter dropdown
+   * in this app.
+   *
+   * This used to be unscoped, and its comment here said `GET /trips/`
+   * had no `business` param to scope it with. That was true when it was
+   * written and is no longer: `TripListQuerySerializer.business` exists
+   * now, and `trip-list` already uses it. Left unscoped, this dropdown
+   * offered every Trip under the Client regardless of which Business
+   * the operator had selected in the header.
+   *
+   * Still bounded at 100 rows, which is a real remaining limitation —
+   * `Trip.Meta.ordering` is ascending by `service_date`, so a Business
+   * with more than 100 Trips offers its *oldest* hundred and no recent
+   * one is selectable at all. Scoping shrinks the problem but does not
+   * remove it; closing it needs either a searchable trip picker or a
+   * date-bounded query, neither of which exists yet.
+   */
+  private async loadTripOptions(businessId: string): Promise<void> {
     const { data } = await this.api.GET('/api/v1/trips/', {
-      params: { query: { limit: 100, offset: 0 } },
+      params: { query: { limit: 100, offset: 0, business: businessId } },
       headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.tripFilterOptions.set([

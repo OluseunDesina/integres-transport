@@ -165,29 +165,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/bookings/{id}/pay-from-wallet/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * @description POST /bookings/{id}/pay-from-wallet/ — Phase 7. Passenger, own
-         *     booking only; no request body (the booking id in the path is the
-         *     whole request). Mirrors `BookingCancelView`'s own
-         *     404-not-found/403-not-yours split, since both operate on a specific
-         *     passenger's own booking by id.
-         */
-        post: operations["bookings_pay_from_wallet_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/bookings/mine/": {
         parameters: {
             query?: never;
@@ -221,6 +198,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/businesses/{business_id}/directors/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description docs/specs/11-kyb-directors.md. Gated per-method the same way
+         *     BusinessListCreateView is, and on the same pair: reads are
+         *     `client.view` (there is no `business.view` codename — `apps.businesses`
+         *     seeds only a write one), writes are `business.manage`.
+         */
+        get: operations["businesses_directors_list"];
+        put?: never;
+        /**
+         * @description docs/specs/11-kyb-directors.md. Gated per-method the same way
+         *     BusinessListCreateView is, and on the same pair: reads are
+         *     `client.view` (there is no `business.view` codename — `apps.businesses`
+         *     seeds only a write one), writes are `business.manage`.
+         */
+        post: operations["businesses_directors_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/businesses/{business_id}/kyb-documents/": {
         parameters: {
             query?: never;
@@ -228,7 +233,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["businesses_kyb_documents_list"];
         put?: never;
         post: operations["businesses_kyb_documents_create"];
         delete?: never;
@@ -331,6 +336,22 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/directors/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["directors_partial_update"];
         trace?: never;
     };
     "/api/v1/drivers/": {
@@ -714,6 +735,48 @@ export interface paths {
         options?: never;
         head?: never;
         patch: operations["routes_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/routes/{id}/fare-matrix/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description The stop-pair fare grid for one Route —
+         *     docs/specs/12-fare-matrix.md.
+         *
+         *     Per-stop-pair pricing has existed end to end since Phase 4; it was
+         *     unreachable and, once reached, unusable at scale — a 10-stop route
+         *     is 45 forward pairs, entered one create flow at a time. This is the
+         *     bulk read/write that makes it tractable.
+         *
+         *     The view orchestrates and never writes: `apps.fares.matrix` calls
+         *     the existing service functions, which own the versioning. See that
+         *     module's docstring for why that separation is load-bearing.
+         */
+        get: operations["routes_fare_matrix_retrieve"];
+        /**
+         * @description The stop-pair fare grid for one Route —
+         *     docs/specs/12-fare-matrix.md.
+         *
+         *     Per-stop-pair pricing has existed end to end since Phase 4; it was
+         *     unreachable and, once reached, unusable at scale — a 10-stop route
+         *     is 45 forward pairs, entered one create flow at a time. This is the
+         *     bulk read/write that makes it tractable.
+         *
+         *     The view orchestrates and never writes: `apps.fares.matrix` calls
+         *     the existing service functions, which own the versioning. See that
+         *     module's docstring for why that separation is load-bearing.
+         */
+        put: operations["routes_fare_matrix_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/routes/{id}/stops/": {
@@ -1629,7 +1692,7 @@ export interface components {
             readonly trip: components["schemas"]["BookingTrip"];
             /** Format: uuid */
             readonly passenger: string;
-            readonly status: components["schemas"]["BookingStatusEnum"];
+            readonly status: components["schemas"]["Status53fEnum"];
             /** Format: decimal */
             readonly total_amount: string;
             readonly currency: string;
@@ -1705,11 +1768,12 @@ export interface components {
         /**
          * @description * `pending_payment` - Pending payment
          *     * `paid` - Paid
+         *     * `completed` - Completed
          *     * `cancelled` - Cancelled
          *     * `expired` - Expired
          * @enum {string}
          */
-        BookingStatusEnum: "pending_payment" | "paid" | "cancelled" | "expired";
+        BookingStatusEnum: "pending_payment" | "paid" | "completed" | "cancelled" | "expired";
         /**
          * @description Schema-only shape for `BookingSerializer.get_trip` — see
          *     docs/specs/4-fares-seating-booking-frontend.md §3.4. Mirrors
@@ -1735,7 +1799,7 @@ export interface components {
             readonly id: string;
             vertical: components["schemas"]["VerticalEnum"];
             name: string;
-            currency: string;
+            currency: components["schemas"]["CurrencyEnum"];
             timezone: string;
             booking_mode_default: components["schemas"]["BookingModeDefaultEnum"];
             fare_pricing_mode?: components["schemas"]["FarePricingModeEnum"];
@@ -1758,6 +1822,7 @@ export interface components {
             /** Format: date-time */
             readonly kyb_submitted_at: string | null;
             readonly documents: components["schemas"]["KybDocument"][];
+            readonly directors: components["schemas"]["Director"][];
         };
         /**
          * @description Request body and response shape for the super-admin-only PATCH —
@@ -1790,7 +1855,7 @@ export interface components {
             readonly client_name: string;
             readonly name: string;
             readonly vertical: components["schemas"]["VerticalEnum"];
-            readonly currency: string;
+            readonly currency: components["schemas"]["CurrencyEnum"];
             readonly is_active: boolean;
             readonly kyb_status: components["schemas"]["KybStatusEnum"];
             /** Format: date-time */
@@ -1869,6 +1934,17 @@ export interface components {
             password: string;
         };
         /**
+         * @description * `NGN` - Nigerian Naira (NGN)
+         *     * `ZAR` - South African Rand (ZAR)
+         *     * `GHS` - Ghanaian Cedi (GHS)
+         *     * `KES` - Kenyan Shilling (KES)
+         *     * `XOF` - West African CFA Franc (XOF)
+         *     * `USD` - US Dollar (USD)
+         *     * `BWP` - Botswana Pula (BWP)
+         * @enum {string}
+         */
+        CurrencyEnum: "NGN" | "ZAR" | "GHS" | "KES" | "XOF" | "USD" | "BWP";
+        /**
          * @description Shared base for the customer and client-admin serializers, which
          *     both need optional client disambiguation.
          */
@@ -1885,6 +1961,24 @@ export interface components {
          * @enum {string}
          */
         DecisionEnum: "approve" | "reject";
+        /**
+         * @description docs/specs/11-kyb-directors.md. `business` is read-only — it comes
+         *     from the URL (`/businesses/{business_id}/directors/`), never the
+         *     body, so a director cannot be created against a Business the caller
+         *     didn't address.
+         */
+        Director: {
+            /** Format: uuid */
+            readonly id: string;
+            /** Format: uuid */
+            readonly business: string;
+            full_name: string;
+            id_type: components["schemas"]["IdTypeEnum"];
+            id_number?: string;
+            is_active?: boolean;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
         /**
          * @description * `certificate_of_incorporation` - Certificate of incorporation
          *     * `proof_of_address` - Proof of address
@@ -1978,6 +2072,82 @@ export interface components {
             name: string;
         };
         /**
+         * @description GET response. `currency` comes from the Business that owns the
+         *     route, deliberately read from this payload by the frontend rather
+         *     than looked up elsewhere — a previous slice shipped a bug reading a
+         *     `currency` field off `LedgerAccount`, which has none.
+         */
+        FareMatrix: {
+            /** Format: uuid */
+            route: string;
+            currency: string;
+            fare_pricing_mode: string;
+            stops: components["schemas"]["FareMatrixStop"][];
+            cells: components["schemas"]["FareMatrixCell"][];
+        };
+        /**
+         * @description One forward stop pair. `amount` is null where the segment has no
+         *     currently-effective rule — an unpriced cell, which the grid renders
+         *     as empty and booking rejects as `FareNotConfigured`.
+         *
+         *     `fare_segment_rule` is echoed so a later save can tell that the tip
+         *     it is superseding has moved since the grid was loaded.
+         */
+        FareMatrixCell: {
+            /** Format: uuid */
+            from_stop: string;
+            /** Format: uuid */
+            to_stop: string;
+            /** Format: decimal */
+            amount: string | null;
+            /** Format: uuid */
+            fare_segment_rule: string | null;
+        };
+        /**
+         * @description One submitted cell. A null `amount` means "stop selling this
+         *     segment" and closes the rule with no successor.
+         *
+         *     `min_value` is exclusive of zero deliberately: a genuinely free
+         *     segment is a policy decision, not a `0.00` fare, which looks
+         *     indistinguishable from a data-entry slip.
+         */
+        FareMatrixCellWrite: {
+            /** Format: uuid */
+            from_stop: string;
+            /** Format: uuid */
+            to_stop: string;
+            /** Format: decimal */
+            amount: string | null;
+        };
+        /**
+         * @description What a save actually did. `unchanged` is reported rather than
+         *     hidden so the operator can see that submitting the whole grid did
+         *     not churn every cell's version history.
+         */
+        FareMatrixSaveResult: {
+            created: number;
+            superseded: number;
+            closed: number;
+            unchanged: number;
+        };
+        /** @description Schema-only shape for a stop in the matrix's axis list. */
+        FareMatrixStop: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            sequence: number;
+        };
+        /**
+         * @description PUT body. One `effective_from` for the whole submission, so a
+         *     matrix save is a single coherent price change rather than N
+         *     independent timelines drifting apart by milliseconds.
+         */
+        FareMatrixWrite: {
+            /** Format: date-time */
+            effective_from?: string;
+            cells: components["schemas"]["FareMatrixCellWrite"][];
+        };
+        /**
          * @description * `flat` - Flat
          *     * `per_segment` - Per segment
          * @enum {string}
@@ -2052,6 +2222,14 @@ export interface components {
             status: string;
         };
         /**
+         * @description * `nin` - National Identification Number (NIN)
+         *     * `passport` - International passport
+         *     * `drivers_licence` - Driver's licence
+         *     * `voters_card` - Voter's card
+         * @enum {string}
+         */
+        IdTypeEnum: "nin" | "passport" | "drivers_licence" | "voters_card";
+        /**
          * @description * `booking_payment` - Booking payment
          *     * `wallet_topup` - Wallet top-up
          * @enum {string}
@@ -2111,9 +2289,24 @@ export interface components {
             decision: components["schemas"]["DecisionEnum"];
             reason?: string;
         };
+        /**
+         * @description `director` is a plain UUIDField resolved in `validate_director`
+         *     below, **not** a `PrimaryKeyRelatedField(queryset=...)`.
+         *
+         *     That distinction is load-bearing: DRF's `SerializerMetaclass`
+         *     collects declared fields at class-body execution time, so a
+         *     `queryset=Director.objects.all()` here would be evaluated once at
+         *     import — before any request has set a tenancy contextvar — and
+         *     freeze to an empty queryset forever, rejecting every real director.
+         *     `apps.identity`'s `Role` field hit exactly this in Phase 1 Slice 4;
+         *     resolving the FK inside a `validate_<field>()` method is the
+         *     established fix.
+         */
         KybDocument: {
             /** Format: uuid */
             readonly id: string;
+            /** Format: uuid */
+            director?: string | null;
             document_type: components["schemas"]["DocumentTypeEnum"];
             /** Format: uri */
             file: string;
@@ -2300,6 +2493,21 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["ClientKycQueue"][];
+        };
+        PaginatedDirectorList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=400&limit=100
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=200&limit=100
+             */
+            previous?: string | null;
+            results: components["schemas"]["Director"][];
         };
         PaginatedDriverList: {
             /** @example 123 */
@@ -2606,7 +2814,7 @@ export interface components {
             readonly id?: string;
             vertical?: components["schemas"]["VerticalEnum"];
             name?: string;
-            currency?: string;
+            currency?: components["schemas"]["CurrencyEnum"];
             timezone?: string;
             booking_mode_default?: components["schemas"]["BookingModeDefaultEnum"];
             fare_pricing_mode?: components["schemas"]["FarePricingModeEnum"];
@@ -2631,6 +2839,24 @@ export interface components {
             /** Format: uuid */
             readonly id?: string;
             seat_hold_minutes?: number;
+        };
+        /**
+         * @description docs/specs/11-kyb-directors.md. `business` is read-only — it comes
+         *     from the URL (`/businesses/{business_id}/directors/`), never the
+         *     body, so a director cannot be created against a Business the caller
+         *     didn't address.
+         */
+        PatchedDirector: {
+            /** Format: uuid */
+            readonly id?: string;
+            /** Format: uuid */
+            readonly business?: string;
+            full_name?: string;
+            id_type?: components["schemas"]["IdTypeEnum"];
+            id_number?: string;
+            is_active?: boolean;
+            /** Format: date-time */
+            readonly created_at?: string;
         };
         PatchedDriver: {
             /** Format: uuid */
@@ -2797,14 +3023,21 @@ export interface components {
         };
         /**
          * @description POST /payments/ body — exactly one of `booking_id` (pay for a
-         *     booking via a fresh Paystack charge) or `wallet_topup` (fund the
-         *     passenger's wallet with no Booking attached). A blend of the two
-         *     isn't supported — see docs/specs/7-passenger-wallet.md's own
-         *     non-goals.
+         *     booking) or `wallet_topup` (fund the passenger's wallet with no
+         *     Booking attached). `use_wallet_balance` is only meaningful
+         *     alongside `booking_id`: when set, the wallet's current balance is
+         *     applied first and only the remainder (if any) is charged via
+         *     Paystack — see `apps.payments.services.initiate_payment_with_wallet`.
+         *     This revisits docs/specs/7-passenger-wallet.md's original "a blend
+         *     of the two isn't supported" non-goal; see that spec's own
+         *     Implementation note for why the reconciliation risk it named no
+         *     longer blocks this.
          */
         PaymentInitiate: {
             /** Format: uuid */
             booking_id?: string;
+            /** @default false */
+            use_wallet_balance: boolean;
             wallet_topup?: components["schemas"]["WalletTopupInitiate"];
         };
         /**
@@ -2834,6 +3067,8 @@ export interface components {
             readonly passenger: string;
             /** Format: decimal */
             readonly amount: string;
+            /** Format: decimal */
+            readonly wallet_component_amount: string;
             readonly currency: string;
             readonly status: components["schemas"]["Status448Enum"];
             readonly psp_provider: string;
@@ -3133,6 +3368,15 @@ export interface components {
          */
         Status44bEnum: "open" | "closed" | "needs_review";
         /**
+         * @description * `pending_payment` - Pending payment
+         *     * `paid` - Paid
+         *     * `completed` - Completed
+         *     * `cancelled` - Cancelled
+         *     * `expired` - Expired
+         * @enum {string}
+         */
+        Status53fEnum: "pending_payment" | "paid" | "completed" | "cancelled" | "expired";
+        /**
          * @description * `scheduled` - Scheduled
          *     * `in_progress` - In progress
          *     * `completed` - Completed
@@ -3288,6 +3532,7 @@ export interface components {
             to_stop: string;
             /** Format: date-time */
             trip_departure_at: string;
+            booking_status: components["schemas"]["BookingStatusEnum"];
         };
         /**
          * @description Documents the actual response shape of the three token-obtain
@@ -3741,27 +3986,6 @@ export interface operations {
             };
         };
     };
-    bookings_pay_from_wallet_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaymentIntent"];
-                };
-            };
-        };
-    };
     bookings_mine_list: {
         parameters: {
             query?: {
@@ -3831,6 +4055,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Business"];
+                };
+            };
+        };
+    };
+    businesses_directors_list: {
+        parameters: {
+            query?: {
+                /** @description Number of results to return per page. */
+                limit?: number;
+                /** @description The initial index from which to return the results. */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                business_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedDirectorList"];
+                };
+            };
+        };
+    };
+    businesses_directors_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                business_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Director"];
+                "application/x-www-form-urlencoded": components["schemas"]["Director"];
+                "multipart/form-data": components["schemas"]["Director"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Director"];
+                };
+            };
+        };
+    };
+    businesses_kyb_documents_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                business_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KybDocument"][];
                 };
             };
         };
@@ -4000,6 +4298,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TokenObtainResponse"];
+                };
+            };
+        };
+    };
+    directors_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedDirector"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedDirector"];
+                "multipart/form-data": components["schemas"]["PatchedDirector"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Director"];
                 };
             };
         };
@@ -4627,6 +4952,54 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Route"];
+                };
+            };
+        };
+    };
+    routes_fare_matrix_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FareMatrix"];
+                };
+            };
+        };
+    };
+    routes_fare_matrix_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FareMatrixWrite"];
+                "application/x-www-form-urlencoded": components["schemas"]["FareMatrixWrite"];
+                "multipart/form-data": components["schemas"]["FareMatrixWrite"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FareMatrixSaveResult"];
                 };
             };
         };
@@ -5405,6 +5778,8 @@ export interface operations {
     trips_list: {
         parameters: {
             query?: {
+                /** @description Filter to a single Business's rows. An unknown or another Client's Business id returns 400. */
+                business?: string;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */

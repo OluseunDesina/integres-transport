@@ -20,11 +20,6 @@ function toErrorMessage(error: unknown): string {
   return 'Failed to load businesses.';
 }
 
-const LOOKUP_PAGE_SIZE = 100;
-// A hard safety cap on how many pages `findById` will ever request, not
-// an expected ceiling — see that method's own docstring.
-const LOOKUP_MAX_PAGES = 50;
-
 /**
  * Cross-client Business search for platform staff (`GET /super-admin/
  * businesses/`) — Phase 5 frontend Slice C. `providedIn: 'root'`
@@ -65,43 +60,16 @@ export class BusinessSuperAdminStore extends ListStore<
   /**
    * Resolves a single Business by id for `paystack-config.ts`/
    * `settlement-runs.ts`, which have no single-Business GET to call
-   * (see this class's own docstring). Checks the already-loaded page
-   * first, then pages through the *entire*, unfiltered cross-client
-   * list directly against the API — deliberately not through
-   * `getAll()`/`updateQuery()`, so a lookup from either of those
-   * screens can never clobber `business-list.ts`'s own paginated
-   * browse state (`items`/`total`/`page`) if the operator navigates
-   * back to it. Was a real, live bug before this method existed: both
-   * callers did one bounded `limit=25` fetch and gave up, so any
-   * Business past the first unfiltered page silently reported "not
-   * found" (confirmed against this dev DB's 145 leftover e2e
-   * Businesses). Early-exits the moment a match is found rather than
-   * always fetching every page.
+   * (see this class's own docstring).
+   *
+   * The paging and the "never touch browse state" rule live in
+   * `ListStore.findByIdPaged`; this store only supplies the scope, and
+   * the scope is deliberately the **unfiltered** cross-client list.
+   * Passing `{}` rather than the live query is the fix for a real bug:
+   * a lookup that reused a leftover `search=` from `business-list.ts`
+   * reported "Business not found" for a Business that existed.
    */
-  async findById(id: string): Promise<BusinessSuperAdmin | null> {
-    const cached = this.items().find((b) => b.id === id);
-    if (cached) {
-      return cached;
-    }
-    const headers = { Authorization: `Bearer ${this.authStore.accessToken()}` };
-    let offset = 0;
-    for (let page = 0; page < LOOKUP_MAX_PAGES; page++) {
-      const { data } = await this.api.GET('/api/v1/super-admin/businesses/', {
-        params: { query: { limit: LOOKUP_PAGE_SIZE, offset } },
-        headers,
-      });
-      if (!data) {
-        return null;
-      }
-      const match = data.results.find((b) => b.id === id);
-      if (match) {
-        return match;
-      }
-      if (data.results.length < LOOKUP_PAGE_SIZE || offset + LOOKUP_PAGE_SIZE >= data.count) {
-        return null;
-      }
-      offset += LOOKUP_PAGE_SIZE;
-    }
-    return null;
+  findById(id: string): Promise<BusinessSuperAdmin | null> {
+    return this.findByIdPaged(id, {});
   }
 }

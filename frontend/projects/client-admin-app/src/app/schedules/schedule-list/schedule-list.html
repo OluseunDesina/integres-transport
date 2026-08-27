@@ -4,6 +4,13 @@
     <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewSchedule()">New schedule</ui-button>
   </div>
 
+  <!-- A failed activate/deactivate is transient and must not replace the
+       table — the row it came from still needs to be visible, and its
+       switch has already rolled back. A load error still does replace it. -->
+  @if (activeError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
   } @else if (store.isEmpty()) {
@@ -21,7 +28,7 @@
           <th class="px-4 py-2">Days</th>
           <th class="px-4 py-2">Departure</th>
           <th class="px-4 py-2">Effective</th>
-          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Active</th>
           <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -37,7 +44,18 @@
               {{ schedule.effective_from }}{{ schedule.effective_until ? ' – ' + schedule.effective_until : '+' }}
             </td>
             <td class="px-4 py-2">
-              @if (schedule.is_active) {
+              <!-- The switch is a write, so it's gated like the Edit
+                   link — but a viewer without manage permission still
+                   needs to see the state, hence the read-only pill.
+                   `?? true` mirrors the model default. -->
+              @if (canManage()) {
+                <ui-toggle
+                  [checked]="schedule.is_active ?? true"
+                  [pending]="pendingId() === schedule.id"
+                  [label]="((schedule.is_active ?? true) ? 'Deactivate ' : 'Activate ') + (routeNames().get(schedule.route) ?? 'this schedule')"
+                  (toggled)="onToggleActive(schedule, $event)"
+                />
+              } @else if (schedule.is_active ?? true) {
                 <ui-status-pill tone="positive" label="Active" />
               } @else {
                 <ui-status-pill tone="neutral" label="Inactive" />

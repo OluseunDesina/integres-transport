@@ -4,6 +4,13 @@
     <ui-button *appHasPermission="'network.manage'" (pressed)="goToNewStop()">New stop</ui-button>
   </div>
 
+  <!-- A failed activate/deactivate is transient and must not replace the
+       table — the row it came from still needs to be visible, and its
+       switch has already rolled back. A load error still does replace it. -->
+  @if (activeError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
   } @else if (store.isEmpty()) {
@@ -20,8 +27,7 @@
           <th class="px-4 py-2">Name</th>
           <th class="px-4 py-2">Address</th>
           <th class="px-4 py-2">Coordinates</th>
-          <th class="px-4 py-2">Business</th>
-          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Active</th>
           <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -37,9 +43,19 @@
                 —
               }
             </td>
-            <td class="px-4 py-2">{{ businessNames().get(stop.business) ?? stop.business }}</td>
             <td class="px-4 py-2">
-              @if (stop.is_active) {
+              <!-- The switch is a write, so it's gated like the Edit
+                   link — but a viewer without manage permission still
+                   needs to see the state, hence the read-only pill.
+                   `?? true` mirrors the model default. -->
+              @if (canManage()) {
+                <ui-toggle
+                  [checked]="stop.is_active ?? true"
+                  [pending]="pendingId() === stop.id"
+                  [label]="((stop.is_active ?? true) ? 'Deactivate ' : 'Activate ') + stop.name"
+                  (toggled)="onToggleActive(stop, $event)"
+                />
+              } @else if (stop.is_active ?? true) {
                 <ui-status-pill tone="positive" label="Active" />
               } @else {
                 <ui-status-pill tone="neutral" label="Inactive" />

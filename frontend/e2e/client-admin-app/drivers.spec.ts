@@ -29,7 +29,6 @@ async function createDriver(
   licenseExpiresAt?: string
 ): Promise<void> {
   await page.goto('/drivers/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Name').fill(name);
   await page.getByLabel('License number').fill(licenseNumber);
   if (licenseExpiresAt) {
@@ -56,7 +55,6 @@ test.describe('client-admin-app drivers', () => {
     await signIn(page);
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await page.goto('/drivers/new');
-    await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
     await page.getByLabel('License number').fill(`DL-${uniqueSuffix()}`);
     await page.getByRole('button', { name: 'Create driver' }).click();
 
@@ -117,7 +115,6 @@ test.describe('client-admin-app drivers', () => {
       .click();
     await expect(page.getByRole('heading', { name: 'Edit driver' })).toBeVisible();
     await expect(page.getByLabel('Name')).toHaveValue(originalName);
-    await expect(page.getByLabel('Business')).toBeDisabled();
 
     await page.getByLabel('Name').fill(updatedName);
     await page.getByRole('button', { name: 'Save changes' }).click();

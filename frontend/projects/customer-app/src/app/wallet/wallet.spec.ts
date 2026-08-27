@@ -118,7 +118,7 @@ describe('WalletScreen', () => {
     expect(apiClient.POST).toHaveBeenCalledWith(
       '/api/v1/payments/',
       jasmine.objectContaining({
-        body: { wallet_topup: { business_id: 'biz-1', amount: '500.00' } },
+        body: { use_wallet_balance: false, wallet_topup: { business_id: 'biz-1', amount: '500.00' } },
       })
     );
     expect(redirectSpy).toHaveBeenCalledWith('https://paystack/checkout');

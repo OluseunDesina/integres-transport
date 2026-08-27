@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
@@ -6,7 +13,6 @@ import { AuthStore } from '@auth';
 import { Alert, Button, Select, TextField } from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
-import { BusinessOptionsService } from '../../shared/business-options.service';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 
 const NONE_OPTION: SelectOption = { value: '', label: '— None —' };
@@ -44,16 +50,40 @@ export class TripForm implements OnInit {
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
   private readonly authStore = inject(AuthStore);
-  private readonly businessOptions = inject(BusinessOptionsService);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
 
-  protected readonly businessOptionsList = signal<SelectOption[]>([]);
   protected readonly routeOptionsList = signal<SelectOption[]>([]);
   protected readonly vehicleOptionsList = signal<SelectOption[]>([NONE_OPTION]);
   protected readonly driverOptionsList = signal<SelectOption[]>([NONE_OPTION]);
   protected readonly submitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
 
+  /**
+   * The booking mode this Trip will be created with, shown read-only.
+   *
+   * It isn't a form field: `create_manual_trip()` snapshots it from
+   * `route.business.booking_mode_default` server-side and ignores
+   * anything the client sends, deliberately — a Trip's mode must match
+   * the Business that runs it. But leaving it invisible meant an
+   * operator had no way to tell, at the moment of creating a Trip,
+   * whether it would come out reservation or tap-and-go. Surfacing the
+   * value it will inherit closes that without pretending it's editable.
+   */
+  protected readonly bookingModeLabel = computed(() => {
+    const id = this.selectedBusinessStore.selectedBusinessId();
+    const business = this.selectedBusinessStore.items().find((b) => b.id === id);
+    if (!business) {
+      return null;
+    }
+    return business.booking_mode_default === 'tap_and_go' ? 'Tap and go' : 'Reservation';
+  });
+
+  // `business` has no field in the template any more — it's resolved
+  // from whichever Business is active in the header switcher.
+  // Re-asking was redundant (it was pre-filled from this same value)
+  // and let a user create a record under a Business other than the one
+  // every other screen was showing them. The control stays purely as
+  // the value carrier for create.
   protected readonly form = this.fb.nonNullable.group({
     business: ['', Validators.required],
     route: ['', Validators.required],
@@ -64,20 +94,16 @@ export class TripForm implements OnInit {
   });
 
   async ngOnInit(): Promise<void> {
-    try {
-      this.businessOptionsList.set(await this.businessOptions.loadOptions());
-    } catch (err) {
-      this.errorMessage.set(err instanceof Error ? err.message : 'Failed to load businesses.');
-    }
-
     this.form.controls.business.valueChanges.subscribe((businessId) => {
       void this.onBusinessChange(businessId);
     });
     const activeBusinessId = this.selectedBusinessStore.selectedBusinessId();
-    if (activeBusinessId) {
-      this.form.patchValue({ business: activeBusinessId });
-      await this.loadScopedOptions(activeBusinessId);
+    if (!activeBusinessId) {
+      this.errorMessage.set('Select a business from the header before creating a trip.');
+      return;
     }
+    this.form.patchValue({ business: activeBusinessId });
+    await this.loadScopedOptions(activeBusinessId);
   }
 
   protected async onBusinessChange(businessId: string): Promise<void> {
@@ -92,15 +118,29 @@ export class TripForm implements OnInit {
       this.driverOptionsList.set([NONE_OPTION]);
       return;
     }
-    const authHeader = { Authorization: `Bearer ${this.authStore.accessToken()}` };
+    const authHeader = {
+      Authorization: `Bearer ${this.authStore.accessToken()}`,
+    };
     const query = { limit: 100, offset: 0, business: businessId };
     const [routes, vehicles, drivers] = await Promise.all([
-      this.api.GET('/api/v1/routes/', { params: { query }, headers: authHeader }),
-      this.api.GET('/api/v1/vehicles/', { params: { query }, headers: authHeader }),
-      this.api.GET('/api/v1/drivers/', { params: { query }, headers: authHeader }),
+      this.api.GET('/api/v1/routes/', {
+        params: { query },
+        headers: authHeader,
+      }),
+      this.api.GET('/api/v1/vehicles/', {
+        params: { query },
+        headers: authHeader,
+      }),
+      this.api.GET('/api/v1/drivers/', {
+        params: { query },
+        headers: authHeader,
+      }),
     ]);
     this.routeOptionsList.set(
-      (routes.data?.results ?? []).map((route) => ({ value: route.id, label: route.name }))
+      (routes.data?.results ?? []).map((route) => ({
+        value: route.id,
+        label: route.name,
+      })),
     );
     this.vehicleOptionsList.set([
       NONE_OPTION,
@@ -111,7 +151,10 @@ export class TripForm implements OnInit {
     ]);
     this.driverOptionsList.set([
       NONE_OPTION,
-      ...(drivers.data?.results ?? []).map((driver) => ({ value: driver.id, label: driver.name })),
+      ...(drivers.data?.results ?? []).map((driver) => ({
+        value: driver.id,
+        label: driver.name,
+      })),
     ]);
   }
 
@@ -124,7 +167,9 @@ export class TripForm implements OnInit {
     this.submitting.set(true);
     this.errorMessage.set(null);
     const values = this.form.getRawValue();
-    const authHeader = { Authorization: `Bearer ${this.authStore.accessToken()}` };
+    const authHeader = {
+      Authorization: `Bearer ${this.authStore.accessToken()}`,
+    };
 
     const { data, error } = await this.api.POST('/api/v1/trips/', {
       body: {
@@ -143,8 +188,8 @@ export class TripForm implements OnInit {
       this.errorMessage.set(
         extractFirstErrorMessage(
           error,
-          'Could not create this trip. Check your details and try again.'
-        )
+          'Could not create this trip. Check your details and try again.',
+        ),
       );
       return;
     }
@@ -152,7 +197,9 @@ export class TripForm implements OnInit {
     await this.router.navigate(['/trips']);
   }
 
-  protected fieldError(field: 'business' | 'route' | 'service_date' | 'departure_time'): string | null {
+  protected fieldError(
+    field: 'business' | 'route' | 'service_date' | 'departure_time',
+  ): string | null {
     const control = this.form.controls[field];
     if (!control.touched || control.valid) {
       return null;

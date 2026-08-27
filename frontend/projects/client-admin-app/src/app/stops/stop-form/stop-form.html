@@ -14,13 +14,6 @@
     }
 
     <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-select
-        label="Business"
-        [options]="businessOptionsList()"
-        formControlName="business"
-        [invalid]="!!fieldError('business')"
-        [errorMessage]="fieldError('business')"
-      />
       <ui-text-field
         label="Stop name"
         formControlName="name"
@@ -34,12 +27,10 @@
       </div>
       <p class="-mt-2 text-sm text-slate-500">Provide an address or both latitude and longitude.</p>
 
-      @if (editing()) {
-        <label class="flex items-center gap-2 text-sm text-slate-700">
-          <input type="checkbox" formControlName="is_active" class="h-4 w-4 rounded border-slate-300" />
-          Active
-        </label>
-      }
+      <!-- No Active checkbox: activating/deactivating is a one-click
+           switch on the list table now. `is_active` is not sent from
+           this form at all, so a details-only save can't clobber a
+           toggle made elsewhere in the meantime. -->
 
       <div class="mt-2 flex gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">

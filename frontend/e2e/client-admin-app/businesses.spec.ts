@@ -20,8 +20,12 @@ async function createBusiness(page: Page, name: string): Promise<void> {
   await page.goto('/businesses/new');
   await page.getByLabel('Vertical').selectOption('shuttle');
   await page.getByLabel('Business name').fill(name);
-  await page.getByLabel('Currency').fill('NGN');
-  await page.getByLabel('Timezone').fill('Africa/Lagos');
+  // Both are <select>s now, not free text — a currency had to be a real
+  // supported code and a timezone a real IANA zone, and typing either
+  // wrong only failed much later (at Paystack, or inside trip
+  // generation). The timezone option label strips the "Africa/" prefix.
+  await page.getByLabel('Currency').selectOption('NGN');
+  await page.getByLabel('Timezone').selectOption('Africa/Lagos');
   await page.getByLabel('Booking mode').selectOption('reservation');
   await page.getByRole('button', { name: 'Create business' }).click();
   await expect(page).toHaveURL(/\/businesses$/);
@@ -116,7 +120,11 @@ test.describe('client-admin-app businesses', () => {
     expect(results.violations).toEqual([]);
   });
 
-  test('uploads a KYB document from the edit screen and stays axe-clean', async ({ page }) => {
+  test('adds a director and uploads KYB documents, staying axe-clean', async ({ page }) => {
+    // KYB moved off the business edit form onto its own screen — see
+    // docs/specs/11-kyb-directors.md. The old form was one document-type
+    // select plus a file input, with nowhere to record director identity
+    // and no way to see what had already been supplied.
     const name = uniqueBusinessName();
     await signIn(page);
     await createBusiness(page, name);
@@ -126,15 +134,38 @@ test.describe('client-admin-app businesses', () => {
       .getByRole('link', { name: 'Edit' })
       .click();
     await expect(page.getByRole('heading', { name: 'Edit business' })).toBeVisible();
+    await page.getByRole('link', { name: 'Open verification' }).click();
+    await expect(
+      page.getByRole('heading', { name: 'Business verification (KYB)' }),
+    ).toBeVisible();
 
-    await page.getByText('Upload a KYB document').scrollIntoViewIfNeeded();
-    await page.getByLabel('Document type').selectOption({ label: 'Tax certificate' });
-    await page.getByLabel('File').setInputFiles({
+    // Every section starts outstanding, which the old UI could not show.
+    await expect(page.getByText('Not supplied yet.').first()).toBeVisible();
+
+    await page.getByLabel('Full name').fill('Ada Okafor');
+    await page.getByLabel('ID type').selectOption('nin');
+    await page.getByRole('button', { name: 'Add director' }).click();
+    // `exact` matters: the name also appears inside that director's
+    // "Upload Ada Okafor's ID" label, so a loose match is ambiguous.
+    await expect(page.getByText('Ada Okafor', { exact: true })).toBeVisible();
+    await expect(page.getByText('No ID uploaded yet.')).toBeVisible();
+
+    // A director's ID goes to that director, not into a generic pile.
+    await page.getByLabel("Ada Okafor's ID document").setInputFiles({
+      name: 'director-id.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4 e2e fixture'),
+    });
+    await page.getByRole('button', { name: "Upload Ada Okafor's ID" }).click();
+    await expect(page.getByText('No ID uploaded yet.')).toHaveCount(0);
+
+    // A company-level document needs no director.
+    await page.getByLabel('Tax certificate file').setInputFiles({
       name: 'tax-cert.pdf',
       mimeType: 'application/pdf',
       buffer: Buffer.from('%PDF-1.4 e2e fixture'),
     });
-    await page.getByRole('button', { name: 'Upload document' }).click();
+    await page.getByRole('button', { name: 'Upload Tax certificate' }).click();
 
     await expect(page.getByText('submitted', { exact: true })).toBeVisible();
 

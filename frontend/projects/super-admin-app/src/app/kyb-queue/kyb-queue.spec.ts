@@ -20,6 +20,7 @@ function makeBusiness(overrides: Partial<BusinessKybQueueItem> = {}): BusinessKy
     kyb_status: 'submitted',
     kyb_submitted_at: '2026-08-06T00:00:00Z',
     documents: [],
+    directors: [],
     ...overrides,
   };
 }

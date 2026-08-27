@@ -24,7 +24,6 @@ async function selectActiveBusiness(page: Page, name: string): Promise<void> {
 
 async function createRoute(page: Page, name: string): Promise<void> {
   await page.goto('/routes/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Route name').fill(name);
   await page.getByRole('button', { name: 'Create route' }).click();
   // Route creation navigates to its own edit page (to let stops be
@@ -34,7 +33,6 @@ async function createRoute(page: Page, name: string): Promise<void> {
 
 async function createVehicleType(page: Page, name: string): Promise<void> {
   await page.goto('/vehicle-types/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Name').fill(name);
   await page.getByLabel('Capacity (seats)').fill('33');
   await page.getByRole('button', { name: 'Create vehicle type' }).click();
@@ -43,7 +41,6 @@ async function createVehicleType(page: Page, name: string): Promise<void> {
 
 async function createVehicle(page: Page, vehicleTypeName: string, registration: string): Promise<void> {
   await page.goto('/vehicles/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Vehicle type').selectOption({ label: `${vehicleTypeName} (33 seats)` });
   await page.getByLabel('Registration number').fill(registration);
   await page.getByRole('button', { name: 'Create vehicle' }).click();
@@ -52,7 +49,6 @@ async function createVehicle(page: Page, vehicleTypeName: string, registration: 
 
 async function createDriver(page: Page, name: string, licenseNumber: string): Promise<void> {
   await page.goto('/drivers/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Name').fill(name);
   await page.getByLabel('License number').fill(licenseNumber);
   await page.getByRole('button', { name: 'Create driver' }).click();
@@ -84,7 +80,6 @@ async function createManualTrip(
   serviceDate: string
 ): Promise<void> {
   await page.goto('/trips/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Route').selectOption({ label: routeName });
   await page.getByLabel('Service date').fill(serviceDate);
   await page.getByLabel('Departure time').fill('08:00');

@@ -25,6 +25,15 @@ function makeDriver(overrides: Partial<Driver> = {}): Driver {
 class FakeDriverStore {
   items = signal<Driver[]>([]);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
+  /** Mirrors `ListStore.findByIdPaged`: match the loaded rows, else
+   * null. The component must never read `items()` and `.find()` for
+   * itself — doing so is what made any record past the store's
+   * current page report "not found" on a refresh. */
+  findById = jasmine
+    .createSpy('findById')
+    .and.callFake((id: string) =>
+      Promise.resolve(this.items().find((item) => item.id === id) ?? null)
+    );
 }
 
 class FakeBusinessOptions {
@@ -52,7 +61,11 @@ async function setup(paramId: string | null, existing: Driver[] = []) {
       { provide: BusinessOptionsService, useValue: businessOptions },
       {
         provide: ActivatedRoute,
-        useValue: { snapshot: { paramMap: convertToParamMap(paramId ? { id: paramId } : {}) } },
+        useValue: {
+          snapshot: {
+            paramMap: convertToParamMap(paramId ? { id: paramId } : {}),
+          },
+        },
       },
     ],
   }).compileComponents();
@@ -77,7 +90,11 @@ describe('DriverForm', () => {
     });
 
     it('does not submit an invalid (missing business/name/license) form', async () => {
-      fixture.componentInstance['form'].patchValue({ business: '', name: '', license_number: '' });
+      fixture.componentInstance['form'].patchValue({
+        business: '',
+        name: '',
+        license_number: '',
+      });
       await fixture.componentInstance['onSubmit']();
       expect(apiClient.POST).not.toHaveBeenCalled();
     });
@@ -93,7 +110,6 @@ describe('DriverForm', () => {
         phone: '',
         license_number: 'DL-000123',
         license_expires_at: '',
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -101,15 +117,20 @@ describe('DriverForm', () => {
       expect(apiClient.POST).toHaveBeenCalledWith(
         '/api/v1/drivers/',
         jasmine.objectContaining({
-          body: jasmine.objectContaining({ business: 'biz-1', name: 'Tunde Bello' }),
-        })
+          body: jasmine.objectContaining({
+            business: 'biz-1',
+            name: 'Tunde Bello',
+          }),
+        }),
       );
       expect(navigateSpy).toHaveBeenCalledWith(['/drivers']);
     });
 
     it('shows the server error message on failure (duplicate license)', async () => {
       apiClient.POST.and.resolveTo({
-        error: { license_number: ['A driver with this license number already exists.'] },
+        error: {
+          license_number: ['A driver with this license number already exists.'],
+        },
       });
       fixture.componentInstance['form'].setValue({
         business: 'biz-1',
@@ -117,14 +138,13 @@ describe('DriverForm', () => {
         phone: '',
         license_number: 'DL-1',
         license_expires_at: '',
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
       fixture.detectChanges();
 
       expect(fixture.componentInstance['errorMessage']()).toBe(
-        'A driver with this license number already exists.'
+        'A driver with this license number already exists.',
       );
     });
   });
@@ -156,7 +176,7 @@ describe('DriverForm', () => {
 
       expect(apiClient.PATCH).toHaveBeenCalledWith(
         '/api/v1/drivers/{id}/',
-        jasmine.objectContaining({ params: { path: { id: 'd-1' } } })
+        jasmine.objectContaining({ params: { path: { id: 'd-1' } } }),
       );
     });
 

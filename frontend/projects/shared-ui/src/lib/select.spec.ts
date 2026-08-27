@@ -12,12 +12,14 @@ import { Select, SelectOption } from './select';
     [options]="options"
     [formControl]="control"
     [invalid]="invalid"
+    [hint]="hint"
     [errorMessage]="invalid ? 'Choose a vertical.' : null"
   />`,
 })
 class HostComponent {
   control = new FormControl('', { nonNullable: true });
   invalid = false;
+  hint: string | null = null;
   options: SelectOption[] = [
     { value: 'shuttle', label: 'Shuttle' },
     { value: 'intercity', label: 'Intercity' },
@@ -67,5 +69,36 @@ describe('Select', () => {
     expect(select.getAttribute('aria-invalid')).toBe('true');
     expect(select.getAttribute('aria-describedby')).toBe(error.id);
     expect(error.textContent).toContain('Choose a vertical.');
+  });
+
+  it('renders no hint and no aria-describedby when no hint is given', () => {
+    const select = fixture.debugElement.query(By.css('select')).nativeElement as HTMLSelectElement;
+    expect(select.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('associates a hint with the select via aria-describedby', () => {
+    host.hint = 'Switching keeps the fares you already entered.';
+    fixture.detectChanges();
+
+    const select = fixture.debugElement.query(By.css('select')).nativeElement as HTMLSelectElement;
+    const hint = fixture.debugElement.query(By.css('p')).nativeElement as HTMLElement;
+
+    expect(hint.textContent).toContain('Switching keeps the fares');
+    expect(select.getAttribute('aria-describedby')).toBe(hint.id);
+  });
+
+  it('describes the select by both hint and error when it is invalid', () => {
+    // Dropping the hint on an invalid field would remove the
+    // explanation exactly when the user most needs it.
+    host.hint = 'Switching keeps the fares you already entered.';
+    host.invalid = true;
+    fixture.detectChanges();
+
+    const select = fixture.debugElement.query(By.css('select')).nativeElement as HTMLSelectElement;
+    const error = fixture.debugElement.query(By.css('[role="alert"]')).nativeElement as HTMLElement;
+    const describedBy = select.getAttribute('aria-describedby')?.split(' ') ?? [];
+
+    expect(describedBy.length).toBe(2);
+    expect(describedBy).toContain(error.id);
   });
 });

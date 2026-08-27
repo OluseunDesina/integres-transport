@@ -8,7 +8,7 @@ import {
   inject,
   untracked,
 } from '@angular/core';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { HasPermissionDirective } from '@auth';
 import { Alert, Button, EmptyState, Paginator, Table } from '@shared-ui';
 
@@ -28,7 +28,16 @@ import { StopStore } from '../../shared/data/store/stop.store';
 @Component({
   selector: 'app-fare-list',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, HasPermissionDirective, Alert, Button, EmptyState, Paginator, Table],
+  imports: [
+    DatePipe,
+    RouterLink,
+    HasPermissionDirective,
+    Alert,
+    Button,
+    EmptyState,
+    Paginator,
+    Table,
+  ],
   templateUrl: './fare-list.html',
 })
 export class FareList implements OnInit {

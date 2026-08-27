@@ -9,6 +9,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
       [type]="type()"
       [disabled]="isDisabled()"
       [attr.aria-pressed]="ariaPressed()"
+      [attr.aria-label]="ariaLabel()"
       (click)="pressed.emit($event)"
       class="inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-not-allowed"
       [class.bg-slate-900]="variant() === 'primary' && !isDisabled()"
@@ -47,6 +48,16 @@ export class Button {
   // `[attr.aria-pressed]` on `<ui-button>` itself — caught live wiring
   // up `validator-app`'s board/alight toggle (docs/specs/4b-tap-and-go.md).
   readonly ariaPressed = input<boolean | null>(null);
+  // Same passthrough reasoning as `ariaPressed` above: a host-level
+  // `[attr.aria-label]` on `<ui-button>` lands on the `display: contents`
+  // wrapper and never reaches the real `<button>`, so it is silently
+  // dropped from the accessibility tree.
+  //
+  // Needed wherever one screen repeats a short generic label — the KYB
+  // screen has six "Upload" buttons, one per document slot, which a
+  // screen reader would otherwise announce identically with no way to
+  // tell which document each belongs to.
+  readonly ariaLabel = input<string | null>(null);
   readonly pressed = output<MouseEvent>();
 
   // A settled `opacity-50` disabled treatment blends any base text color

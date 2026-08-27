@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, forwardRef, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  forwardRef,
+  input,
+  signal,
+} from '@angular/core';
 import { NG_VALUE_ACCESSOR } from '@angular/forms';
 import type { ControlValueAccessor } from '@angular/forms';
 
@@ -32,7 +39,7 @@ export interface SelectOption {
         [value]="value()"
         [disabled]="disabled()"
         [attr.aria-invalid]="invalid() || null"
-        [attr.aria-describedby]="invalid() && errorMessage() ? errorId : null"
+        [attr.aria-describedby]="describedBy()"
         (change)="onSelect($event)"
         (blur)="onTouched()"
         class="w-full min-h-11 rounded-md border bg-white px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
@@ -43,6 +50,9 @@ export interface SelectOption {
           <option [value]="option.value">{{ option.label }}</option>
         }
       </select>
+      @if (hint(); as text) {
+        <p [id]="hintId" class="text-sm text-slate-500">{{ text }}</p>
+      }
       @if (invalid() && errorMessage()) {
         <p [id]="errorId" class="text-sm text-red-600" role="alert">{{ errorMessage() }}</p>
       }
@@ -54,9 +64,33 @@ export class Select implements ControlValueAccessor {
   readonly options = input.required<SelectOption[]>();
   readonly errorMessage = input<string | null>(null);
   readonly invalid = input(false);
+  /**
+   * Guidance rendered under the control and associated with it via
+   * `aria-describedby`, so a screen reader announces it as part of the
+   * field rather than as stray text a sighted user happens to see
+   * nearby. Added for the fare-pricing-mode select, where the
+   * consequence of switching is not inferable from the option labels
+   * (docs/specs/12-fare-matrix.md).
+   */
+  readonly hint = input<string | null>(null);
 
   protected readonly id = `ui-select-${nextId++}`;
   protected readonly errorId = `${this.id}-error`;
+  protected readonly hintId = `${this.id}-hint`;
+
+  /** Both descriptions when both are present — `aria-describedby` takes
+   * a space-separated id list, and dropping the hint on an invalid
+   * field would remove the explanation exactly when it is most needed. */
+  protected readonly describedBy = computed(() => {
+    const ids: string[] = [];
+    if (this.hint()) {
+      ids.push(this.hintId);
+    }
+    if (this.invalid() && this.errorMessage()) {
+      ids.push(this.errorId);
+    }
+    return ids.length > 0 ? ids.join(' ') : null;
+  });
   protected readonly value = signal('');
   protected readonly disabled = signal(false);
 

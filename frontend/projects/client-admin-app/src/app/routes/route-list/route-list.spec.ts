@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Router, provideRouter } from '@angular/router';
+import { API_CLIENT } from '@api-client';
 import { AuthStore } from '@auth';
 import type { AuthUser } from '@auth';
 
@@ -67,6 +68,12 @@ class FakeSelectedBusinessStore {
   selectedBusinessId = signal<string | null>('biz-1');
 }
 
+const apiClientStub = {
+  GET: jasmine.createSpy('GET').and.resolveTo({ data: { count: 0, results: [] } }),
+  POST: jasmine.createSpy('POST').and.resolveTo({ data: {} }),
+  PATCH: jasmine.createSpy('PATCH').and.resolveTo({ data: {} }),
+};
+
 describe('RouteList', () => {
   let fixture: ComponentFixture<RouteList>;
   let store: FakeRouteStore;
@@ -80,9 +87,13 @@ describe('RouteList', () => {
       imports: [RouteList],
       providers: [
         provideRouter([]),
+        { provide: API_CLIENT, useValue: apiClientStub },
         { provide: RouteStore, useValue: store },
         { provide: BusinessStore, useValue: new FakeBusinessStore() },
-        { provide: SelectedBusinessStore, useValue: new FakeSelectedBusinessStore() },
+        {
+          provide: SelectedBusinessStore,
+          useValue: new FakeSelectedBusinessStore(),
+        },
       ],
     }).compileComponents();
 
@@ -90,7 +101,7 @@ describe('RouteList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'network.view'] })
+      makeUser({ permissions: ['client-admin:access', 'network.view'] }),
     );
 
     fixture = TestBed.createComponent(RouteList);
@@ -138,7 +149,9 @@ describe('RouteList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'network.view', 'network.manage'] })
+      makeUser({
+        permissions: ['client-admin:access', 'network.view', 'network.manage'],
+      }),
     );
     fixture.detectChanges();
 
@@ -152,7 +165,9 @@ describe('RouteList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'network.view', 'network.manage'] })
+      makeUser({
+        permissions: ['client-admin:access', 'network.view', 'network.manage'],
+      }),
     );
     fixture.detectChanges();
     const router = TestBed.inject(Router);
@@ -173,9 +188,75 @@ describe('RouteList', () => {
     fixture.detectChanges();
 
     const buttons = fixture.debugElement.queryAll(By.css('button'));
-    const nextButton = buttons.find((b) => (b.nativeElement.textContent as string).includes('Next'));
+    const nextButton = buttons.find((b) =>
+      (b.nativeElement.textContent as string).includes('Next'),
+    );
     nextButton?.nativeElement.click();
 
     expect(store.changePage).toHaveBeenCalledWith(25);
+  });
+
+  describe('activate/deactivate switch', () => {
+    function switchEl(): HTMLButtonElement | undefined {
+      return fixture.debugElement.query(By.css('button[role="switch"]'))?.nativeElement as
+        HTMLButtonElement | undefined;
+    }
+
+    beforeEach(() => {
+      apiClientStub.PATCH.calls.reset();
+      apiClientStub.PATCH.and.resolveTo({
+        data: makeRoute({ is_active: false }),
+      });
+      authStore.setSession(
+        'a',
+        'r',
+        makeUser({
+          permissions: ['client-admin:access', 'network.view', 'network.manage'],
+        }),
+      );
+      store.items.set([makeRoute()]);
+      fixture.detectChanges();
+    });
+
+    it('PATCHes the row with the requested state and refetches', async () => {
+      switchEl()?.click();
+      await fixture.whenStable();
+
+      expect(apiClientStub.PATCH).toHaveBeenCalledWith(
+        '/api/v1/routes/{id}/',
+        jasmine.objectContaining({
+          params: { path: { id: 'route-1' } },
+          body: { is_active: false },
+        }),
+      );
+      expect(store.getAll).toHaveBeenCalled();
+    });
+
+    it('surfaces a failed toggle without hiding the table', async () => {
+      apiClientStub.PATCH.and.resolveTo({
+        error: { detail: 'Route is in use.' },
+      });
+
+      switchEl()?.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(fixture.componentInstance['activeError']()).toBe('Route is in use.');
+      // The row must still be on screen — the switch has rolled back and
+      // the user needs to see what failed.
+      expect(fixture.nativeElement.textContent).toContain('Ikeja Express');
+    });
+
+    it('shows a read-only pill instead of a switch without network.manage', () => {
+      authStore.setSession(
+        'a',
+        'r',
+        makeUser({ permissions: ['client-admin:access', 'network.view'] }),
+      );
+      fixture.detectChanges();
+
+      expect(switchEl()).toBeUndefined();
+      expect(fixture.nativeElement.textContent).toContain('Active');
+    });
   });
 });

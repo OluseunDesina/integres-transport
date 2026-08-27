@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, request, test, type Page } from '@playwright/test';
 
+import { findVehicleByRegistration } from '../fixture-lookup';
+
 const STAFF_EMAIL = 'e2e-client-staff@example.com';
 const PASSENGER_EMAIL = 'e2e-passenger@example.com';
 const PASSWORD = 'e2e-test-password-123';
@@ -60,14 +62,11 @@ async function seedBooking(): Promise<SeededBooking> {
     const fromStop = route.stops[0];
     const toStop = route.stops[route.stops.length - 1];
 
-    const vehicles = await (
-      await api.get(`${BACKEND_URL}/api/v1/vehicles/?limit=50`, {
-        headers: { Authorization: `Bearer ${staffToken}` },
-      })
-    ).json();
-    const vehicle = vehicles.results.find(
-      (v: { registration_number: string }) => v.registration_number === 'E2E-1234-LA'
-    );
+    // Paged, not one bounded `?limit=50` page plus `.find()` — `GET
+    // /vehicles/` has no registration filter, and accumulated e2e
+    // vehicles pushed the fixture off the first page. Identical fix and
+    // reasoning in customer-app/booking.spec.ts.
+    const vehicle = await findVehicleByRegistration(api, staffToken, 'E2E-1234-LA');
 
     // A near-term date, not a far-future one: `loadTripOptions()` fetches
     // only the earliest 100 Trips by `service_date` (unpaginated, by

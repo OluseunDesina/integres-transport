@@ -67,6 +67,17 @@ export class KybQueue implements OnInit {
     void this.store.getAll();
   }
 
+  /** Every director on the packet, including soft-removed ones — one may
+   * still own an ID document in this submission, and omitting them would
+   * leave a reviewer looking at an ID whose owner isn't listed. */
+  protected directorNames(business: BusinessKybQueueItem): string {
+    // No `?? []` fallback: the serializer always emits the array, and the
+    // generated type says so — NG8107 flagged the matching `?.` in the
+    // template as provably dead. A defensive guard that the compiler can
+    // prove unreachable only obscures where the real nullability is.
+    return business.directors.map((director) => director.full_name).join(', ');
+  }
+
   protected onPageChange(offset: number): void {
     void this.store.changePage(offset);
   }

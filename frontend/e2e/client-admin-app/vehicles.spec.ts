@@ -24,7 +24,6 @@ async function selectActiveBusiness(page: Page, name: string): Promise<void> {
 
 async function createVehicleType(page: Page, name: string): Promise<void> {
   await page.goto('/vehicle-types/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Name').fill(name);
   await page.getByLabel('Capacity (seats)').fill('33');
   await page.getByRole('button', { name: 'Create vehicle type' }).click();
@@ -38,7 +37,6 @@ async function createVehicle(
   insuranceExpiresAt?: string
 ): Promise<void> {
   await page.goto('/vehicles/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Vehicle type').selectOption({ label: `${vehicleTypeName} (33 seats)` });
   await page.getByLabel('Registration number').fill(registration);
   if (insuranceExpiresAt) {
@@ -114,7 +112,6 @@ test.describe('client-admin-app vehicles', () => {
       .click();
     await expect(page.getByRole('heading', { name: 'Edit vehicle' })).toBeVisible();
     await expect(page.getByLabel('Registration number')).toHaveValue(registration);
-    await expect(page.getByLabel('Business')).toBeDisabled();
     await expect(page.getByLabel('Vehicle type')).toBeDisabled();
 
     await page.getByLabel('Registration number').fill(updatedRegistration);

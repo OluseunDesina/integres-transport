@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
@@ -7,7 +14,6 @@ import { AuthStore } from '@auth';
 import { Alert, Button, Select, TextField } from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
-import { BusinessOptionsService } from '../../shared/business-options.service';
 import { RouteStore, type Route } from '../../shared/data/store/route.store';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 
@@ -46,7 +52,6 @@ export class RouteForm implements OnInit {
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
   private readonly authStore = inject(AuthStore);
-  private readonly businessOptions = inject(BusinessOptionsService);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   protected readonly store = inject(RouteStore);
 
@@ -55,7 +60,6 @@ export class RouteForm implements OnInit {
   protected readonly existingRoute = signal<Route | null>(null);
   protected readonly notFound = signal(false);
 
-  protected readonly businessOptionsList = signal<SelectOption[]>([]);
   protected readonly submitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
   // Unlike create (which navigates to the new route's edit page) and
@@ -79,40 +83,44 @@ export class RouteForm implements OnInit {
       .map((stop) => ({ value: stop.id, label: stop.name }));
   });
 
+  // `business` has no field in the template any more — it's resolved
+  // from whichever Business is active in the header switcher. It stays
+  // a form control purely as the value carrier for create.
+  //
+  // `is_active` is gone entirely: the Routes table owns it now. Leaving
+  // it here would mean a details-only save silently re-sent whatever
+  // value this form loaded with, clobbering a toggle made elsewhere in
+  // the meantime.
   protected readonly form = this.fb.nonNullable.group({
     business: ['', Validators.required],
     name: ['', Validators.required],
     code: [''],
     description: [''],
-    is_active: [true],
   });
 
   async ngOnInit(): Promise<void> {
-    try {
-      this.businessOptionsList.set(await this.businessOptions.loadOptions());
-    } catch (err) {
-      this.errorMessage.set(err instanceof Error ? err.message : 'Failed to load businesses.');
-    }
-
     const id = this.route.snapshot.paramMap.get('id');
     if (!id) {
-      // Create mode: default the Business select to whichever one the
-      // user currently has active, so a user working "inside" one
-      // Business doesn't have to keep re-specifying it — still fully
-      // changeable before submit.
+      // Create mode: the Route belongs to whichever Business is active
+      // in the header switcher — there's no field to pick one any more.
+      // Re-asking here was redundant (it was pre-filled from this same
+      // value) and let a user create a Route under a Business other
+      // than the one every other screen was showing them.
       const activeBusinessId = this.selectedBusinessStore.selectedBusinessId();
-      if (activeBusinessId) {
-        this.form.patchValue({ business: activeBusinessId });
+      if (!activeBusinessId) {
+        this.errorMessage.set('Select a business from the header before creating a route.');
+        return;
       }
+      this.form.patchValue({ business: activeBusinessId });
       return;
     }
     this.routeId.set(id);
 
-    let route = this.store.items().find((r) => r.id === id) ?? null;
-    if (!route) {
-      await this.store.getAll();
-      route = this.store.items().find((r) => r.id === id) ?? null;
-    }
+    // Paged full-list lookup, not one bounded page plus `.find()`:
+    // the bounded form reported "not found" for any record outside
+    // the store's current page, which on a refresh or a pasted link
+    // is page 1. See `ListStore.findByIdPaged`.
+    const route = await this.store.findById(id);
 
     if (!route) {
       this.notFound.set(true);
@@ -132,7 +140,6 @@ export class RouteForm implements OnInit {
       name: route.name,
       code: route.code,
       description: route.description,
-      is_active: route.is_active ?? true,
     });
   }
 
@@ -145,7 +152,7 @@ export class RouteForm implements OnInit {
       this.availableStops.set(
         data.results
           .filter((stop) => stop.business === businessId)
-          .map((stop) => ({ id: stop.id, name: stop.name }))
+          .map((stop) => ({ id: stop.id, name: stop.name })),
       );
     }
   }
@@ -160,7 +167,9 @@ export class RouteForm implements OnInit {
     this.errorMessage.set(null);
     this.detailsSaved.set(false);
     const values = this.form.getRawValue();
-    const authHeader = { Authorization: `Bearer ${this.authStore.accessToken()}` };
+    const authHeader = {
+      Authorization: `Bearer ${this.authStore.accessToken()}`,
+    };
     const id = this.routeId();
 
     if (id) {
@@ -170,14 +179,16 @@ export class RouteForm implements OnInit {
           name: values.name,
           code: values.code,
           description: values.description,
-          is_active: values.is_active,
         },
         headers: authHeader,
       });
       this.submitting.set(false);
       if (!data) {
         this.errorMessage.set(
-          extractFirstErrorMessage(error, 'Could not save this route. Check your details and try again.')
+          extractFirstErrorMessage(
+            error,
+            'Could not save this route. Check your details and try again.',
+          ),
         );
         return;
       }
@@ -198,7 +209,10 @@ export class RouteForm implements OnInit {
     this.submitting.set(false);
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(error, 'Could not save this route. Check your details and try again.')
+        extractFirstErrorMessage(
+          error,
+          'Could not save this route. Check your details and try again.',
+        ),
       );
       return;
     }
@@ -257,7 +271,9 @@ export class RouteForm implements OnInit {
     this.savingStops.set(false);
 
     if (!data) {
-      this.stopsError.set(extractFirstErrorMessage(error, 'Could not save the stop order. Try again.'));
+      this.stopsError.set(
+        extractFirstErrorMessage(error, 'Could not save the stop order. Try again.'),
+      );
       return;
     }
 

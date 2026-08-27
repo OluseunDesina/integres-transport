@@ -24,6 +24,15 @@ function makeStop(overrides: Partial<Stop> = {}): Stop {
 class FakeStopStore {
   items = signal<Stop[]>([]);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
+  /** Mirrors `ListStore.findByIdPaged`: match the loaded rows, else
+   * null. The component must never read `items()` and `.find()` for
+   * itself — doing so is what made any record past the store's
+   * current page report "not found" on a refresh. */
+  findById = jasmine
+    .createSpy('findById')
+    .and.callFake((id: string) =>
+      Promise.resolve(this.items().find((item) => item.id === id) ?? null)
+    );
 }
 
 class FakeBusinessOptions {
@@ -51,7 +60,11 @@ async function setup(paramId: string | null, existing: Stop[] = []) {
       { provide: BusinessOptionsService, useValue: businessOptions },
       {
         provide: ActivatedRoute,
-        useValue: { snapshot: { paramMap: convertToParamMap(paramId ? { id: paramId } : {}) } },
+        useValue: {
+          snapshot: {
+            paramMap: convertToParamMap(paramId ? { id: paramId } : {}),
+          },
+        },
       },
     ],
   }).compileComponents();
@@ -91,7 +104,6 @@ describe('StopForm', () => {
         address: '12 Awolowo Rd',
         latitude: '',
         longitude: '',
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -99,15 +111,20 @@ describe('StopForm', () => {
       expect(apiClient.POST).toHaveBeenCalledWith(
         '/api/v1/stops/',
         jasmine.objectContaining({
-          body: jasmine.objectContaining({ business: 'biz-1', name: 'Ikeja Bus Park' }),
-        })
+          body: jasmine.objectContaining({
+            business: 'biz-1',
+            name: 'Ikeja Bus Park',
+          }),
+        }),
       );
       expect(navigateSpy).toHaveBeenCalledWith(['/stops']);
     });
 
     it('shows the server error message on failure (missing location)', async () => {
       apiClient.POST.and.resolveTo({
-        error: { non_field_errors: ['Provide an address or both latitude and longitude.'] },
+        error: {
+          non_field_errors: ['Provide an address or both latitude and longitude.'],
+        },
       });
       fixture.componentInstance['form'].setValue({
         business: 'biz-1',
@@ -115,14 +132,13 @@ describe('StopForm', () => {
         address: '',
         latitude: '',
         longitude: '',
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
       fixture.detectChanges();
 
       expect(fixture.componentInstance['errorMessage']()).toBe(
-        'Provide an address or both latitude and longitude.'
+        'Provide an address or both latitude and longitude.',
       );
     });
   });
@@ -154,7 +170,7 @@ describe('StopForm', () => {
 
       expect(apiClient.PATCH).toHaveBeenCalledWith(
         '/api/v1/stops/{id}/',
-        jasmine.objectContaining({ params: { path: { id: 'stop-1' } } })
+        jasmine.objectContaining({ params: { path: { id: 'stop-1' } } }),
       );
     });
 

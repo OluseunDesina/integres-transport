@@ -48,4 +48,19 @@ export class ScheduleStore extends ListStore<Schedule, ScheduleQuery> {
     }
     return { items: data.results as Schedule[], total: data.count };
   }
+
+  /**
+   * Resolves one Schedule by id for its edit screen, which has no
+   * single-record `GET` to call. Paging, the early exit and the
+   * "never touch browse state" rule all live in
+   * `ListStore.findByIdPaged`.
+   *
+   * Scoped with `{}`, not the live query: a deep link must resolve
+   * whichever Business the record belongs to, regardless of which one
+   * the header switcher happens to have selected. The list stays
+   * Client-scoped server-side either way.
+   */
+  findById(id: string): Promise<Schedule | null> {
+    return this.findByIdPaged(id, {});
+  }
 }

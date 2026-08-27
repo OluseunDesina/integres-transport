@@ -1,8 +1,14 @@
+import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 
 import { BookingList } from './booking-list';
+import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
+
+class FakeSelectedBusinessStore {
+  selectedBusinessId = signal<string | null>('biz-1');
+}
 
 function makeBooking(overrides: Record<string, unknown> = {}) {
   return {
@@ -62,7 +68,11 @@ describe('BookingList', () => {
 
     TestBed.configureTestingModule({
       imports: [BookingList],
-      providers: [provideRouter([]), { provide: API_CLIENT, useValue: apiClient }],
+      providers: [
+        provideRouter([]),
+        { provide: API_CLIENT, useValue: apiClient },
+        { provide: SelectedBusinessStore, useValue: new FakeSelectedBusinessStore() },
+      ],
     });
   });
 
@@ -114,6 +124,21 @@ describe('BookingList', () => {
       { value: '', label: 'All trips' },
       { value: 'trip-1', label: 'Ikeja → CMS — 2026-09-01' },
     ]);
+  });
+
+  it('scopes the trip filter to the selected business', async () => {
+    // Every other filter dropdown in this app is business-scoped. This
+    // one was not, because `GET /trips/` had no `business` param when it
+    // was written — it does now, and without this the dropdown offered
+    // every Trip under the Client regardless of the header selection.
+    await createComponent();
+
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/trips/',
+      jasmine.objectContaining({
+        params: { query: { limit: 100, offset: 0, business: 'biz-1' } },
+      })
+    );
   });
 
   it('refetches with the trip filter applied', async () => {

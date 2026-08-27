@@ -96,13 +96,23 @@ describe('BusinessSuperAdminStore', () => {
 
       expect(found?.id).toBe('biz-100');
       expect(apiClient.GET).toHaveBeenCalledTimes(2);
+      // `search: undefined` is explicit now that the lookup runs through
+      // `fetchPage` (via `ListStore.findByIdPaged`) rather than through a
+      // hand-written request of its own — same unfiltered call on the
+      // wire, since openapi-fetch drops undefined params. Sharing
+      // `fetchPage` is the point: the lookup and the browse can no
+      // longer drift apart.
       expect(apiClient.GET).toHaveBeenCalledWith(
         '/api/v1/super-admin/businesses/',
-        jasmine.objectContaining({ params: { query: { limit: 100, offset: 0 } } })
+        jasmine.objectContaining({
+          params: { query: { limit: 100, offset: 0, search: undefined } },
+        })
       );
       expect(apiClient.GET).toHaveBeenCalledWith(
         '/api/v1/super-admin/businesses/',
-        jasmine.objectContaining({ params: { query: { limit: 100, offset: 100 } } })
+        jasmine.objectContaining({
+          params: { query: { limit: 100, offset: 100, search: undefined } },
+        })
       );
     });
 

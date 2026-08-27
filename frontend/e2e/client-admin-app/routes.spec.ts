@@ -30,7 +30,6 @@ async function selectActiveBusiness(page: Page, name: string): Promise<void> {
 
 async function createStop(page: Page, name: string): Promise<void> {
   await page.goto('/stops/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Stop name').fill(name);
   await page.getByLabel('Address').fill('12 Awolowo Rd, Ikeja');
   await page.getByRole('button', { name: 'Create stop' }).click();
@@ -39,7 +38,6 @@ async function createStop(page: Page, name: string): Promise<void> {
 
 async function createRoute(page: Page, name: string): Promise<void> {
   await page.goto('/routes/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Route name').fill(name);
   await page.getByRole('button', { name: 'Create route' }).click();
   // Create navigates straight into edit mode (the stop-order section
@@ -64,7 +62,6 @@ test.describe('client-admin-app routes', () => {
     await signIn(page);
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await page.goto('/routes/new');
-    await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
     await page.getByRole('button', { name: 'Create route' }).click();
 
     await expect(page.getByText('This field is required.').first()).toBeVisible();
@@ -95,7 +92,6 @@ test.describe('client-admin-app routes', () => {
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await createRoute(page, originalName);
     await expect(page.getByLabel('Route name')).toHaveValue(originalName);
-    await expect(page.getByLabel('Business')).toBeDisabled();
 
     await page.getByLabel('Route name').fill(updatedName);
     await page.getByRole('button', { name: 'Save changes' }).click();

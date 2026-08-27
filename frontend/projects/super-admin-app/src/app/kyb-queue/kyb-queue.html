@@ -16,6 +16,7 @@
           <th class="px-4 py-2">Client</th>
           <th class="px-4 py-2">Vertical</th>
           <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Directors</th>
           <th class="px-4 py-2">Documents</th>
           <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
         </tr>
@@ -27,6 +28,16 @@
             <td class="px-4 py-2">{{ business.client_name }}</td>
             <td class="px-4 py-2">{{ business.vertical }}</td>
             <td class="px-4 py-2"><ui-status-pill label="Submitted" tone="warning" /></td>
+            <!-- Names, not a count: a reviewer approving a business needs
+                 to see who they are approving, which was previously only
+                 inferable from an ID document's filename. -->
+            <td class="px-4 py-2">
+              @if (business.directors.length) {
+                {{ directorNames(business) }}
+              } @else {
+                <span class="text-slate-400">None listed</span>
+              }
+            </td>
             <td class="px-4 py-2">{{ business.documents.length }}</td>
             <td class="px-4 py-2 text-right">
               <ui-button variant="secondary" (pressed)="review(business)">Review</ui-button>

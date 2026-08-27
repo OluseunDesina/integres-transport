@@ -9,6 +9,7 @@ export type Trip = components['schemas']['Trip'];
 // First real multi-key TQuery consumer — TripStore exercises
 // ListStore.updateQuery() with more than a single `business` filter.
 export interface TripQuery {
+  business?: string;
   route?: string;
   schedule?: string;
   service_date?: string;
@@ -36,13 +37,14 @@ export class TripStore extends ListStore<Trip, TripQuery> {
 
   protected override async fetchPage(
     query: TripQuery,
-    page: Page
+    page: Page,
   ): Promise<{ items: Trip[]; total: number }> {
     const { data, error } = await this.api.GET('/api/v1/trips/', {
       params: {
         query: {
           limit: page.limit,
           offset: page.offset,
+          business: query.business,
           route: query.route,
           schedule: query.schedule,
           service_date: query.service_date,

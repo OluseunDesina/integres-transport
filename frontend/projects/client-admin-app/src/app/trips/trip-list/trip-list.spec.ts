@@ -53,7 +53,12 @@ class FakeTripStore {
   items = signal<Trip[]>([]);
   total = signal(0);
   page = signal({ limit: 25, offset: 0 });
-  query = signal<{ route?: string; schedule?: string; service_date?: string; status?: string }>({});
+  query = signal<{
+    route?: string;
+    schedule?: string;
+    service_date?: string;
+    status?: string;
+  }>({});
   loading = signal(false);
   error = signal<string | null>(null);
   isEmpty = signal(false);
@@ -83,9 +88,9 @@ describe('TripList', () => {
     };
     closedSubject = new Subject<boolean | undefined>();
     dialogSpy = jasmine.createSpyObj<Dialog>('Dialog', ['open']);
-    dialogSpy.open.and.returnValue({ closed: closedSubject.asObservable() } as ReturnType<
-      Dialog['open']
-    >);
+    dialogSpy.open.and.returnValue({
+      closed: closedSubject.asObservable(),
+    } as ReturnType<Dialog['open']>);
 
     await TestBed.configureTestingModule({
       imports: [TripList],
@@ -94,7 +99,10 @@ describe('TripList', () => {
         { provide: TripStore, useValue: store },
         { provide: API_CLIENT, useValue: apiClient },
         { provide: Dialog, useValue: dialogSpy },
-        { provide: SelectedBusinessStore, useValue: new FakeSelectedBusinessStore() },
+        {
+          provide: SelectedBusinessStore,
+          useValue: new FakeSelectedBusinessStore(),
+        },
       ],
     }).compileComponents();
 
@@ -102,7 +110,9 @@ describe('TripList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'scheduling.view', 'scheduling.manage'] })
+      makeUser({
+        permissions: ['client-admin:access', 'scheduling.view', 'scheduling.manage'],
+      }),
     );
 
     fixture = TestBed.createComponent(TripList);
@@ -113,8 +123,13 @@ describe('TripList', () => {
 
   afterEach(() => localStorage.clear());
 
-  it('calls getAll() on init', () => {
-    expect(store.getAll).toHaveBeenCalled();
+  it('scopes the query to the active Business on init', () => {
+    // Not getAll(): an unscoped fetch here would race the scoped one the
+    // effect fires, and the table would briefly show every Business's
+    // Trips. GET /trips/ takes a ?business= param now, so this screen
+    // scopes its rows the way every sibling list already did.
+    expect(store.updateQuery).toHaveBeenCalledWith({ business: 'biz-1' });
+    expect(store.getAll).not.toHaveBeenCalled();
   });
 
   it('shows the empty state when the store has no rows', () => {
@@ -137,7 +152,9 @@ describe('TripList', () => {
     expect(store.updateQuery).toHaveBeenCalledWith({ schedule: 'sch-1' });
 
     fixture.componentInstance['onServiceDateFilterChange']('2026-09-01');
-    expect(store.updateQuery).toHaveBeenCalledWith({ service_date: '2026-09-01' });
+    expect(store.updateQuery).toHaveBeenCalledWith({
+      service_date: '2026-09-01',
+    });
 
     fixture.componentInstance['onStatusFilterChange']('cancelled');
     expect(store.updateQuery).toHaveBeenCalledWith({ status: 'cancelled' });
@@ -157,7 +174,7 @@ describe('TripList', () => {
       jasmine.objectContaining({
         params: { path: { id: 'trip-1' } },
         body: { vehicle: 'v-1', driver: 'd-1' },
-      })
+      }),
     );
     expect(store.getAll).toHaveBeenCalled();
   });
@@ -236,7 +253,7 @@ describe('TripList', () => {
       jasmine.objectContaining({
         params: { path: { id: 'trip-1' } },
         body: { status: 'in_progress', reason: '' },
-      })
+      }),
     );
     expect(result).toEqual({ ok: true });
   });

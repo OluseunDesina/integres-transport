@@ -6,6 +6,13 @@
     >
   </div>
 
+  <!-- A failed activate/deactivate is transient and must not replace the
+       table — the row it came from still needs to be visible, and its
+       switch has already rolled back. A load error still does replace it. -->
+  @if (activeError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
   } @else if (store.isEmpty()) {
@@ -23,8 +30,7 @@
         <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
           <th class="px-4 py-2">Name</th>
           <th class="px-4 py-2">Capacity</th>
-          <th class="px-4 py-2">Business</th>
-          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Active</th>
           <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -34,10 +40,18 @@
             <td class="px-4 py-2 font-medium text-slate-900">{{ vehicleType.name }}</td>
             <td class="px-4 py-2">{{ vehicleType.capacity }}</td>
             <td class="px-4 py-2">
-              {{ businessNames().get(vehicleType.business) ?? vehicleType.business }}
-            </td>
-            <td class="px-4 py-2">
-              @if (vehicleType.is_active) {
+              <!-- The switch is a write, so it's gated like the Edit
+                   link — but a viewer without manage permission still
+                   needs to see the state, hence the read-only pill.
+                   `?? true` mirrors the model default. -->
+              @if (canManage()) {
+                <ui-toggle
+                  [checked]="vehicleType.is_active ?? true"
+                  [pending]="pendingId() === vehicleType.id"
+                  [label]="((vehicleType.is_active ?? true) ? 'Deactivate ' : 'Activate ') + vehicleType.name"
+                  (toggled)="onToggleActive(vehicleType, $event)"
+                />
+              } @else if (vehicleType.is_active ?? true) {
                 <ui-status-pill tone="positive" label="Active" />
               } @else {
                 <ui-status-pill tone="neutral" label="Inactive" />

@@ -7,13 +7,6 @@
 
   <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
     <ui-select
-      label="Business"
-      [options]="businessOptionsList()"
-      formControlName="business"
-      [invalid]="!!fieldError('business')"
-      [errorMessage]="fieldError('business')"
-    />
-    <ui-select
       label="Route"
       [options]="routeOptionsList()"
       formControlName="route"

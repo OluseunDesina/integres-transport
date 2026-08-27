@@ -33,14 +33,16 @@
         [invalid]="!!fieldError('name')"
         [errorMessage]="fieldError('name')"
       />
-      <ui-text-field
+      <ui-select
         label="Currency"
+        [options]="currencyOptions"
         formControlName="currency"
         [invalid]="!!fieldError('currency')"
         [errorMessage]="fieldError('currency')"
       />
-      <ui-text-field
+      <ui-select
         label="Timezone"
+        [options]="timezoneOptions"
         formControlName="timezone"
         [invalid]="!!fieldError('timezone')"
         [errorMessage]="fieldError('timezone')"
@@ -51,6 +53,14 @@
         formControlName="booking_mode_default"
         [invalid]="!!fieldError('booking_mode_default')"
         [errorMessage]="fieldError('booking_mode_default')"
+      />
+      <ui-select
+        label="Fare pricing mode"
+        [options]="farePricingModeOptions"
+        [hint]="farePricingModeHint"
+        formControlName="fare_pricing_mode"
+        [invalid]="!!fieldError('fare_pricing_mode')"
+        [errorMessage]="fieldError('fare_pricing_mode')"
       />
       <div class="mt-2 flex gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
@@ -64,37 +74,23 @@
       </div>
     </form>
 
-    @if (editing() && existingBusiness()) {
-      <div *appHasPermission="'kyb.submit'" class="mt-10 border-t border-slate-200 pt-6">
-        <h2 class="mb-1 text-sm font-medium text-slate-700">Upload a KYB document</h2>
+    @if (editing() && existingBusiness(); as business) {
+      <!-- KYB moved to its own screen. It was a single document-type
+           select plus a file input bolted onto the bottom of this form,
+           with no way to see what had already been supplied, no guidance
+           on what a valid document looks like, and nowhere at all to
+           record director identity — see docs/specs/11-kyb-directors.md. -->
+      <div class="mt-10 border-t border-slate-200 pt-6">
+        <h2 class="mb-1 text-sm font-medium text-slate-700">Business verification (KYB)</h2>
         <p class="mb-4 text-sm text-slate-500">
-          You can upload additional documents at any time — uploading after this business is
-          approved adds the document but doesn't change its status.
+          Add directors and supply the documents needed to verify this business.
         </p>
-
-        @if (kybUploadError(); as message) {
-          <ui-alert class="mb-4">{{ message }}</ui-alert>
-        }
-
-        <form (ngSubmit)="onKybUpload()" class="flex flex-col gap-4" novalidate>
-          <ui-select
-            label="Document type"
-            [options]="documentTypeOptions"
-            [ngModel]="kybDocumentType()"
-            [ngModelOptions]="{ standalone: true }"
-            (ngModelChange)="setKybDocumentType($event)"
-          />
-          <app-file-upload-field
-            label="File"
-            accept="application/pdf,image/*"
-            (fileSelected)="onKybFileSelected($event)"
-          />
-          <div>
-            <ui-button type="submit" [loading]="kybUploading()" [disabled]="kybUploading()">
-              Upload document
-            </ui-button>
-          </div>
-        </form>
+        <a
+          [routerLink]="['/businesses', business.id, 'kyb']"
+          class="inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+        >
+          Open verification
+        </a>
       </div>
     }
   }

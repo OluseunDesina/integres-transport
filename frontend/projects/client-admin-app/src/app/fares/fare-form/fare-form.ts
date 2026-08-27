@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
@@ -48,7 +55,9 @@ export class FareForm implements OnInit {
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
 
   protected readonly businessOptionsList = computed<SelectOption[]>(() =>
-    this.selectedBusinessStore.items().map((business) => ({ value: business.id, label: business.name }))
+    this.selectedBusinessStore
+      .items()
+      .map((business) => ({ value: business.id, label: business.name })),
   );
   protected readonly routeOptionsList = signal<SelectOption[]>([]);
   protected readonly stopOptionsList = signal<SelectOption[]>([]);
@@ -61,6 +70,12 @@ export class FareForm implements OnInit {
   protected readonly submitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
 
+  // `business` has no field in the template any more — it's resolved
+  // from whichever Business is active in the header switcher.
+  // Re-asking was redundant (it was pre-filled from this same value)
+  // and let a user create a record under a Business other than the one
+  // every other screen was showing them. The control stays purely as
+  // the value carrier for create.
   protected readonly form = this.fb.nonNullable.group({
     business: ['', Validators.required],
     route: ['', Validators.required],
@@ -77,10 +92,12 @@ export class FareForm implements OnInit {
 
   ngOnInit(): void {
     const activeBusinessId = this.selectedBusinessStore.selectedBusinessId();
-    if (activeBusinessId) {
-      this.form.patchValue({ business: activeBusinessId });
-      void this.onBusinessChange(activeBusinessId);
+    if (!activeBusinessId) {
+      this.errorMessage.set('Select a business from the header before creating a fare.');
+      return;
     }
+    this.form.patchValue({ business: activeBusinessId });
+    void this.onBusinessChange(activeBusinessId);
 
     this.form.controls.business.valueChanges.subscribe((businessId) => {
       void this.onBusinessChange(businessId);
@@ -103,7 +120,12 @@ export class FareForm implements OnInit {
       headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.routesForBusiness = data?.results ?? [];
-    this.routeOptionsList.set(this.routesForBusiness.map((route) => ({ value: route.id, label: route.name })));
+    this.routeOptionsList.set(
+      this.routesForBusiness.map((route) => ({
+        value: route.id,
+        label: route.name,
+      })),
+    );
   }
 
   protected onRouteChange(routeId: string): void {
@@ -122,7 +144,7 @@ export class FareForm implements OnInit {
     this.stopOptionsList.set(
       [...route.stops]
         .sort((a, b) => a.sequence - b.sequence)
-        .map((stop) => ({ value: stop.id, label: stop.name }))
+        .map((stop) => ({ value: stop.id, label: stop.name })),
     );
   }
 
@@ -140,7 +162,9 @@ export class FareForm implements OnInit {
     this.submitting.set(true);
     this.errorMessage.set(null);
     const values = this.form.getRawValue();
-    const authHeader = { Authorization: `Bearer ${this.authStore.accessToken()}` };
+    const authHeader = {
+      Authorization: `Bearer ${this.authStore.accessToken()}`,
+    };
 
     const { data, error } = perSegment
       ? await this.api.POST('/api/v1/fare-segment-rules/', {
@@ -154,7 +178,11 @@ export class FareForm implements OnInit {
           headers: authHeader,
         })
       : await this.api.POST('/api/v1/fare-rules/', {
-          body: { business: values.business, route: values.route, amount: values.amount },
+          body: {
+            business: values.business,
+            route: values.route,
+            amount: values.amount,
+          },
           headers: authHeader,
         });
 
@@ -162,7 +190,10 @@ export class FareForm implements OnInit {
 
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(error, 'Could not save this fare. Check your details and try again.')
+        extractFirstErrorMessage(
+          error,
+          'Could not save this fare. Check your details and try again.',
+        ),
       );
       return;
     }

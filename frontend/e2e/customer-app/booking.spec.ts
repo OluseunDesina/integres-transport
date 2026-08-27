@@ -1,6 +1,8 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, request, test, type Page } from '@playwright/test';
 
+import { findVehicleByRegistration } from '../fixture-lookup';
+
 const PASSENGER_EMAIL = 'e2e-passenger@example.com';
 const STAFF_EMAIL = 'e2e-client-staff@example.com';
 const PASSWORD = 'e2e-test-password-123';
@@ -25,9 +27,26 @@ function farFutureISO(): string {
   return date.toISOString().slice(0, 10);
 }
 
+/**
+ * Selects the fixture route by value, matched on a label *prefix*.
+ *
+ * `selectOption({ label })` matches exactly, and `trip-search.ts`
+ * appends ` — <operator>` to every option as soon as the browse
+ * endpoint spans more than one Business. The tap-and-go fixture alone
+ * guarantees that, so the bare-label form here had been failing since
+ * that fixture landed — unnoticed, because this project's e2e suite
+ * had not been run since.
+ */
+async function selectFixtureRoute(page: Page): Promise<void> {
+  const select = page.getByLabel('Route');
+  const option = select.locator('option').filter({ hasText: ROUTE_NAME }).first();
+  await expect(option).toBeAttached();
+  await select.selectOption((await option.getAttribute('value')) ?? '');
+}
+
 async function searchAndOpenSeatPicker(page: Page, serviceDate: string): Promise<void> {
   await page.goto('/search');
-  await page.getByLabel('Route').selectOption({ label: ROUTE_NAME });
+  await selectFixtureRoute(page);
   await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
   await page.getByLabel('To').selectOption({ label: '3. CMS' });
   await page.getByLabel('Travel date').fill(serviceDate);
@@ -117,7 +136,7 @@ test.describe('customer-app booking flow', () => {
   test('shows an axe-clean empty state when nothing runs on the chosen date', async ({ page }) => {
     await signIn(page);
     await page.goto('/search');
-    await page.getByLabel('Route').selectOption({ label: ROUTE_NAME });
+    await selectFixtureRoute(page);
     await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
     await page.getByLabel('To').selectOption({ label: '3. CMS' });
     await page.getByLabel('Travel date').fill(farFutureISO());
@@ -132,7 +151,7 @@ test.describe('customer-app booking flow', () => {
     await signIn(page);
 
     await page.goto('/search');
-    await page.getByLabel('Route').selectOption({ label: ROUTE_NAME });
+    await selectFixtureRoute(page);
     await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
     await page.getByLabel('To').selectOption({ label: '3. CMS' });
     await page.getByLabel('Travel date').fill(todayISO());
@@ -221,14 +240,13 @@ test.describe('customer-app booking flow', () => {
     const fromStop = route.stops[0];
     const toStop = route.stops[route.stops.length - 1];
 
-    const vehicles = await (
-      await api.get(`${BACKEND_URL}/api/v1/vehicles/?limit=50`, {
-        headers: { Authorization: `Bearer ${staffToken}` },
-      })
-    ).json();
-    const vehicle = vehicles.results.find(
-      (v: { registration_number: string }) => v.registration_number === 'E2E-1234-LA'
-    );
+    // Paged, not one bounded `?limit=50` page plus `.find()`: `GET
+    // /vehicles/` has no registration filter, and the fixture vehicle is
+    // long past the first page (104 vehicles here, `E2E-1234-LA` well
+    // outside the first 50). The bounded form failed with an opaque
+    // "Cannot read properties of undefined (reading 'id')" rather than
+    // anything naming the real cause.
+    const vehicle = await findVehicleByRegistration(api, staffToken, 'E2E-1234-LA');
 
     const serviceDate = new Date();
     serviceDate.setDate(serviceDate.getDate() + 200 + Math.floor(Math.random() * 500));
@@ -266,7 +284,7 @@ test.describe('customer-app booking flow', () => {
     // via trip-search's own "Choose seats" click — for each context.
     for (const page of [pageA, pageB]) {
       await page.goto('/search');
-      await page.getByLabel('Route').selectOption({ label: ROUTE_NAME });
+      await selectFixtureRoute(page);
       // Stop options are labelled "{sequence}. {name}" (trip-search.ts's
       // toStopOption()), not the bare stop name.
       await page.getByLabel('From').selectOption({ label: `${fromStop.sequence}. ${fromStop.name}` });

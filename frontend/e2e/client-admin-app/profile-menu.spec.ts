@@ -34,7 +34,6 @@ async function selectActiveBusiness(page: Page, name: string): Promise<void> {
 
 async function createRoute(page: Page, name: string, business: string): Promise<void> {
   await page.goto('/routes/new');
-  await page.getByLabel('Business').selectOption({ label: business });
   await page.getByLabel('Route name').fill(name);
   await page.getByRole('button', { name: 'Create route' }).click();
   await expect(page).toHaveURL(/\/routes\/[^/]+\/edit$/);

@@ -137,7 +137,11 @@ export class WalletScreen implements OnInit {
 
     const { data, error } = await this.api.POST('/api/v1/payments/', {
       params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
-      body: { wallet_topup: { business_id: businessId, amount } },
+      // use_wallet_balance is only meaningful alongside booking_id
+      // (the server rejects it paired with wallet_topup) — included
+      // as false here only because the generated type isn't optional
+      // for a field with a schema-level default.
+      body: { use_wallet_balance: false, wallet_topup: { business_id: businessId, amount } },
       headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 

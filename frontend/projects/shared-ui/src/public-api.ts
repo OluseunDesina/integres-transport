@@ -13,3 +13,4 @@ export * from './lib/paginator';
 export * from './lib/stat';
 export * from './lib/confirm-dialog';
 export * from './lib/icon';
+export * from './lib/toggle';

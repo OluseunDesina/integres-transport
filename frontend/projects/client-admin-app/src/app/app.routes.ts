@@ -56,6 +56,18 @@ export const routes: Routes = [
         data: { permissions: ['business.manage'] },
       },
       {
+        // Gated on client.view, not business.manage: uploading is
+        // kyb.submit and adding directors is business.manage, but a
+        // read-only viewer should still be able to see how far the
+        // verification packet has got. The screen hides the write
+        // controls it can't use.
+        path: 'businesses/:id/kyb',
+        loadComponent: () =>
+          import('./businesses/business-kyb/business-kyb').then((m) => m.BusinessKyb),
+        canActivate: [permissionGuard],
+        data: { permissions: ['client.view'] },
+      },
+      {
         path: 'routes',
         loadComponent: () => import('./routes/route-list/route-list').then((m) => m.RouteList),
         canActivate: [permissionGuard],
@@ -214,6 +226,16 @@ export const routes: Routes = [
         loadComponent: () => import('./fares/fare-form/fare-form').then((m) => m.FareForm),
         canActivate: [permissionGuard],
         data: { permissions: ['fares.manage'] },
+      },
+      {
+        // fares.view, not fares.manage: the grid is the clearest view
+        // of what a route actually charges, so a read-only viewer
+        // should reach it. The screen disables its cells and hides the
+        // save button when the session can't write.
+        path: 'fares/fare-matrix/:routeId',
+        loadComponent: () => import('./fares/fare-matrix/fare-matrix').then((m) => m.FareMatrix),
+        canActivate: [permissionGuard],
+        data: { permissions: ['fares.view'] },
       },
       {
         path: 'tap-go',

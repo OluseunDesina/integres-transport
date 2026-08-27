@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { API_CLIENT } from '@api-client';
 import { AuthStore } from '@auth';
 import type { AuthUser } from '@auth';
 
@@ -81,6 +82,12 @@ class FakeSelectedBusinessStore {
   selectedBusinessId = signal<string | null>('biz-1');
 }
 
+const apiClientStub = {
+  GET: jasmine.createSpy('GET').and.resolveTo({ data: { count: 0, results: [] } }),
+  POST: jasmine.createSpy('POST').and.resolveTo({ data: {} }),
+  PATCH: jasmine.createSpy('PATCH').and.resolveTo({ data: {} }),
+};
+
 describe('ScheduleList', () => {
   let fixture: ComponentFixture<ScheduleList>;
   let store: FakeScheduleStore;
@@ -95,9 +102,13 @@ describe('ScheduleList', () => {
       imports: [ScheduleList],
       providers: [
         provideRouter([]),
+        { provide: API_CLIENT, useValue: apiClientStub },
         { provide: ScheduleStore, useValue: store },
         { provide: RouteStore, useValue: routeStore },
-        { provide: SelectedBusinessStore, useValue: new FakeSelectedBusinessStore() },
+        {
+          provide: SelectedBusinessStore,
+          useValue: new FakeSelectedBusinessStore(),
+        },
       ],
     }).compileComponents();
 
@@ -105,7 +116,7 @@ describe('ScheduleList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'scheduling.view'] })
+      makeUser({ permissions: ['client-admin:access', 'scheduling.view'] }),
     );
 
     fixture = TestBed.createComponent(ScheduleList);

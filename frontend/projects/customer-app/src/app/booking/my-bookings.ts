@@ -36,6 +36,7 @@ type BookingStatus = Booking['status'];
 const STATUS_TONE: Record<BookingStatus, StatusPillTone> = {
   pending_payment: 'warning',
   paid: 'positive',
+  completed: 'positive',
   cancelled: 'negative',
   expired: 'neutral',
 };
@@ -43,6 +44,7 @@ const STATUS_TONE: Record<BookingStatus, StatusPillTone> = {
 const STATUS_LABEL: Record<BookingStatus, string> = {
   pending_payment: 'Pending payment',
   paid: 'Paid',
+  completed: 'Completed',
   cancelled: 'Cancelled',
   expired: 'Expired',
 };
@@ -88,11 +90,14 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
  *
  * "Pay now" (Phase 5 frontend, Slice A) initiates a real Paystack
  * checkout for a `pending_payment` row and redirects the browser to
- * `authorization_url`. Deliberately scoped no further than that: no
- * dedicated wallet/payment-history screen, and `booking-confirm.ts`'s
- * post-create navigation is untouched — a passenger lands here first
- * either way and pays from this list, same as they already cancel from
- * it.
+ * `authorization_url`. docs/specs/7-passenger-wallet.md's later
+ * Implementation note (the blended-payment revisit) folded the
+ * previously-separate "Pay from wallet" button into this same action:
+ * a checkbox applies the wallet balance first, and `payNow()` handles
+ * both possible outcomes — a `succeeded` response with no
+ * `authorization_url` (wallet covered it all, nothing to redirect to)
+ * or an `authorization_url` for whatever remainder (if any) Paystack
+ * still needs to collect.
  */
 @Component({
   selector: 'app-my-bookings',
@@ -111,7 +116,9 @@ export class MyBookings implements OnInit {
   // page's pending_payment bookings, not one per row — a passenger's
   // pending bookings are usually all with the same operator.
   protected readonly walletBalances = signal<ReadonlyMap<string, string>>(new Map());
-  protected readonly payingFromWalletBookingIds = signal<ReadonlySet<string>>(new Set());
+  // Per-row "use my wallet balance" checkbox state — a passenger could
+  // plausibly want it for one pending booking and not another.
+  protected readonly useWalletBalanceIds = signal<ReadonlySet<string>>(new Set());
 
   @ViewChild('cancelBody') private readonly cancelBody!: TemplateRef<unknown>;
 
@@ -167,21 +174,57 @@ export class MyBookings implements OnInit {
     return booking.status === CANCELLABLE_STATUS;
   }
 
-  protected canPayFromWallet(booking: Booking): boolean {
+  protected canPay(booking: Booking): boolean {
+    return booking.status === PAYABLE_STATUS;
+  }
+
+  // The checkbox only makes sense when there's an actual balance to
+  // apply — nothing to offer on a zero/unknown balance.
+  protected canUseWalletBalance(booking: Booking): boolean {
     if (booking.status !== PAYABLE_STATUS) {
       return false;
     }
     const balance = this.walletBalances().get(booking.business);
-    // Display-only gate, not a source of truth — the backend
-    // independently re-checks the exact Decimal balance under a row
-    // lock at payment time (`InsufficientWalletBalance`), so a Number()
-    // comparison here only decides whether the button renders, never
-    // whether money actually moves.
-    return balance !== undefined && Number(balance) >= Number(booking.total_amount);
+    return balance !== undefined && Number(balance) > 0;
   }
 
-  protected canPay(booking: Booking): boolean {
-    return booking.status === PAYABLE_STATUS;
+  protected isUsingWalletBalance(booking: Booking): boolean {
+    return this.useWalletBalanceIds().has(booking.id);
+  }
+
+  protected toggleUseWalletBalance(booking: Booking, checked: boolean): void {
+    this.useWalletBalanceIds.update((ids) => {
+      const next = new Set(ids);
+      if (checked) {
+        next.add(booking.id);
+      } else {
+        next.delete(booking.id);
+      }
+      return next;
+    });
+  }
+
+  // Display-only preview of the split, computed from the same balance
+  // `canUseWalletBalance` already reads — never a source of truth. The
+  // backend independently computes and enforces the actual split under
+  // a row lock at payment time; this only decides what text renders
+  // before the passenger clicks "Pay now", same "display-only" posture
+  // this file already established for the old canPayFromWallet gate.
+  protected walletBreakdown(
+    booking: Booking
+  ): { walletPortion: string; remainder: string; fullyCovered: boolean } | null {
+    const balance = this.walletBalances().get(booking.business);
+    if (balance === undefined) {
+      return null;
+    }
+    const total = Number(booking.total_amount);
+    const walletPortion = Math.min(Number(balance), total);
+    const remainder = Math.max(0, total - walletPortion);
+    return {
+      walletPortion: formatMoney(walletPortion.toFixed(2), booking.currency),
+      remainder: formatMoney(remainder.toFixed(2), booking.currency),
+      fullyCovered: remainder === 0,
+    };
   }
 
   protected canViewTickets(booking: Booking): boolean {
@@ -245,7 +288,7 @@ export class MyBookings implements OnInit {
       // (idempotencyKeyFor above) so a retry after a timeout returns
       // the original PaymentIntent instead of a second one.
       params: { header: { 'Idempotency-Key': this.idempotencyKeyFor(booking.id) } },
-      body: { booking_id: booking.id },
+      body: { booking_id: booking.id, use_wallet_balance: this.isUsingWalletBalance(booking) },
       headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
@@ -259,38 +302,13 @@ export class MyBookings implements OnInit {
       this.redirectToPaystack(data.authorization_url);
       return;
     }
-    this.paymentError.set(extractFirstErrorMessage(error, 'Could not start payment. Try again.'));
-  }
-
-  protected async payFromWallet(booking: Booking): Promise<void> {
-    if (this.payingFromWalletBookingIds().has(booking.id)) {
-      return;
-    }
-    this.paymentError.set(null);
-    this.payingFromWalletBookingIds.update((ids) => new Set(ids).add(booking.id));
-
-    // No Idempotency-Key: unlike payNow()'s Paystack round-trip, this
-    // is synchronous and the backend's own row-lock on the booking
-    // (`pay_booking_from_wallet`) already makes a double-click safe —
-    // a retry just sees the booking already paid and fails cleanly.
-    const { data, error } = await this.api.POST('/api/v1/bookings/{id}/pay-from-wallet/', {
-      params: { path: { id: booking.id } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
-    });
-
-    this.payingFromWalletBookingIds.update((ids) => {
-      const next = new Set(ids);
-      next.delete(booking.id);
-      return next;
-    });
-
-    if (data) {
+    if (data?.status === 'succeeded') {
+      // The wallet balance covered the full amount — no Paystack
+      // round-trip happened, nothing to redirect to.
       await this.store.getAll();
       return;
     }
-    this.paymentError.set(
-      extractFirstErrorMessage(error, 'Could not pay from your wallet. Try again.')
-    );
+    this.paymentError.set(extractFirstErrorMessage(error, 'Could not start payment. Try again.'));
   }
 
   private idempotencyKeyFor(bookingId: string): string {

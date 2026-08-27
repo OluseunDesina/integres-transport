@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { Router, provideRouter } from '@angular/router';
+import { API_CLIENT } from '@api-client';
 import { AuthStore } from '@auth';
 import type { AuthUser } from '@auth';
 
@@ -67,6 +68,12 @@ class FakeSelectedBusinessStore {
   selectedBusinessId = signal<string | null>('biz-1');
 }
 
+const apiClientStub = {
+  GET: jasmine.createSpy('GET').and.resolveTo({ data: { count: 0, results: [] } }),
+  POST: jasmine.createSpy('POST').and.resolveTo({ data: {} }),
+  PATCH: jasmine.createSpy('PATCH').and.resolveTo({ data: {} }),
+};
+
 describe('StopList', () => {
   let fixture: ComponentFixture<StopList>;
   let store: FakeStopStore;
@@ -80,9 +87,13 @@ describe('StopList', () => {
       imports: [StopList],
       providers: [
         provideRouter([]),
+        { provide: API_CLIENT, useValue: apiClientStub },
         { provide: StopStore, useValue: store },
         { provide: BusinessStore, useValue: new FakeBusinessStore() },
-        { provide: SelectedBusinessStore, useValue: new FakeSelectedBusinessStore() },
+        {
+          provide: SelectedBusinessStore,
+          useValue: new FakeSelectedBusinessStore(),
+        },
       ],
     }).compileComponents();
 
@@ -90,7 +101,7 @@ describe('StopList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'network.view'] })
+      makeUser({ permissions: ['client-admin:access', 'network.view'] }),
     );
 
     fixture = TestBed.createComponent(StopList);
@@ -138,7 +149,9 @@ describe('StopList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'network.view', 'network.manage'] })
+      makeUser({
+        permissions: ['client-admin:access', 'network.view', 'network.manage'],
+      }),
     );
     fixture.detectChanges();
 
@@ -152,7 +165,9 @@ describe('StopList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'network.view', 'network.manage'] })
+      makeUser({
+        permissions: ['client-admin:access', 'network.view', 'network.manage'],
+      }),
     );
     fixture.detectChanges();
     const router = TestBed.inject(Router);
@@ -173,7 +188,9 @@ describe('StopList', () => {
     fixture.detectChanges();
 
     const buttons = fixture.debugElement.queryAll(By.css('button'));
-    const nextButton = buttons.find((b) => (b.nativeElement.textContent as string).includes('Next'));
+    const nextButton = buttons.find((b) =>
+      (b.nativeElement.textContent as string).includes('Next'),
+    );
     nextButton?.nativeElement.click();
 
     expect(store.changePage).toHaveBeenCalledWith(25);

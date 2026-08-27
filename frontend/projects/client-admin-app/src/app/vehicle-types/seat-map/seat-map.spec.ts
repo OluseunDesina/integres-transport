@@ -55,6 +55,15 @@ function makeSeat(overrides: Partial<Seat> = {}): Seat {
 class FakeVehicleTypeStore {
   items = signal<VehicleType[]>([]);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
+  /** Mirrors `ListStore.findByIdPaged`: match the loaded rows, else
+   * null. The component must never read `items()` and `.find()` for
+   * itself — doing so is what made any record past the store's
+   * current page report "not found" on a refresh. */
+  findById = jasmine
+    .createSpy('findById')
+    .and.callFake((id: string) =>
+      Promise.resolve(this.items().find((item) => item.id === id) ?? null)
+    );
 }
 
 async function setup(paramId: string | null, existingVehicleTypes: VehicleType[] = []) {
@@ -181,6 +190,11 @@ describe('SeatMap', () => {
     it('disables Generate when rows x columns exceeds capacity', async () => {
       fixture.componentInstance['setRowsInput']('3');
       fixture.componentInstance['setColumnsInput']('3');
+      fixture.detectChanges();
+      // `whenStable` because the vehicle type is now resolved by an
+      // awaited `findById` rather than read synchronously off the
+      // store's loaded page — and `exceedsCapacity` reads its capacity.
+      await fixture.whenStable();
       fixture.detectChanges();
 
       expect(fixture.componentInstance['exceedsCapacity']()).toBeTrue();

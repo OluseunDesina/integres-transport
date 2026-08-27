@@ -49,13 +49,14 @@ describe('TripStore', () => {
           query: {
             limit: 25,
             offset: 0,
+            business: undefined,
             route: undefined,
             schedule: undefined,
             service_date: undefined,
             status: undefined,
           },
         },
-      })
+      }),
     );
     expect(store.items().length).toBe(1);
     expect(store.items()[0].route.name).toBe('Ikeja Express');
@@ -71,10 +72,11 @@ describe('TripStore', () => {
     expect(store.items()).toEqual([]);
   });
 
-  it('round-trips all four query filters via updateQuery()', async () => {
+  it('round-trips all five query filters via updateQuery()', async () => {
     apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
 
     await store.updateQuery({
+      business: 'biz-1',
       route: 'route-1',
       schedule: 'schedule-1',
       service_date: '2026-09-01',
@@ -88,13 +90,14 @@ describe('TripStore', () => {
           query: {
             limit: 25,
             offset: 0,
+            business: 'biz-1',
             route: 'route-1',
             schedule: 'schedule-1',
             service_date: '2026-09-01',
             status: 'scheduled',
           },
         },
-      })
+      }),
     );
   });
 });

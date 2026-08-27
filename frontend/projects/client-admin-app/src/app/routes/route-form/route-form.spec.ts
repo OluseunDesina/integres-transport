@@ -24,6 +24,15 @@ function makeRoute(overrides: Partial<Route> = {}): Route {
 class FakeRouteStore {
   items = signal<Route[]>([]);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
+  /** Mirrors `ListStore.findByIdPaged`: match the loaded rows, else
+   * null. The component must never read `items()` and `.find()` for
+   * itself — doing so is what made any record past the store's
+   * current page report "not found" on a refresh. */
+  findById = jasmine
+    .createSpy('findById')
+    .and.callFake((id: string) =>
+      Promise.resolve(this.items().find((item) => item.id === id) ?? null)
+    );
 }
 
 class FakeBusinessOptions {
@@ -52,7 +61,11 @@ async function setup(paramId: string | null, existing: Route[] = []) {
       { provide: BusinessOptionsService, useValue: businessOptions },
       {
         provide: ActivatedRoute,
-        useValue: { snapshot: { paramMap: convertToParamMap(paramId ? { id: paramId } : {}) } },
+        useValue: {
+          snapshot: {
+            paramMap: convertToParamMap(paramId ? { id: paramId } : {}),
+          },
+        },
       },
     ],
   }).compileComponents();
@@ -64,7 +77,12 @@ async function setup(paramId: string | null, existing: Route[] = []) {
 describe('RouteForm', () => {
   describe('create mode', () => {
     let fixture: ComponentFixture<RouteForm>;
-    let apiClient: { GET: jasmine.Spy; POST: jasmine.Spy; PATCH: jasmine.Spy; PUT: jasmine.Spy };
+    let apiClient: {
+      GET: jasmine.Spy;
+      POST: jasmine.Spy;
+      PATCH: jasmine.Spy;
+      PUT: jasmine.Spy;
+    };
 
     beforeEach(async () => {
       ({ fixture, apiClient } = await setup(null));
@@ -91,7 +109,6 @@ describe('RouteForm', () => {
         name: 'Ikeja Express',
         code: '',
         description: '',
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -99,29 +116,33 @@ describe('RouteForm', () => {
       expect(apiClient.POST).toHaveBeenCalledWith(
         '/api/v1/routes/',
         jasmine.objectContaining({
-          body: jasmine.objectContaining({ business: 'biz-1', name: 'Ikeja Express' }),
-        })
+          body: jasmine.objectContaining({
+            business: 'biz-1',
+            name: 'Ikeja Express',
+          }),
+        }),
       );
       expect(navigateSpy).toHaveBeenCalledWith(['/routes', 'route-1', 'edit']);
     });
 
     it('shows the server error message on failure', async () => {
       apiClient.POST.and.resolveTo({
-        error: { business: ['This Business must be KYB-approved before creating Routes.'] },
+        error: {
+          business: ['This Business must be KYB-approved before creating Routes.'],
+        },
       });
       fixture.componentInstance['form'].setValue({
         business: 'biz-1',
         name: 'Ikeja Express',
         code: '',
         description: '',
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
       fixture.detectChanges();
 
       expect(fixture.componentInstance['errorMessage']()).toBe(
-        'This Business must be KYB-approved before creating Routes.'
+        'This Business must be KYB-approved before creating Routes.',
       );
     });
   });
@@ -151,7 +172,7 @@ describe('RouteForm', () => {
 
       expect(apiClient.PATCH).toHaveBeenCalledWith(
         '/api/v1/routes/{id}/',
-        jasmine.objectContaining({ params: { path: { id: 'route-1' } } })
+        jasmine.objectContaining({ params: { path: { id: 'route-1' } } }),
       );
     });
 
@@ -223,7 +244,7 @@ describe('RouteForm', () => {
           jasmine.objectContaining({
             params: { path: { id: 'route-1' } },
             body: { stops: ['stop-b', 'stop-a'] },
-          })
+          }),
         );
         expect(fixture.componentInstance['stopsSaved']()).toBe(true);
       });

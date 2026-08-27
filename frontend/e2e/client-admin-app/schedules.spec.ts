@@ -24,7 +24,6 @@ async function selectActiveBusiness(page: Page, name: string): Promise<void> {
 
 async function createRoute(page: Page, name: string): Promise<void> {
   await page.goto('/routes/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Route name').fill(name);
   await page.getByRole('button', { name: 'Create route' }).click();
   // Route creation navigates to its own edit page (to let stops be
@@ -34,7 +33,6 @@ async function createRoute(page: Page, name: string): Promise<void> {
 
 async function createSchedule(page: Page, routeName: string): Promise<void> {
   await page.goto('/schedules/new');
-  await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
   await page.getByLabel('Route').selectOption({ label: routeName });
   await page.getByLabel('Mon').check();
   await page.getByLabel('Wed').check();
@@ -65,7 +63,6 @@ test.describe('client-admin-app schedules', () => {
     await createRoute(page, routeName);
 
     await page.goto('/schedules/new');
-    await page.getByLabel('Business').selectOption({ label: NETWORK_BUSINESS });
     await page.getByLabel('Route').selectOption({ label: routeName });
     await page.getByLabel('Departure time').fill('07:30');
     await page.getByLabel('Effective from').fill('2026-01-01');
@@ -107,7 +104,6 @@ test.describe('client-admin-app schedules', () => {
       .getByRole('link', { name: 'Edit' })
       .click();
     await expect(page.getByRole('heading', { name: 'Edit schedule' })).toBeVisible();
-    await expect(page.getByLabel('Business')).toBeDisabled();
     await expect(page.getByLabel('Route')).toBeDisabled();
     await expect(page.getByLabel('Mon')).toBeChecked();
 

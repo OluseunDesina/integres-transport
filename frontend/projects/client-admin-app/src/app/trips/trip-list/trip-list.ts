@@ -3,7 +3,6 @@ import { DatePipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
-  OnInit,
   TemplateRef,
   ViewChild,
   computed,
@@ -28,7 +27,12 @@ import {
   Table,
   TextField,
 } from '@shared-ui';
-import type { ConfirmDialogData, ConfirmDialogResult, SelectOption, StatusPillTone } from '@shared-ui';
+import type {
+  ConfirmDialogData,
+  ConfirmDialogResult,
+  SelectOption,
+  StatusPillTone,
+} from '@shared-ui';
 
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 import { TripStore, type Trip } from '../../shared/data/store/trip.store';
@@ -36,7 +40,10 @@ import { TripStore, type Trip } from '../../shared/data/store/trip.store';
 const NONE_OPTION: SelectOption = { value: '', label: '— None —' };
 
 const ALL_ROUTES_OPTION: SelectOption = { value: '', label: 'All routes' };
-const ALL_SCHEDULES_OPTION: SelectOption = { value: '', label: 'All schedules' };
+const ALL_SCHEDULES_OPTION: SelectOption = {
+  value: '',
+  label: 'All schedules',
+};
 const STATUS_FILTER_OPTIONS: SelectOption[] = [
   { value: '', label: 'All statuses' },
   { value: 'scheduled', label: 'Scheduled' },
@@ -123,7 +130,7 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
   ],
   templateUrl: './trip-list.html',
 })
-export class TripList implements OnInit {
+export class TripList {
   protected readonly store = inject(TripStore);
   private readonly dialog = inject(Dialog);
   private readonly api = inject(API_CLIENT);
@@ -147,33 +154,50 @@ export class TripList implements OnInit {
   protected readonly statusTarget = signal<StatusTransitionOption['target'] | ''>('');
   protected readonly statusReason = signal('');
   protected readonly confirmDisabled = computed(
-    () => this.statusTarget() === 'cancelled' && !this.statusReason().trim()
+    () => this.statusTarget() === 'cancelled' && !this.statusReason().trim(),
   );
   protected readonly danger = computed(() => this.statusTarget() === 'cancelled');
   protected readonly confirmLabel = computed(
-    () => this.statusOptions().find((o) => o.target === this.statusTarget())?.label ?? 'Confirm'
+    () => this.statusOptions().find((o) => o.target === this.statusTarget())?.label ?? 'Confirm',
   );
 
-  // Keeps the Route/Schedule filter dropdowns scoped to whichever
-  // Business is active — a client-side convenience only (GET /trips/
-  // has no ?business= param of its own), same effect()/untracked()
+  // Scopes both the rows *and* the Route/Schedule filter dropdowns to
+  // whichever Business is active — the same effect()/untracked()
   // pattern every other business-scoped screen already uses.
-  private readonly syncFilterOptions = effect(
+  //
+  // Previously only the dropdowns were scoped, because GET /trips/ had
+  // no `?business=` param of its own: the table itself still listed
+  // every Trip across every Business under the Client, which is what
+  // made this screen the odd one out. The param exists now
+  // (`TripListQuerySerializer.business`), so the query is scoped too.
+  //
+  // This is the only fetch trigger on this screen — the ngOnInit that
+  // used to call getAll() is gone, deliberately: an unscoped fetch
+  // there would race this scoped one and the table would briefly show
+  // every Business's Trips.
+  private readonly syncBusinessFilter = effect(
     () => {
       const businessId = this.selectedBusinessStore.selectedBusinessId();
       if (businessId) {
-        untracked(() => void this.loadFilterOptions(businessId));
+        untracked(() => {
+          void this.store.updateQuery({ business: businessId });
+          void this.loadFilterOptions(businessId);
+        });
       }
     },
-    { allowSignalWrites: true }
+    { allowSignalWrites: true },
   );
 
-  // A page of Trips can span multiple Businesses (GET /trips/ has no
-  // ?business= filter) — lazily fetch-and-cache Vehicle/Driver options
-  // per business id actually seen on the current page, rather than a
-  // shared options service (no pagination/query needs of its own) or a
-  // per-row fetch-on-render. `loadingBusinessIds` is a plain in-flight
-  // guard, not a signal — it must not itself retrigger this effect.
+  // Lazily fetch-and-cache Vehicle/Driver options per business id seen
+  // on the current page, rather than a shared options service (no
+  // pagination/query needs of its own) or a per-row fetch-on-render.
+  // `loadingBusinessIds` is a plain in-flight guard, not a signal — it
+  // must not itself retrigger this effect.
+  //
+  // Now that the list is scoped by `?business=`, a page resolves to a
+  // single id in practice; this stays keyed by id anyway so switching
+  // the active Business reuses the cache instead of refetching, and so
+  // nothing breaks if the scoping is ever relaxed.
   private readonly loadingBusinessIds = new Set<string>();
 
   private readonly loadMissingAssignmentOptions = effect(
@@ -181,19 +205,18 @@ export class TripList implements OnInit {
       const businessIds = new Set(this.store.items().map((trip) => trip.business));
       untracked(() => {
         for (const businessId of businessIds) {
-          if (!this.vehicleOptionsCache().has(businessId) && !this.loadingBusinessIds.has(businessId)) {
+          if (
+            !this.vehicleOptionsCache().has(businessId) &&
+            !this.loadingBusinessIds.has(businessId)
+          ) {
             this.loadingBusinessIds.add(businessId);
             void this.fetchAssignmentOptions(businessId);
           }
         }
       });
     },
-    { allowSignalWrites: true }
+    { allowSignalWrites: true },
   );
-
-  ngOnInit(): void {
-    void this.store.getAll();
-  }
 
   protected onPageChange(offset: number): void {
     void this.store.changePage(offset);
@@ -290,16 +313,27 @@ export class TripList implements OnInit {
   }
 
   private async loadFilterOptions(businessId: string): Promise<void> {
-    const authHeader = { Authorization: `Bearer ${this.authStore.accessToken()}` };
+    const authHeader = {
+      Authorization: `Bearer ${this.authStore.accessToken()}`,
+    };
     const query = { limit: 100, offset: 0, business: businessId };
     const [routes, schedules] = await Promise.all([
-      this.api.GET('/api/v1/routes/', { params: { query }, headers: authHeader }),
-      this.api.GET('/api/v1/schedules/', { params: { query }, headers: authHeader }),
+      this.api.GET('/api/v1/routes/', {
+        params: { query },
+        headers: authHeader,
+      }),
+      this.api.GET('/api/v1/schedules/', {
+        params: { query },
+        headers: authHeader,
+      }),
     ]);
     const routeNameById = new Map((routes.data?.results ?? []).map((r) => [r.id, r.name]));
     this.routeFilterOptions.set([
       ALL_ROUTES_OPTION,
-      ...(routes.data?.results ?? []).map((r) => ({ value: r.id, label: r.name })),
+      ...(routes.data?.results ?? []).map((r) => ({
+        value: r.id,
+        label: r.name,
+      })),
     ]);
     this.scheduleFilterOptions.set([
       ALL_SCHEDULES_OPTION,
@@ -311,11 +345,19 @@ export class TripList implements OnInit {
   }
 
   private async fetchAssignmentOptions(businessId: string): Promise<void> {
-    const authHeader = { Authorization: `Bearer ${this.authStore.accessToken()}` };
+    const authHeader = {
+      Authorization: `Bearer ${this.authStore.accessToken()}`,
+    };
     const query = { limit: 100, offset: 0, business: businessId };
     const [vehicles, drivers] = await Promise.all([
-      this.api.GET('/api/v1/vehicles/', { params: { query }, headers: authHeader }),
-      this.api.GET('/api/v1/drivers/', { params: { query }, headers: authHeader }),
+      this.api.GET('/api/v1/vehicles/', {
+        params: { query },
+        headers: authHeader,
+      }),
+      this.api.GET('/api/v1/drivers/', {
+        params: { query },
+        headers: authHeader,
+      }),
     ]);
 
     // Both caches are populated together, only once the real data has
@@ -327,13 +369,16 @@ export class TripList implements OnInit {
           value: v.id,
           label: v.registration_number,
         })),
-      ])
+      ]),
     );
     this.driverOptionsCache.update((map) =>
       new Map(map).set(businessId, [
         NONE_OPTION,
-        ...(drivers.data?.results ?? []).map((d) => ({ value: d.id, label: d.name })),
-      ])
+        ...(drivers.data?.results ?? []).map((d) => ({
+          value: d.id,
+          label: d.name,
+        })),
+      ]),
     );
     this.loadingBusinessIds.delete(businessId);
   }
@@ -341,7 +386,7 @@ export class TripList implements OnInit {
   private async patchAssignment(
     trip: Trip,
     vehicle: string | null,
-    driver: string | null
+    driver: string | null,
   ): Promise<void> {
     this.assignmentError.set(null);
 
@@ -353,7 +398,7 @@ export class TripList implements OnInit {
 
     if (!data) {
       this.assignmentError.set(
-        extractFirstErrorMessage(error, "Could not update this trip's assignment.")
+        extractFirstErrorMessage(error, "Could not update this trip's assignment."),
       );
       return;
     }
@@ -364,10 +409,18 @@ export class TripList implements OnInit {
   private async submitStatusChange(tripId: string): Promise<ConfirmDialogResult> {
     const { error } = await this.api.POST('/api/v1/trips/{id}/status/', {
       params: { path: { id: tripId } },
-      body: { status: this.statusTarget() as 'in_progress' | 'completed' | 'cancelled', reason: this.statusReason() },
+      body: {
+        status: this.statusTarget() as 'in_progress' | 'completed' | 'cancelled',
+        reason: this.statusReason(),
+      },
       headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
-    return error ? { ok: false, error: extractFirstErrorMessage(error, 'Could not change this trip’s status. Try again.') } : { ok: true };
+    return error
+      ? {
+          ok: false,
+          error: extractFirstErrorMessage(error, 'Could not change this trip’s status. Try again.'),
+        }
+      : { ok: true };
   }
 }

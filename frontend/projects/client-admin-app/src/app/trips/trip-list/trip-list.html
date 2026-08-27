@@ -71,7 +71,11 @@
             <td class="px-4 py-2">{{ trip.service_date }}</td>
             <td class="px-4 py-2">{{ trip.scheduled_departure_at | date: 'short' }}</td>
             <td class="px-4 py-2">
-              <ui-status-pill [tone]="statusTone[trip.status]" [label]="statusLabel[trip.status] ?? trip.status" />
+              <!-- No `?? trip.status` fallback: STATUS_LABEL is keyed by
+                   the full status union, so the compiler (NG8102) proves
+                   the fallback dead. A new status breaks the map's own
+                   type instead, which is the guard we actually want. -->
+              <ui-status-pill [tone]="statusTone[trip.status]" [label]="statusLabel[trip.status]" />
             </td>
             <td class="max-w-40 px-4 py-2 [&_label]:sr-only">
               @if (assignmentOptionsReady(trip.business)) {

@@ -25,6 +25,15 @@ function makeVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
 class FakeVehicleStore {
   items = signal<Vehicle[]>([]);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
+  /** Mirrors `ListStore.findByIdPaged`: match the loaded rows, else
+   * null. The component must never read `items()` and `.find()` for
+   * itself — doing so is what made any record past the store's
+   * current page report "not found" on a refresh. */
+  findById = jasmine
+    .createSpy('findById')
+    .and.callFake((id: string) =>
+      Promise.resolve(this.items().find((item) => item.id === id) ?? null)
+    );
 }
 
 class FakeBusinessOptions {
@@ -52,7 +61,11 @@ async function setup(paramId: string | null, existing: Vehicle[] = []) {
       { provide: BusinessOptionsService, useValue: businessOptions },
       {
         provide: ActivatedRoute,
-        useValue: { snapshot: { paramMap: convertToParamMap(paramId ? { id: paramId } : {}) } },
+        useValue: {
+          snapshot: {
+            paramMap: convertToParamMap(paramId ? { id: paramId } : {}),
+          },
+        },
       },
     ],
   }).compileComponents();
@@ -90,7 +103,7 @@ describe('VehicleForm', () => {
         '/api/v1/vehicle-types/',
         jasmine.objectContaining({
           params: { query: { limit: 100, offset: 0, business: 'biz-1' } },
-        })
+        }),
       );
     });
 
@@ -105,7 +118,6 @@ describe('VehicleForm', () => {
         registration_number: 'LAG-123-XY',
         insurance_expires_at: '',
         roadworthiness_expires_at: '',
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -113,15 +125,20 @@ describe('VehicleForm', () => {
       expect(apiClient.POST).toHaveBeenCalledWith(
         '/api/v1/vehicles/',
         jasmine.objectContaining({
-          body: jasmine.objectContaining({ business: 'biz-1', vehicle_type: 'vt-1' }),
-        })
+          body: jasmine.objectContaining({
+            business: 'biz-1',
+            vehicle_type: 'vt-1',
+          }),
+        }),
       );
       expect(navigateSpy).toHaveBeenCalledWith(['/vehicles']);
     });
 
     it('shows the server error message on failure (vehicle type mismatch)', async () => {
       apiClient.POST.and.resolveTo({
-        error: { vehicle_type: ['This vehicle type belongs to a different Business.'] },
+        error: {
+          vehicle_type: ['This vehicle type belongs to a different Business.'],
+        },
       });
       fixture.componentInstance['form'].setValue({
         business: 'biz-1',
@@ -129,14 +146,13 @@ describe('VehicleForm', () => {
         registration_number: 'LAG-999-XY',
         insurance_expires_at: '',
         roadworthiness_expires_at: '',
-        is_active: true,
       });
 
       await fixture.componentInstance['onSubmit']();
       fixture.detectChanges();
 
       expect(fixture.componentInstance['errorMessage']()).toBe(
-        'This vehicle type belongs to a different Business.'
+        'This vehicle type belongs to a different Business.',
       );
     });
   });
@@ -169,7 +185,7 @@ describe('VehicleForm', () => {
 
       expect(apiClient.PATCH).toHaveBeenCalledWith(
         '/api/v1/vehicles/{id}/',
-        jasmine.objectContaining({ params: { path: { id: 'v-1' } } })
+        jasmine.objectContaining({ params: { path: { id: 'v-1' } } }),
       );
     });
 

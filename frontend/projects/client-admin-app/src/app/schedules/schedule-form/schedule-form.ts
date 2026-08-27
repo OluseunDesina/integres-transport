@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
@@ -6,7 +13,6 @@ import { AuthStore } from '@auth';
 import { Alert, Button, Select, TextField } from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
-import { BusinessOptionsService } from '../../shared/business-options.service';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 import { ScheduleStore } from '../../shared/data/store/schedule.store';
 
@@ -53,7 +59,6 @@ export class ScheduleForm implements OnInit {
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
   private readonly authStore = inject(AuthStore);
-  private readonly businessOptions = inject(BusinessOptionsService);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   protected readonly store = inject(ScheduleStore);
 
@@ -63,47 +68,47 @@ export class ScheduleForm implements OnInit {
   protected readonly editing = computed(() => this.scheduleId() !== null);
   protected readonly notFound = signal(false);
 
-  protected readonly businessOptionsList = signal<SelectOption[]>([]);
   protected readonly routeOptionsList = signal<SelectOption[]>([]);
   protected readonly selectedDays = signal<number[]>([]);
   protected readonly submitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
 
+  // `business` has no field in the template any more — it's resolved
+  // from whichever Business is active in the header switcher.
+  // Re-asking was redundant (it was pre-filled from this same value)
+  // and let a user create a record under a Business other than the one
+  // every other screen was showing them. The control stays purely as
+  // the value carrier for create.
   protected readonly form = this.fb.nonNullable.group({
     business: ['', Validators.required],
     route: ['', Validators.required],
     departure_time: ['', Validators.required],
     effective_from: ['', Validators.required],
     effective_until: [''],
-    is_active: [true],
   });
 
   async ngOnInit(): Promise<void> {
-    try {
-      this.businessOptionsList.set(await this.businessOptions.loadOptions());
-    } catch (err) {
-      this.errorMessage.set(err instanceof Error ? err.message : 'Failed to load businesses.');
-    }
-
     const id = this.route.snapshot.paramMap.get('id');
     if (!id) {
       this.form.controls.business.valueChanges.subscribe((businessId) => {
         void this.onBusinessChange(businessId);
       });
       const activeBusinessId = this.selectedBusinessStore.selectedBusinessId();
-      if (activeBusinessId) {
-        this.form.patchValue({ business: activeBusinessId });
-        await this.loadRouteOptions(activeBusinessId);
+      if (!activeBusinessId) {
+        this.errorMessage.set('Select a business from the header before creating a schedule.');
+        return;
       }
+      this.form.patchValue({ business: activeBusinessId });
+      await this.loadRouteOptions(activeBusinessId);
       return;
     }
     this.scheduleId.set(id);
 
-    let schedule = this.store.items().find((s) => s.id === id) ?? null;
-    if (!schedule) {
-      await this.store.getAll();
-      schedule = this.store.items().find((s) => s.id === id) ?? null;
-    }
+    // Paged full-list lookup, not one bounded page plus `.find()`:
+    // the bounded form reported "not found" for any record outside
+    // the store's current page, which on a refresh or a pasted link
+    // is page 1. See `ListStore.findByIdPaged`.
+    const schedule = await this.store.findById(id);
 
     if (!schedule) {
       this.notFound.set(true);
@@ -118,7 +123,6 @@ export class ScheduleForm implements OnInit {
       departure_time: schedule.departure_time,
       effective_from: schedule.effective_from,
       effective_until: schedule.effective_until ?? '',
-      is_active: schedule.is_active ?? true,
     });
     this.form.controls.business.disable();
     this.form.controls.route.disable();
@@ -139,7 +143,10 @@ export class ScheduleForm implements OnInit {
       headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.routeOptionsList.set(
-      (data?.results ?? []).map((route) => ({ value: route.id, label: route.name }))
+      (data?.results ?? []).map((route) => ({
+        value: route.id,
+        label: route.name,
+      })),
     );
   }
 
@@ -149,7 +156,7 @@ export class ScheduleForm implements OnInit {
 
   protected toggleDay(day: number): void {
     this.selectedDays.update((days) =>
-      days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort((a, b) => a - b)
+      days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort((a, b) => a - b),
     );
   }
 
@@ -166,7 +173,9 @@ export class ScheduleForm implements OnInit {
     this.submitting.set(true);
     this.errorMessage.set(null);
     const values = this.form.getRawValue();
-    const authHeader = { Authorization: `Bearer ${this.authStore.accessToken()}` };
+    const authHeader = {
+      Authorization: `Bearer ${this.authStore.accessToken()}`,
+    };
     const id = this.scheduleId();
 
     const { data, error } = id
@@ -177,7 +186,6 @@ export class ScheduleForm implements OnInit {
             departure_time: values.departure_time,
             effective_from: values.effective_from,
             effective_until: values.effective_until || null,
-            is_active: values.is_active,
           },
           headers: authHeader,
         })
@@ -198,8 +206,8 @@ export class ScheduleForm implements OnInit {
       this.errorMessage.set(
         extractFirstErrorMessage(
           error,
-          'Could not save this schedule. Check your details and try again.'
-        )
+          'Could not save this schedule. Check your details and try again.',
+        ),
       );
       return;
     }
@@ -207,7 +215,9 @@ export class ScheduleForm implements OnInit {
     await this.router.navigate(['/schedules']);
   }
 
-  protected fieldError(field: 'business' | 'route' | 'departure_time' | 'effective_from'): string | null {
+  protected fieldError(
+    field: 'business' | 'route' | 'departure_time' | 'effective_from',
+  ): string | null {
     const control = this.form.controls[field];
     if (!control.touched || control.valid) {
       return null;

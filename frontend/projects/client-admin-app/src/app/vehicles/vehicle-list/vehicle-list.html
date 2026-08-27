@@ -4,6 +4,13 @@
     <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewVehicle()">New vehicle</ui-button>
   </div>
 
+  <!-- A failed activate/deactivate is transient and must not replace the
+       table — the row it came from still needs to be visible, and its
+       switch has already rolled back. A load error still does replace it. -->
+  @if (activeError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
   } @else if (store.isEmpty()) {
@@ -18,9 +25,8 @@
       <thead>
         <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
           <th class="px-4 py-2">Registration</th>
-          <th class="px-4 py-2">Business</th>
           <th class="px-4 py-2">Compliance</th>
-          <th class="px-4 py-2">Status</th>
+          <th class="px-4 py-2">Active</th>
           <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
@@ -28,7 +34,6 @@
         @for (vehicle of store.items(); track vehicle.id) {
           <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
             <td class="px-4 py-2 font-medium text-slate-900">{{ vehicle.registration_number }}</td>
-            <td class="px-4 py-2">{{ businessNames().get(vehicle.business) ?? vehicle.business }}</td>
             <td class="px-4 py-2">
               @if (vehicle.compliance_warnings.length > 0) {
                 <ui-status-pill
@@ -41,7 +46,18 @@
               }
             </td>
             <td class="px-4 py-2">
-              @if (vehicle.is_active) {
+              <!-- The switch is a write, so it's gated like the Edit
+                   link — but a viewer without manage permission still
+                   needs to see the state, hence the read-only pill.
+                   `?? true` mirrors the model default. -->
+              @if (canManage()) {
+                <ui-toggle
+                  [checked]="vehicle.is_active ?? true"
+                  [pending]="pendingId() === vehicle.id"
+                  [label]="((vehicle.is_active ?? true) ? 'Deactivate ' : 'Activate ') + vehicle.registration_number"
+                  (toggled)="onToggleActive(vehicle, $event)"
+                />
+              } @else if (vehicle.is_active ?? true) {
                 <ui-status-pill tone="positive" label="Active" />
               } @else {
                 <ui-status-pill tone="neutral" label="Inactive" />
