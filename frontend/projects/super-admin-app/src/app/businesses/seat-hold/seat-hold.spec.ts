@@ -20,13 +20,16 @@ function makeBusiness(overrides: Partial<BusinessSuperAdmin> = {}): BusinessSupe
     currency: 'NGN',
     is_active: true,
     kyb_status: 'approved',
+    booking_mode_default: 'reservation',
     created_at: '2026-08-06T00:00:00Z',
     ...overrides,
   };
 }
 
+let businesses: BusinessSuperAdmin[] = [makeBusiness()];
+
 class FakeBusinessSuperAdminStore {
-  items = signal<BusinessSuperAdmin[]>([makeBusiness()]);
+  items = signal<BusinessSuperAdmin[]>(businesses);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
   updateQuery = jasmine.createSpy('updateQuery').and.resolveTo();
   findById = jasmine.createSpy('findById').and.callFake((id: string) =>
@@ -73,6 +76,7 @@ describe('SeatHold', () => {
 
   beforeEach(() => {
     localStorage.clear();
+    businesses = [makeBusiness()];
     apiClient = { GET: jasmine.createSpy('GET'), PATCH: jasmine.createSpy('PATCH') };
   });
 
@@ -122,5 +126,43 @@ describe('SeatHold', () => {
       })
     );
     expect(fixture.nativeElement.textContent).toContain('Seat-hold duration saved.');
+  });
+
+  // docs/specs/10-booking-modes.md slice 4. Nothing is held in open
+  // seating — a place is counted when a ticket is issued — so this
+  // screen would otherwise let platform staff tune a number that
+  // changes nothing, with no way to tell.
+  describe('for an open-seating business', () => {
+    beforeEach(() => {
+      businesses = [makeBusiness({ booking_mode_default: 'open_seating' })];
+    });
+
+    it('says the setting has no effect', async () => {
+      apiClient.GET.and.resolveTo({ data: { id: 'biz-1', seat_hold_minutes: 15 } });
+
+      await createComponent();
+
+      expect(fixture.nativeElement.textContent).toContain('has no effect');
+    });
+
+    it('still lets it be edited, so the value survives a mode switch', async () => {
+      apiClient.GET.and.resolveTo({ data: { id: 'biz-1', seat_hold_minutes: 15 } });
+      await createComponent();
+      apiClient.PATCH.and.resolveTo({ data: { id: 'biz-1', seat_hold_minutes: 20 } });
+      fixture.componentInstance['form'].controls.seat_hold_minutes.setValue('20');
+
+      await fixture.componentInstance['onSubmit']();
+
+      expect(apiClient.PATCH).toHaveBeenCalled();
+    });
+
+    it('says nothing of the sort for a reservation business', async () => {
+      businesses = [makeBusiness()];
+      apiClient.GET.and.resolveTo({ data: { id: 'biz-1', seat_hold_minutes: 15 } });
+
+      await createComponent();
+
+      expect(fixture.nativeElement.textContent).not.toContain('has no effect');
+    });
   });
 });

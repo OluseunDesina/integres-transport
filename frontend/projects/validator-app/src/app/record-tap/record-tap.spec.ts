@@ -1,5 +1,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
+import {
+  ValidateTicketService,
+  type TicketValidationResult,
+} from '../validate-ticket/validate-ticket.service';
 import { RecordTap } from './record-tap';
 import { RecordTapService, type Trip } from './record-tap.service';
 
@@ -15,10 +19,32 @@ function makeTrip(overrides: Partial<Trip> = {}): Trip {
     status_changed_at: null,
     vehicle: null,
     driver: null,
-    booking_mode: 'tap_and_go',
+    booking_mode: 'open_seating',
+    fare_collection_mode: 'pay_as_you_go',
     cancellation_reason: '',
     compliance_warnings: [],
     created_at: '2026-08-06T00:00:00Z',
+    ...overrides,
+  };
+}
+
+const PREPAID_TRIP = makeTrip({
+  id: 'trip-prepaid',
+  fare_collection_mode: 'prepaid',
+  booking_mode: 'reservation',
+});
+
+function makeValidationResult(
+  overrides: Partial<TicketValidationResult> = {}
+): TicketValidationResult {
+  return {
+    status: 'boarded',
+    passenger_name: 'Ada Obi',
+    seat_number: '4A',
+    from_stop: 'CBD',
+    to_stop: 'Mall',
+    trip_departure_at: '2026-09-01T08:00:00Z',
+    booking_status: 'completed',
     ...overrides,
   };
 }
@@ -29,27 +55,35 @@ async function setup() {
     'loadRouteStops',
     'recordTap',
   ]);
-  recordTapService.loadTripsForDate.and.resolveTo([makeTrip()]);
+  recordTapService.loadTripsForDate.and.resolveTo([makeTrip(), PREPAID_TRIP]);
   recordTapService.loadRouteStops.and.resolveTo([
     { id: 'stop-1', name: 'CBD', sequence: 1 },
     { id: 'stop-2', name: 'Mall', sequence: 2 },
   ]);
+  const validateTicketService = jasmine.createSpyObj<ValidateTicketService>(
+    'ValidateTicketService',
+    ['loadTripsForDate', 'validateTicket', 'validateCredential']
+  );
 
   await TestBed.configureTestingModule({
     imports: [RecordTap],
-    providers: [{ provide: RecordTapService, useValue: recordTapService }],
+    providers: [
+      { provide: RecordTapService, useValue: recordTapService },
+      { provide: ValidateTicketService, useValue: validateTicketService },
+    ],
   }).compileComponents();
 
   const fixture = TestBed.createComponent(RecordTap);
-  return { fixture, recordTapService };
+  return { fixture, recordTapService, validateTicketService };
 }
 
 describe('RecordTap', () => {
   let fixture: ComponentFixture<RecordTap>;
   let recordTapService: jasmine.SpyObj<RecordTapService>;
+  let validateTicketService: jasmine.SpyObj<ValidateTicketService>;
 
   beforeEach(async () => {
-    ({ fixture, recordTapService } = await setup());
+    ({ fixture, recordTapService, validateTicketService } = await setup());
     fixture.detectChanges();
     await fixture.whenStable();
   });
@@ -58,7 +92,7 @@ describe('RecordTap', () => {
     expect(recordTapService.loadTripsForDate).toHaveBeenCalledWith(
       fixture.componentInstance['form'].controls.serviceDate.value
     );
-    expect(fixture.componentInstance['trips']().length).toBe(1);
+    expect(fixture.componentInstance['trips']().length).toBe(2);
   });
 
   it('loads the trip route stops when a trip is selected', async () => {
@@ -79,6 +113,20 @@ describe('RecordTap', () => {
 
     expect(fixture.componentInstance['form'].controls.stopId.value).toBe('');
     expect(fixture.componentInstance['stops']()).toEqual([]);
+  });
+
+  it('shows the selected trip detail and its fare collection mode', async () => {
+    // Rendered, not read off the signal: `selectedTrip` was a computed
+    // over a plain form-control value, which depends on no signal and
+    // so froze on "nothing selected" in the browser. A signal-level
+    // assertion passes against that bug; this one does not.
+    fixture.componentInstance['form'].controls.tripId.setValue('trip-1');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const text: string = fixture.nativeElement.textContent;
+    expect(text).toContain('Gaborone Loop');
+    expect(text).toContain('Pay as you go');
   });
 
   it('defaults to a board tap and toggles to alight', () => {
@@ -119,6 +167,7 @@ describe('RecordTap', () => {
     });
     expect(component['result']()).toEqual({
       ok: true,
+      kind: 'journey',
       data: jasmine.objectContaining({ id: 'tap-1' }),
     });
     // Token is cleared for the next passenger; trip/stop stay selected.
@@ -142,6 +191,95 @@ describe('RecordTap', () => {
     expect(component['result']()).toEqual({
       ok: false,
       message: 'This passenger already has an open tap-and-go journey.',
+    });
+  });
+
+  // --- prepaid trips: the same tap boards a ticket ---------------------------
+
+  describe('on a prepaid trip', () => {
+    let component: RecordTap;
+
+    beforeEach(async () => {
+      component = fixture.componentInstance;
+      component['form'].controls.tripId.setValue('trip-prepaid');
+      await fixture.whenStable();
+      fixture.detectChanges();
+    });
+
+    it('hides the tap type and stop controls, which have no meaning here', () => {
+      const text: string = fixture.nativeElement.textContent;
+      expect(text).not.toContain('Tap type');
+      expect(fixture.nativeElement.querySelectorAll('ui-select').length).toBe(1); // trip only
+      expect(text).toContain('Prepaid');
+    });
+
+    it('does not ask the backend for stops it will not offer', () => {
+      expect(recordTapService.loadRouteStops).not.toHaveBeenCalled();
+    });
+
+    it('submits with no stop selected — the required stop is disabled, not just hidden', async () => {
+      validateTicketService.validateCredential.and.resolveTo({
+        ok: true,
+        data: makeValidationResult(),
+      });
+      component['form'].patchValue({ token: 'scanned-token' });
+
+      await component['onSubmit']();
+
+      expect(validateTicketService.validateCredential).toHaveBeenCalledWith({
+        tripId: 'trip-prepaid',
+        token: 'scanned-token',
+      });
+      expect(recordTapService.recordTap).not.toHaveBeenCalled();
+      expect(component['result']()).toEqual({
+        ok: true,
+        kind: 'ticket',
+        data: jasmine.objectContaining({ passenger_name: 'Ada Obi' }),
+      });
+      expect(component['form'].controls.token.value).toBe('');
+    });
+
+    it('renders the boarded passenger rather than a journey', async () => {
+      validateTicketService.validateCredential.and.resolveTo({
+        ok: true,
+        data: makeValidationResult({ seat_number: null }),
+      });
+      component['form'].patchValue({ token: 'scanned-token' });
+
+      await component['onSubmit']();
+      fixture.detectChanges();
+
+      const text: string = fixture.nativeElement.textContent;
+      expect(text).toContain('Ada Obi');
+      expect(text).toContain('CBD');
+      // An open-seating ticket has no seat, so the label must not appear
+      // at all rather than trailing an empty value.
+      expect(text).not.toContain('seat');
+    });
+
+    it('shows the error message when no ticket matches the credential', async () => {
+      validateTicketService.validateCredential.and.resolveTo({
+        ok: false,
+        status: 404,
+        message: 'No ticket was found for this credential on this trip.',
+      });
+      component['form'].patchValue({ token: 'scanned-token' });
+
+      await component['onSubmit']();
+
+      expect(component['result']()).toEqual({
+        ok: false,
+        message: 'No ticket was found for this credential on this trip.',
+      });
+    });
+
+    it('re-enables the stop control when switching back to a pay-as-you-go trip', async () => {
+      expect(component['form'].controls.stopId.disabled).toBeTrue();
+
+      component['form'].controls.tripId.setValue('trip-1');
+      await fixture.whenStable();
+
+      expect(component['form'].controls.stopId.disabled).toBeFalse();
     });
   });
 });

@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Alert, Button, Select, TextField } from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
@@ -55,17 +56,31 @@ export class ValidateTicket implements OnInit {
     })),
   ]);
 
+  /** See `record-tap.ts`'s note on the same signal: a `computed` over a
+   * plain form-control value depends on no signal, so it caches its
+   * first result forever and the trip detail below never appears. */
+  private readonly selectedTripId = toSignal(this.form.controls.tripId.valueChanges, {
+    initialValue: '',
+  });
+
   protected readonly selectedTrip = computed(() =>
-    this.trips().find((trip) => trip.id === this.form.controls.tripId.value)
+    this.trips().find((trip) => trip.id === this.selectedTripId())
   );
 
   async ngOnInit(): Promise<void> {
-    await this.loadTrips();
-
+    // Subscribed **before** the first load is awaited, not after. The
+    // other order silently drops a date typed while that first request
+    // is still in flight — the subscription does not exist yet — and
+    // the screen then shows the wrong day's trips with the date field
+    // saying otherwise. On a validator that is a trip picked against
+    // the wrong departure. Found by an e2e that changed the date
+    // immediately on arrival.
     this.form.controls.serviceDate.valueChanges.subscribe(() => {
       this.form.patchValue({ tripId: '' });
       void this.loadTrips();
     });
+
+    await this.loadTrips();
   }
 
   private async loadTrips(): Promise<void> {

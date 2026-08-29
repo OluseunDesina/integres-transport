@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
@@ -36,6 +36,14 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
  * screen's "not yet configured" branch: `seat_hold_minutes` is a plain
  * non-nullable field with a model default, so there's no
  * unconfigured state to render around, only a value to show and edit.
+ *
+ * **It does nothing for an open-seating Business.** Nothing holds a
+ * seat there — a place is counted when a ticket is issued, not
+ * reserved on the way to payment (docs/specs/10-booking-modes.md). The
+ * field is still editable, because a Business can switch modes and the
+ * stored value should survive that; it is the screen's job to say the
+ * setting is currently inert rather than to let platform staff tune a
+ * number that changes nothing.
  */
 @Component({
   selector: 'app-seat-hold',
@@ -61,6 +69,10 @@ export class SeatHold implements OnInit {
   protected readonly form = this.fb.nonNullable.group({
     seat_hold_minutes: ['', Validators.required],
   });
+
+  protected readonly inert = computed(
+    () => this.business()?.booking_mode_default === 'open_seating'
+  );
 
   async ngOnInit(): Promise<void> {
     const id = this.route.snapshot.paramMap.get('id');

@@ -11,6 +11,14 @@ import { readSeatPickerRequest } from '../shared/booking-draft';
 import { formatMoney, multiplyDecimal } from '../shared/money';
 
 type SeatAvailability = components['schemas']['SeatAvailability'];
+type Bookability = components['schemas']['TripBookability'];
+
+/** The most places one booking may buy when capacity is unlimited
+ * (`capacity_enforced` off, so `capacity_remaining` is null). A cap has
+ * to come from somewhere, and an unbounded number input on a phone is
+ * an invitation to a typo that books forty seats. Operators who need
+ * more than this take group bookings off-app. */
+const UNLIMITED_PLACES_CAP = 10;
 
 interface SeatRow {
   row: number | null;
@@ -66,11 +74,22 @@ function toErrorMessage(error: unknown, fallback: string): string {
  * segment-aware availability query (`?from_stop=&to_stop=`) is the only
  * thing that knows whether seat 4A is free for *this* leg range.
  *
- * Two states are load-bearing rather than incidental:
- * - a Trip with no Vehicle assigned returns an empty seat list (not an
- *   error) — shown as an empty state, per §5.
+ * **Two ways to buy, one screen** (docs/specs/10-booking-modes.md).
+ * Either the passenger picks named seats, or they say how many places
+ * they want — the latter covering both open seating and reservation
+ * mode with seat choice turned off. Which one applies is answered by
+ * the availability envelope (`booking_mode`, `seat_selection_enabled`),
+ * never guessed from the seat list being empty.
+ *
+ * Three states are load-bearing rather than incidental:
+ * - `not_configured` — nobody has assigned a vehicle yet. An operator
+ *   fixes this; the passenger cannot.
+ * - `sold_out` — genuinely full for this segment. Until slice 4 these
+ *   two were rendered identically, because both arrived as an empty
+ *   seat array; telling a passenger "sold out" about a departure with
+ *   no bus assigned is the defect the envelope exists to fix.
  * - an unpriced segment 404s on the fare endpoint — shown as a blocking
- *   alert *before* any seat is selectable, so a passenger never picks
+ *   alert *before* anything is selectable, so a passenger never picks
  *   seats for a trip that cannot be priced.
  */
 @Component({
@@ -90,13 +109,60 @@ export class SeatPicker implements OnInit {
   protected readonly loadError = signal<string | null>(null);
   protected readonly fareError = signal<string | null>(null);
 
-  private readonly availability = signal<SeatAvailability[]>([]);
+  private readonly bookability = signal<Bookability | null>(null);
   private readonly farePerSeat = signal<string | null>(null);
   protected readonly currency = signal('');
 
   protected readonly selectedSeatIds = signal<ReadonlySet<string>>(new Set());
+  protected readonly passengerCount = signal(1);
 
-  protected readonly hasSeats = computed(() => this.availability().length > 0);
+  private readonly availability = computed<SeatAvailability[]>(
+    () => this.bookability()?.seats ?? []
+  );
+
+  protected readonly status = computed(() => this.bookability()?.status ?? null);
+  protected readonly notConfigured = computed(() => this.status() === 'not_configured');
+  protected readonly soldOut = computed(() => this.status() === 'sold_out');
+
+  /** Why no seat is being chosen, which is **not** the same sentence
+   * in the two cases that get here. Open seating assigns nobody a seat;
+   * quick book assigns one, the passenger just does not pick it. Saying
+   * "sit anywhere that's free" to a quick-book passenger who is holding
+   * seat 3B would be plainly wrong. */
+  protected readonly placesHint = computed(() =>
+    this.bookability()?.booking_mode === 'open_seating'
+      ? "Seats aren't assigned on this service — sit anywhere that's free."
+      : 'This operator assigns seats for you — you just tell us how many.'
+  );
+
+  /** Asking "How many passengers?" above "Not open for booking yet"
+   * reads as a broken screen — the question is only worth asking when
+   * there is something to answer it about. */
+  protected readonly heading = computed(() => {
+    if (this.status() !== 'open') {
+      return 'Your journey';
+    }
+    return this.buysPlaces() ? 'How many passengers?' : 'Choose your seats';
+  });
+
+  /** True when the passenger buys places rather than picking seats.
+   * Read off the envelope, not inferred from an empty seat list — that
+   * inference is exactly what conflated "sold out" with "no bus yet". */
+  protected readonly buysPlaces = computed(() => {
+    const bookability = this.bookability();
+    return bookability !== null && !bookability.seat_selection_enabled;
+  });
+
+  /** Options for the "how many" control, capped by what is actually
+   * left. Constrained rather than free text, matching this workspace's
+   * standing preference for inputs that cannot express a wrong value. */
+  protected readonly placeOptions = computed<number[]>(() => {
+    const remaining = this.bookability()?.capacity_remaining;
+    const seatsFree = this.availability().filter((entry) => entry.is_available).length;
+    const cap =
+      remaining ?? (this.bookability()?.booking_mode === 'open_seating' ? UNLIMITED_PLACES_CAP : seatsFree);
+    return Array.from({ length: Math.max(Math.min(cap, UNLIMITED_PLACES_CAP), 1) }, (_, i) => i + 1);
+  });
 
   /**
    * Groups seats into rows when the VehicleType defines `row`/`column`
@@ -122,7 +188,12 @@ export class SeatPicker implements OnInit {
       });
   });
 
-  protected readonly selectedCount = computed(() => this.selectedSeatIds().size);
+  /** How many places this booking is for, in whichever way the
+   * passenger expressed it — the one number the total is priced from,
+   * so both modes share the money maths rather than duplicating it. */
+  protected readonly selectedCount = computed(() =>
+    this.buysPlaces() ? this.passengerCount() : this.selectedSeatIds().size
+  );
 
   protected readonly totalLabel = computed(() => {
     const fare = this.farePerSeat();
@@ -161,6 +232,7 @@ export class SeatPicker implements OnInit {
     this.loadError.set(null);
     this.fareError.set(null);
     this.selectedSeatIds.set(new Set());
+    this.passengerCount.set(1);
 
     const path = { path: { id: request.tripId } };
     const query = { from_stop: request.fromStop.id, to_stop: request.toStop.id };
@@ -182,7 +254,7 @@ export class SeatPicker implements OnInit {
       );
       return;
     }
-    this.availability.set(availability.data);
+    this.bookability.set(availability.data);
 
     if (!fare.data) {
       // Not a load failure — the seats are real, there is just no fare
@@ -228,21 +300,28 @@ export class SeatPicker implements OnInit {
     await this.router.navigate(['/search']);
   }
 
+  protected setPassengerCount(value: string): void {
+    this.passengerCount.set(Number(value));
+  }
+
   protected async continueToConfirm(): Promise<void> {
     const request = this.request();
     const fare = this.farePerSeat();
     if (!request || fare === null || this.selectedCount() === 0) {
       return;
     }
+    const money = { farePerSeat: fare, currency: this.currency() };
     const selected = this.selectedSeatIds();
-    const state: BookingRequest = {
-      ...request,
-      seats: this.availability()
-        .filter((entry) => selected.has(entry.seat.id))
-        .map((entry) => ({ id: entry.seat.id, seatNumber: entry.seat.seat_number })),
-      farePerSeat: fare,
-      currency: this.currency(),
-    };
+    const state: BookingRequest = this.buysPlaces()
+      ? { ...request, ...money, kind: 'places', passengerCount: this.passengerCount() }
+      : {
+          ...request,
+          ...money,
+          kind: 'seats',
+          seats: this.availability()
+            .filter((entry) => selected.has(entry.seat.id))
+            .map((entry) => ({ id: entry.seat.id, seatNumber: entry.seat.seat_number })),
+        };
     await this.router.navigate(['/book'], { state });
   }
 }

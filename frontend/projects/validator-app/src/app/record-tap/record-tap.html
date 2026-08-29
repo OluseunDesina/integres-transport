@@ -9,6 +9,13 @@
     @if (selectedTrip(); as trip) {
       <p class="-mt-2 text-sm text-slate-500">
         {{ trip.route.name }} · {{ trip.service_date }} · {{ trip.status }}
+        <span class="block">
+          @if (isPrepaid()) {
+            Prepaid — a tap boards the passenger's ticket.
+          } @else {
+            Pay as you go — a tap opens or closes a journey.
+          }
+        </span>
       </p>
     }
 
@@ -18,43 +25,62 @@
       autocomplete="off"
     />
 
-    <div class="flex flex-col gap-1">
-      <span class="text-sm font-medium text-slate-700">Tap type</span>
-      <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Tap type">
-        <ui-button
-          type="button"
-          [variant]="tapType() === 'board' ? 'primary' : 'secondary'"
-          [ariaPressed]="tapType() === 'board'"
-          (pressed)="setTapType('board')"
-        >
-          Board
-        </ui-button>
-        <ui-button
-          type="button"
-          [variant]="tapType() === 'alight' ? 'primary' : 'secondary'"
-          [ariaPressed]="tapType() === 'alight'"
-          (pressed)="setTapType('alight')"
-        >
-          Alight
-        </ui-button>
+    <!-- Board/alight and a stop are pay-as-you-go questions: they say
+         where a fare starts and ends. A prepaid passenger already
+         bought a specific journey, so there is nothing to ask. -->
+    @if (!isPrepaid()) {
+      <div class="flex flex-col gap-1">
+        <span class="text-sm font-medium text-slate-700">Tap type</span>
+        <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Tap type">
+          <ui-button
+            type="button"
+            [variant]="tapType() === 'board' ? 'primary' : 'secondary'"
+            [ariaPressed]="tapType() === 'board'"
+            (pressed)="setTapType('board')"
+          >
+            Board
+          </ui-button>
+          <ui-button
+            type="button"
+            [variant]="tapType() === 'alight' ? 'primary' : 'secondary'"
+            [ariaPressed]="tapType() === 'alight'"
+            (pressed)="setTapType('alight')"
+          >
+            Alight
+          </ui-button>
+        </div>
       </div>
-    </div>
 
-    <ui-select label="Stop" [options]="stopOptions()" formControlName="stopId" />
+      <ui-select label="Stop" [options]="stopOptions()" formControlName="stopId" />
+    }
 
     <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
-      Record {{ tapType() }} tap
+      @if (isPrepaid()) {
+        Board ticket
+      } @else {
+        Record {{ tapType() }} tap
+      }
     </ui-button>
   </form>
 
   @if (result(); as outcome) {
     @if (outcome.ok) {
-      <ui-alert variant="success">
-        Recorded. Journey {{ outcome.data.journey.status }}
-        @if (outcome.data.journey.amount) {
-          — {{ outcome.data.journey.amount }} {{ outcome.data.journey.currency }}
-        }
-      </ui-alert>
+      @if (outcome.kind === 'ticket') {
+        <ui-alert variant="success">
+          {{ outcome.data.status }} — {{ outcome.data.passenger_name }}
+          @if (outcome.data.seat_number) {
+            , seat {{ outcome.data.seat_number }}
+          }
+          ({{ outcome.data.from_stop }} → {{ outcome.data.to_stop }})
+        </ui-alert>
+      } @else {
+        <ui-alert variant="success">
+          Recorded. Journey {{ outcome.data.journey.status }}
+          @if (outcome.data.journey.amount) {
+            — {{ outcome.data.journey.amount }} {{ outcome.data.journey.currency }}
+          }
+        </ui-alert>
+      }
     } @else {
       <ui-alert>{{ outcome.message }}</ui-alert>
     }

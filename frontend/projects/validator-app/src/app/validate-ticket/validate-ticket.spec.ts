@@ -16,6 +16,7 @@ function makeTrip(overrides: Partial<Trip> = {}): Trip {
     vehicle: null,
     driver: null,
     booking_mode: 'reservation',
+    fare_collection_mode: 'prepaid',
     cancellation_reason: '',
     compliance_warnings: [],
     created_at: '2026-08-06T00:00:00Z',
@@ -54,6 +55,18 @@ describe('ValidateTicket', () => {
       fixture.componentInstance['form'].controls.serviceDate.value
     );
     expect(fixture.componentInstance['trips']().length).toBe(1);
+  });
+
+  it('shows the selected trip detail', async () => {
+    // A rendered assertion, not a signal read: `selectedTrip` used to be
+    // a computed over a plain form-control value, which depends on no
+    // signal and so cached "nothing selected" forever. Reading the
+    // signal from the test would have passed against that bug.
+    fixture.componentInstance['form'].controls.tripId.setValue('trip-1');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('Ikeja → CMS');
   });
 
   it('reloads trips and clears the trip selection when the service date changes', async () => {
@@ -123,5 +136,31 @@ describe('ValidateTicket', () => {
       ok: false,
       message: 'This ticket has already been boarded.',
     });
+  });
+});
+
+describe('ValidateTicket initial load', () => {
+  beforeEach(() => TestBed.resetTestingModule());
+
+  it('honours a date changed while the first load is still in flight', async () => {
+    // The subscription used to be registered *after* the initial load
+    // was awaited, so a date typed on arrival was silently dropped and
+    // the picker kept showing another day's trips with the date field
+    // saying otherwise. On a validator that means a trip picked against
+    // the wrong departure. Found by an e2e, not by this suite.
+    const { fixture: pending, validateTicketService: service } = await setup();
+    let resolveFirst: (trips: Trip[]) => void = () => undefined;
+    service.loadTripsForDate.and.returnValue(
+      new Promise<Trip[]>((resolve) => {
+        resolveFirst = resolve;
+      })
+    );
+
+    pending.detectChanges();
+    pending.componentInstance['form'].controls.serviceDate.setValue('2026-09-02');
+    resolveFirst([]);
+    await pending.whenStable();
+
+    expect(service.loadTripsForDate).toHaveBeenCalledWith('2026-09-02');
   });
 });

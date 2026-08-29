@@ -170,7 +170,12 @@ test.describe('client-admin-app fare matrix', () => {
           { headers: { Authorization: `Bearer ${passengerToken}` } }
         )
       ).json();
-      const seat = availability.find((entry: { is_available: boolean }) => entry.is_available);
+      // `.seats`, not the response itself — the endpoint returns an
+      // envelope as of docs/specs/10-booking-modes.md, so a
+      // vehicle-less trip can be told apart from a sold-out one.
+      const seat = availability.seats.find(
+        (entry: { is_available: boolean }) => entry.is_available
+      );
 
       const booking = await (
         await api.post(`${BACKEND_URL}/api/v1/bookings/`, {

@@ -64,7 +64,14 @@ export class AppShell {
     { label: 'Trips', path: '/trips', icon: 'clock', permissions: ['scheduling.view'] },
     { label: 'Bookings', path: '/bookings', icon: 'document-check', permissions: ['booking.view'] },
     { label: 'Fares', path: '/fares', icon: 'tag', permissions: ['fares.view'] },
-    { label: 'Tap & Go', path: '/tap-go', icon: 'bolt', permissions: ['tapngo.view'] },
+    // "Pay as you go", not "Tap & Go", as of
+    // docs/specs/10-booking-modes.md: what this screen lists is
+    // `FareJourney` rows, which only exist where the fare is charged
+    // after travel. A tap credential itself is now usable in any mode,
+    // so labelling this by the tap would name the wrong half. The route
+    // path stays `/tap-go` — a URL nobody reads is not worth breaking
+    // every bookmark and link over.
+    { label: 'Pay as you go', path: '/tap-go', icon: 'bolt', permissions: ['tapngo.view'] },
     { label: 'Payments', path: '/payments', icon: 'banknotes', permissions: ['payments.view'] },
     { label: 'Ledger', path: '/ledger', icon: 'book-open', permissions: ['ledger.view'] },
     {

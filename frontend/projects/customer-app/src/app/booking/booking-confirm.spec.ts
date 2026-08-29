@@ -5,19 +5,32 @@ import { API_CLIENT } from '@api-client';
 import type { BookingRequest } from '../shared/booking-draft';
 import { BookingConfirm } from './booking-confirm';
 
-const REQUEST: BookingRequest = {
+const JOURNEY = {
   tripId: 'trip-1',
   routeName: 'Ikeja → CMS',
   serviceDate: '2026-09-01',
   scheduledDepartureAt: '2026-09-01T06:30:00Z',
   fromStop: { id: 'stop-a', name: 'Ikeja' },
   toStop: { id: 'stop-c', name: 'CMS' },
+  farePerSeat: '750.00',
+  currency: 'NGN',
+};
+
+const REQUEST: BookingRequest = {
+  ...JOURNEY,
+  kind: 'seats',
   seats: [
     { id: 'seat-1', seatNumber: '1A' },
     { id: 'seat-2', seatNumber: '1B' },
   ],
-  farePerSeat: '750.00',
-  currency: 'NGN',
+};
+
+/** The other thing a passenger can buy — open seating, or reservation
+ * mode with seat choice off (docs/specs/10-booking-modes.md). */
+const PLACES_REQUEST: BookingRequest = {
+  ...JOURNEY,
+  kind: 'places',
+  passengerCount: 2,
 };
 
 function makeBooking() {
@@ -166,6 +179,53 @@ describe('BookingConfirm', () => {
 
     expect(component['submitError']()).toBe('Trip is no longer scheduled.');
     expect(navigateSpy).not.toHaveBeenCalledWith(['/search/seats'], jasmine.anything());
+  });
+
+  describe('when the passenger bought places rather than seats', () => {
+    it('posts passenger_count and the journey, not a seats array', async () => {
+      await createComponent(PLACES_REQUEST);
+
+      await component['submit']();
+
+      expect(apiClient.POST).toHaveBeenCalledWith(
+        '/api/v1/bookings/',
+        jasmine.objectContaining({
+          body: {
+            trip: 'trip-1',
+            passenger_count: 2,
+            from_stop: 'stop-a',
+            to_stop: 'stop-c',
+          },
+        })
+      );
+    });
+
+    it('prices the same way, from the passenger count', async () => {
+      await createComponent(PLACES_REQUEST);
+
+      expect(component['totalLabel']()).toBe('NGN 1500.00');
+    });
+
+    it('does not promise that places are held', async () => {
+      // Found in the §10.6 visual pass. Open seating holds nothing at
+      // all — a place is counted when a ticket is issued at payment —
+      // so the reservation flow's "held once you reserve" copy would be
+      // a plainly false statement here.
+      await createComponent(PLACES_REQUEST);
+
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).not.toContain('held');
+      expect(text).toContain('confirmed once you pay');
+    });
+
+    it('shows a passenger count instead of a blank seats row', async () => {
+      await createComponent(PLACES_REQUEST);
+
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain('Passengers');
+      expect(text).not.toContain('Seats');
+      expect(component['seatNumbers']()).toBeNull();
+    });
   });
 
   it('goes back to the seat map without a conflict notice', async () => {

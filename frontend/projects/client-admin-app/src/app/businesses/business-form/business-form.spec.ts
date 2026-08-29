@@ -22,6 +22,27 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
   };
 }
 
+/** Sets every field, so the form stays exhaustively filled as it
+ * grows — three copies of the full literal is what made adding fields
+ * a spec-wide edit each time. */
+function fillForm(
+  fixture: ComponentFixture<BusinessForm>,
+  overrides: Record<string, unknown> = {}
+): void {
+  fixture.componentInstance['form'].setValue({
+    vertical: 'shuttle',
+    name: 'Acme Shuttle Co',
+    currency: 'NGN',
+    timezone: 'Africa/Lagos',
+    booking_mode_default: 'reservation',
+    fare_collection_mode: 'prepaid',
+    fare_pricing_mode: 'flat',
+    seat_selection_enabled: true,
+    capacity_enforced: true,
+    ...overrides,
+  });
+}
+
 class FakeBusinessStore {
   items = signal<Business[]>([]);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
@@ -90,14 +111,7 @@ describe('BusinessForm', () => {
       const router = TestBed.inject(Router);
       const navigateSpy = spyOn(router, 'navigate').and.resolveTo(true);
 
-      fixture.componentInstance['form'].setValue({
-        vertical: 'shuttle',
-        name: 'Acme Shuttle Co',
-        currency: 'NGN',
-        timezone: 'Africa/Lagos',
-        booking_mode_default: 'reservation',
-        fare_pricing_mode: 'flat',
-      });
+      fillForm(fixture);
 
       await fixture.componentInstance['onSubmit']();
 
@@ -138,14 +152,7 @@ describe('BusinessForm', () => {
       apiClient.POST.and.resolveTo({ data: makeBusiness() });
       spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
 
-      fixture.componentInstance['form'].setValue({
-        vertical: 'shuttle',
-        name: 'Acme Shuttle Co',
-        currency: 'NGN',
-        timezone: 'Africa/Lagos',
-        booking_mode_default: 'reservation',
-        fare_pricing_mode: 'per_segment',
-      });
+      fillForm(fixture, { fare_pricing_mode: 'per_segment' });
       await fixture.componentInstance['onSubmit']();
 
       expect(apiClient.POST).toHaveBeenCalledWith(
@@ -156,18 +163,124 @@ describe('BusinessForm', () => {
       );
     });
 
+    // docs/specs/10-booking-modes.md slice 4. All three fields were
+    // writable on the serializer from slice 1 with no control anywhere,
+    // so a Business could only ever hold their defaults — the same
+    // defect spec 12 existed to fix for `fare_pricing_mode`.
+    it('offers a fare collection mode control, named apart from fare *pricing* mode', () => {
+      const labels: HTMLLabelElement[] = Array.from(
+        fixture.nativeElement.querySelectorAll('label'),
+      );
+      const label = labels.find((el) => el.textContent?.includes('Fare collection mode'));
+      expect(label).withContext('fare collection mode select is rendered').toBeTruthy();
+
+      const select = fixture.nativeElement.querySelector(
+        `#${label!.getAttribute('for')}`,
+      ) as HTMLSelectElement;
+      expect(Array.from(select.options).map((o) => o.value)).toEqual(['prepaid', 'pay_as_you_go']);
+
+      const hint = fixture.nativeElement.querySelector(
+        `#${select.getAttribute('aria-describedby')}`,
+      ) as HTMLElement;
+      expect(hint.textContent).toContain('not how it is calculated');
+    });
+
+    it('shows only the switch that applies to the chosen booking mode', async () => {
+      const text = () => fixture.nativeElement.textContent as string;
+
+      expect(text()).toContain('Let passengers choose their seat');
+      expect(text()).not.toContain('Enforce vehicle capacity');
+
+      fixture.componentInstance['form'].controls.booking_mode_default.setValue('open_seating');
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(text()).toContain('Enforce vehicle capacity');
+      expect(text()).not.toContain('Let passengers choose their seat');
+    });
+
+    it('keeps the hidden switch value across a mode change', async () => {
+      // The backend stores both regardless of mode, precisely so a
+      // Business that switches and switches back finds its old setting
+      // intact. Resetting the hidden one here would defeat that.
+      fixture.componentInstance['form'].controls.seat_selection_enabled.setValue(false);
+
+      fixture.componentInstance['form'].controls.booking_mode_default.setValue('open_seating');
+      await fixture.whenStable();
+      fixture.componentInstance['form'].controls.booking_mode_default.setValue('reservation');
+      await fixture.whenStable();
+
+      expect(fixture.componentInstance['form'].value.seat_selection_enabled).toBeFalse();
+    });
+
+    it('submits all three new fields, including the mode-inert switch', async () => {
+      apiClient.POST.and.resolveTo({ data: makeBusiness() });
+      spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
+
+      fillForm(fixture, {
+        booking_mode_default: 'open_seating',
+        fare_collection_mode: 'pay_as_you_go',
+        seat_selection_enabled: false,
+        capacity_enforced: false,
+      });
+      await fixture.componentInstance['onSubmit']();
+
+      expect(apiClient.POST).toHaveBeenCalledWith(
+        '/api/v1/businesses/',
+        jasmine.objectContaining({
+          body: jasmine.objectContaining({
+            booking_mode_default: 'open_seating',
+            fare_collection_mode: 'pay_as_you_go',
+            // Inert in open seating, and sent anyway — omitting it would
+            // let a mode switch quietly reset the other mode's setting.
+            seat_selection_enabled: false,
+            capacity_enforced: false,
+          }),
+        }),
+      );
+    });
+
+    it('attaches the switch to its explanation for a screen reader', () => {
+      // Found in the §10.6 visual pass: the guidance was a loose <p>
+      // beside the control, which reaches sighted users only — the
+      // exact failure `ui-select`'s own `hint` input exists to avoid,
+      // and which CLAUDE.md already records as a standing trap.
+      const toggle = fixture.nativeElement.querySelector(
+        'ui-toggle button[role="switch"]',
+      ) as HTMLButtonElement;
+      const describedBy = toggle.getAttribute('aria-describedby');
+
+      expect(describedBy).toBeTruthy();
+      expect(
+        (fixture.nativeElement.querySelector(`#${describedBy}`) as HTMLElement).textContent,
+      ).toContain('allocated a seat');
+    });
+
+    it('flips the switch through the rendered control, not just the form model', () => {
+      // `ui-toggle` is not a ControlValueAccessor, so this binding is
+      // hand-wired — a rendered click is the only assertion that proves
+      // the wiring, and a form-model assertion would pass without it.
+      const toggle = fixture.nativeElement.querySelector(
+        'ui-toggle button[role="switch"]',
+      ) as HTMLButtonElement;
+      expect(toggle.getAttribute('aria-checked')).toBe('true');
+
+      toggle.click();
+      fixture.detectChanges();
+
+      expect(fixture.componentInstance['form'].value.seat_selection_enabled).toBeFalse();
+      expect(
+        (fixture.nativeElement.querySelector(
+          'ui-toggle button[role="switch"]',
+        ) as HTMLButtonElement).getAttribute('aria-checked'),
+      ).toBe('false');
+    });
+
     it('shows the server error message on failure', async () => {
       apiClient.POST.and.resolveTo({
         error: { name: ['A business with this name already exists.'] },
       });
-      fixture.componentInstance['form'].setValue({
-        vertical: 'shuttle',
-        name: 'Acme Shuttle Co',
-        currency: 'NGN',
-        timezone: 'Africa/Lagos',
-        booking_mode_default: 'reservation',
-        fare_pricing_mode: 'flat',
-      });
+      fillForm(fixture);
 
       await fixture.componentInstance['onSubmit']();
       fixture.detectChanges();
@@ -201,6 +314,34 @@ describe('BusinessForm', () => {
       fixture.detectChanges();
 
       expect(fixture.componentInstance['form'].value.fare_pricing_mode).toBe('per_segment');
+    });
+
+    it('prefills the mode axes rather than defaulting them on', async () => {
+      const { fixture } = await setup('biz-1', [
+        makeBusiness({
+          booking_mode_default: 'open_seating',
+          fare_collection_mode: 'pay_as_you_go',
+          seat_selection_enabled: false,
+          capacity_enforced: false,
+        }),
+      ]);
+
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const value = fixture.componentInstance['form'].value;
+      expect(value.fare_collection_mode).toBe('pay_as_you_go');
+      expect(value.capacity_enforced).toBeFalse();
+      expect(value.seat_selection_enabled).toBeFalse();
+      // The switch on screen must agree with what was loaded — a
+      // boolean control showing "on" over a stored false would be saved
+      // back as on by an unrelated edit.
+      const toggle = fixture.nativeElement.querySelector(
+        'ui-toggle button[role="switch"]',
+      ) as HTMLButtonElement;
+      expect(toggle.getAttribute('aria-checked')).toBe('false');
+      expect(fixture.nativeElement.textContent).toContain('Enforce vehicle capacity');
     });
 
     it('patches the business at its id on submit', async () => {

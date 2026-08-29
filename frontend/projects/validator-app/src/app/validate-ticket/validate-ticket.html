@@ -25,9 +25,15 @@
 
   @if (result(); as outcome) {
     @if (outcome.ok) {
+      <!-- `seat_number` is null for an open-seating ticket, which was
+           never assigned one — a bare "seat " reads as a rendering bug
+           rather than as the honest blank the API means. -->
       <ui-alert variant="success">
-        {{ outcome.data.status }} — {{ outcome.data.passenger_name }}, seat
-        {{ outcome.data.seat_number }} ({{ outcome.data.from_stop }} → {{ outcome.data.to_stop }})
+        {{ outcome.data.status }} — {{ outcome.data.passenger_name }}
+        @if (outcome.data.seat_number) {
+          , seat {{ outcome.data.seat_number }}
+        }
+        ({{ outcome.data.from_stop }} → {{ outcome.data.to_stop }})
       </ui-alert>
     } @else {
       <ui-alert>{{ outcome.message }}</ui-alert>

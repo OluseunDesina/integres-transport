@@ -41,10 +41,28 @@ describe('SeatPicker', () => {
   let component: SeatPicker;
   let navigateSpy: jasmine.Spy;
 
-  function respondWith(seats: unknown[], fare: unknown = { amount: '750.00', currency: 'NGN' }) {
+  /** Wraps `seats` in the availability envelope the endpoint returns as
+   * of docs/specs/10-booking-modes.md. `status` is now load-bearing, so
+   * it is stated explicitly per test rather than derived from the seat
+   * list — deriving it would let a test pass against the very
+   * conflation ("empty seats means sold out") this screen was fixed
+   * for. */
+  function respondWith(
+    seats: unknown[],
+    fare: unknown = { amount: '750.00', currency: 'NGN' },
+    envelope: Record<string, unknown> = {}
+  ) {
+    const body = {
+      booking_mode: 'reservation',
+      status: seats.length === 0 ? 'not_configured' : 'open',
+      seats,
+      capacity_remaining: null,
+      seat_selection_enabled: true,
+      ...envelope,
+    };
     apiClient.GET.and.callFake((path: string) =>
       path === '/api/v1/trips/{id}/availability/'
-        ? Promise.resolve({ data: seats })
+        ? Promise.resolve({ data: body })
         : Promise.resolve(fare ? { data: fare } : { error: { detail: 'No fare configured.' } })
     );
   }
@@ -176,16 +194,60 @@ describe('SeatPicker', () => {
     expect(component['selectedCount']()).toBe(0);
   });
 
-  it('shows an empty state when the trip has no vehicle assigned yet', async () => {
-    respondWith([]);
+  // One test per `status`, in both modes — docs/specs/10-booking-modes.md's
+  // own test plan. The two empty states below used to be the same
+  // rendering, because both arrived as an empty seat array; a test that
+  // only checked "no seat map is shown" would still pass against that
+  // bug, so each asserts the *words* a passenger actually reads.
+  describe('status', () => {
+    it('says a vehicle-less departure is not open yet, not that it is full', async () => {
+      respondWith([], undefined, { status: 'not_configured' });
 
-    await createComponent();
+      await createComponent();
 
-    const host = fixture.nativeElement as HTMLElement;
-    expect(host.querySelector('ui-empty-state')?.textContent).toContain(
-      'Seating not yet configured'
-    );
-    expect(component['loadError']()).toBeNull();
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain('Not open for booking yet');
+      expect(text).not.toContain('full');
+      expect(component['loadError']()).toBeNull();
+    });
+
+    it('says a genuinely full departure is full, not that it is unconfigured', async () => {
+      respondWith([makeSeat('seat-1', '1A', false)], undefined, { status: 'sold_out' });
+
+      await createComponent();
+
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain('This departure is full');
+      expect(text).not.toContain('Not open for booking yet');
+      // The seat map is not offered either — every seat is taken, so
+      // there is nothing to choose from.
+      expect(
+        (fixture.nativeElement as HTMLElement).querySelector('[role="group"]')
+      ).toBeNull();
+    });
+
+    it('renders the seat map when open', async () => {
+      await createComponent();
+
+      expect(
+        (fixture.nativeElement as HTMLElement).querySelector('[role="group"]')
+      ).not.toBeNull();
+    });
+
+    it('distinguishes the two empty states for open seating too', async () => {
+      respondWith([], undefined, {
+        booking_mode: 'open_seating',
+        status: 'sold_out',
+        capacity_remaining: 0,
+        seat_selection_enabled: false,
+      });
+
+      await createComponent();
+
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+        'This departure is full'
+      );
+    });
   });
 
   it('blocks booking with an alert when the segment has no fare', async () => {
@@ -217,6 +279,7 @@ describe('SeatPicker', () => {
     expect(navigateSpy).toHaveBeenCalledWith(['/book'], {
       state: {
         ...JOURNEY,
+        kind: 'seats',
         seats: [{ id: 'seat-1', seatNumber: '1A' }],
         farePerSeat: '750.00',
         currency: 'NGN',
@@ -230,5 +293,133 @@ describe('SeatPicker', () => {
     await component['continueToConfirm']();
 
     expect(navigateSpy).not.toHaveBeenCalledWith(['/book'], jasmine.anything());
+  });
+
+  // The second way to buy — docs/specs/10-booking-modes.md. Open
+  // seating has no seats at all; quick book has seats the operator
+  // allocates. The screen treats them identically, because from a
+  // passenger's side they are the same question.
+  describe('when the passenger buys places rather than seats', () => {
+    function openSeatingEnvelope(overrides: Record<string, unknown> = {}) {
+      return {
+        booking_mode: 'open_seating',
+        status: 'open',
+        capacity_remaining: 3,
+        seat_selection_enabled: false,
+        ...overrides,
+      };
+    }
+
+    it('asks how many passengers instead of showing a seat map', async () => {
+      respondWith([], undefined, openSeatingEnvelope());
+
+      await createComponent();
+
+      const host = fixture.nativeElement as HTMLElement;
+      expect(host.querySelector('h1')?.textContent).toContain('How many passengers?');
+      expect(host.querySelector('[role="group"]')).toBeNull();
+      expect(host.querySelector('#passenger-count')).not.toBeNull();
+    });
+
+    it('offers no more places than are actually left', async () => {
+      respondWith([], undefined, openSeatingEnvelope({ capacity_remaining: 2 }));
+
+      await createComponent();
+
+      expect(component['placeOptions']()).toEqual([1, 2]);
+    });
+
+    it('caps an unlimited departure rather than offering an unbounded list', async () => {
+      respondWith([], undefined, openSeatingEnvelope({ capacity_remaining: null }));
+
+      await createComponent();
+
+      expect(component['placeOptions']().length).toBe(10);
+    });
+
+    it('prices from the passenger count and hands it to the confirm screen', async () => {
+      respondWith([], undefined, openSeatingEnvelope());
+      await createComponent();
+
+      component['setPassengerCount']('3');
+
+      expect(component['totalLabel']()).toBe('NGN 2250.00');
+
+      await component['continueToConfirm']();
+
+      expect(navigateSpy).toHaveBeenCalledWith(['/book'], {
+        state: {
+          ...JOURNEY,
+          kind: 'places',
+          passengerCount: 3,
+          farePerSeat: '750.00',
+          currency: 'NGN',
+        },
+      });
+    });
+
+    it('does not ask "how many" about a departure that cannot be booked', async () => {
+      // Found in the §10.6 visual pass: "How many passengers?" sat
+      // directly above "Not open for booking yet".
+      respondWith([], undefined, openSeatingEnvelope({ status: 'not_configured' }));
+
+      await createComponent();
+
+      expect((fixture.nativeElement as HTMLElement).querySelector('h1')?.textContent).not.toContain(
+        'How many'
+      );
+    });
+
+    it('pluralises the passenger count', async () => {
+      respondWith([], undefined, openSeatingEnvelope());
+      await createComponent();
+
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('1 passenger ');
+
+      component['setPassengerCount']('2');
+      fixture.detectChanges();
+
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('2 passengers ');
+    });
+
+    it('explains open seating and quick book differently', async () => {
+      // Telling a quick-book passenger holding seat 3B to "sit anywhere
+      // that's free" would be plainly wrong.
+      respondWith([], undefined, openSeatingEnvelope());
+      await createComponent();
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('sit anywhere');
+
+      respondWith([makeSeat('seat-1', '1A', true)], undefined, {
+        booking_mode: 'reservation',
+        status: 'open',
+        seat_selection_enabled: false,
+      });
+      await component['load']();
+      fixture.detectChanges();
+
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain('assigns seats for you');
+      expect(text).not.toContain('sit anywhere');
+    });
+
+    it('asks the same question for a reservation trip whose operator assigns seats', async () => {
+      // Quick book: there *are* seats, and the map is deliberately not
+      // offered. Inferring the mode from an empty seat list would show
+      // this passenger a seat map they are not allowed to use.
+      respondWith([makeSeat('seat-1', '1A', true), makeSeat('seat-2', '1B', true)], undefined, {
+        booking_mode: 'reservation',
+        status: 'open',
+        seat_selection_enabled: false,
+      });
+
+      await createComponent();
+
+      const host = fixture.nativeElement as HTMLElement;
+      expect(host.querySelector('h1')?.textContent).toContain('How many passengers?');
+      expect(host.querySelector('[role="group"]')).toBeNull();
+      // Bounded by the seats that are actually free, not by the
+      // unlimited cap — the operator can only allocate what exists.
+      expect(component['placeOptions']()).toEqual([1, 2]);
+    });
   });
 });

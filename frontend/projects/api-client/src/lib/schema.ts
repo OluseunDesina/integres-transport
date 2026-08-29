@@ -1371,13 +1371,18 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * @description Seat availability for a Trip's segment —
-         *     docs/specs/4-fares-seating-booking.md §3. Not permission-codename
-         *     gated: same IsAuthenticated + ordinary tenancy scoping as
+         * @description Whether a Trip's segment can be booked —
+         *     docs/specs/4-fares-seating-booking.md §3 and
+         *     docs/specs/10-booking-modes.md. Not permission-codename gated: same
+         *     IsAuthenticated + ordinary tenancy scoping as
          *     apps.fares.views.TripFareView, and for the same reason (passengers
          *     have no Role — see that view's own docstring).
+         *
+         *     Returns an envelope rather than the bare seat array it used to,
+         *     because a bare array cannot say *why* it is empty. See
+         *     `TripBookabilitySerializer`.
          */
-        get: operations["trips_availability_list"];
+        get: operations["trips_availability_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1461,8 +1466,15 @@ export interface paths {
          * @description POST /trips/{trip_id}/tickets/validate/ — the validator action,
          *     gated on `ticketing.validate`. Mirrors `apps.tapngo.views.TapRecordView`'s
          *     exact shape: `Idempotency-Key` header required before anything else,
-         *     each typed exception from `validate_ticket` mapped to its own
+         *     each typed exception from the service layer mapped to its own
          *     status.
+         *
+         *     Takes either fare medium: a scanned ticket QR (`payload`) or a tap
+         *     credential (`token`, docs/specs/10-booking-modes.md's universal
+         *     tap). One endpoint rather than two, because both board the same
+         *     `Ticket` and return the same result — a credential presented here
+         *     is not a `TapEvent` and cannot be one, since `TapEvent.journey` is
+         *     non-null and a prepaid trip opens no journey.
          */
         post: operations["trips_tickets_validate_create"];
         delete?: never;
@@ -1724,20 +1736,25 @@ export interface components {
         BookingCreate: {
             /** Format: uuid */
             trip: string;
-            seats: components["schemas"]["BookingSeatRequest"][];
+            seats?: components["schemas"]["BookingSeatRequest"][];
+            passenger_count?: number;
+            /** Format: uuid */
+            from_stop?: string;
+            /** Format: uuid */
+            to_stop?: string;
         };
         /**
          * @description * `reservation` - Reservation
-         *     * `tap_and_go` - Tap and go
+         *     * `open_seating` - Open seating
          * @enum {string}
          */
-        BookingModeDefaultEnum: "reservation" | "tap_and_go";
+        BookingModeDefaultEnum: "reservation" | "open_seating";
         /**
          * @description * `reservation` - Reservation
-         *     * `tap_and_go` - Tap and go
+         *     * `open_seating` - Open seating
          * @enum {string}
          */
-        BookingModeEnum: "reservation" | "tap_and_go";
+        BookingModeEnum: "reservation" | "open_seating";
         BookingSeatRequest: {
             /** Format: uuid */
             seat: string;
@@ -1802,6 +1819,9 @@ export interface components {
             currency: components["schemas"]["CurrencyEnum"];
             timezone: string;
             booking_mode_default: components["schemas"]["BookingModeDefaultEnum"];
+            fare_collection_mode?: components["schemas"]["FareCollectionModeEnum"];
+            seat_selection_enabled?: boolean;
+            capacity_enforced?: boolean;
             fare_pricing_mode?: components["schemas"]["FarePricingModeEnum"];
             is_active?: boolean;
             readonly kyb_status: components["schemas"]["KybStatusEnum"];
@@ -1858,6 +1878,7 @@ export interface components {
             readonly currency: components["schemas"]["CurrencyEnum"];
             readonly is_active: boolean;
             readonly kyb_status: components["schemas"]["KybStatusEnum"];
+            readonly booking_mode_default: components["schemas"]["BookingModeDefaultEnum"];
             /** Format: date-time */
             readonly created_at: string;
         };
@@ -2021,6 +2042,12 @@ export interface components {
          * @enum {string}
          */
         EntryTypeEnum: "payment" | "refund" | "concession" | "topup";
+        /**
+         * @description * `prepaid` - Prepaid
+         *     * `pay_as_you_go` - Pay as you go
+         * @enum {string}
+         */
+        FareCollectionModeEnum: "prepaid" | "pay_as_you_go";
         FareJourney: {
             /** Format: uuid */
             readonly id: string;
@@ -2817,6 +2844,9 @@ export interface components {
             currency?: components["schemas"]["CurrencyEnum"];
             timezone?: string;
             booking_mode_default?: components["schemas"]["BookingModeDefaultEnum"];
+            fare_collection_mode?: components["schemas"]["FareCollectionModeEnum"];
+            seat_selection_enabled?: boolean;
+            capacity_enforced?: boolean;
             fare_pricing_mode?: components["schemas"]["FarePricingModeEnum"];
             is_active?: boolean;
             readonly kyb_status?: components["schemas"]["KybStatusEnum"];
@@ -3514,10 +3544,18 @@ export interface components {
          * @description POST /trips/{trip_id}/tickets/validate/ body — mirrors
          *     `apps.tapngo.serializers.TapRecordSerializer`'s minimal shape; no FK
          *     resolution needed here, since everything is resolved from the
-         *     decoded payload inside `apps.ticketing.services.validate_ticket`.
+         *     decoded payload (or the credential token) inside
+         *     `apps.ticketing.services`.
+         *
+         *     Exactly one of `payload` and `token` — the two fare media that can
+         *     board the same Ticket (docs/specs/10-booking-modes.md). Both are
+         *     optional in the schema and the pairing is enforced here, because
+         *     DRF has no native "exactly one of" declaration and a required field
+         *     per media would make each impossible to send without the other.
          */
         TicketValidate: {
-            payload: string;
+            payload?: string;
+            token?: string;
         };
         /**
          * @description Schema-only shape for a successful validation response — not
@@ -3527,7 +3565,7 @@ export interface components {
         TicketValidationResult: {
             status: string;
             passenger_name: string;
-            seat_number: string;
+            seat_number: string | null;
             from_stop: string;
             to_stop: string;
             /** Format: date-time */
@@ -3573,10 +3611,31 @@ export interface components {
             readonly vehicle: components["schemas"]["TripVehicle"] | null;
             readonly driver: components["schemas"]["TripDriver"] | null;
             readonly booking_mode: components["schemas"]["BookingModeEnum"];
+            readonly fare_collection_mode: components["schemas"]["FareCollectionModeEnum"];
             readonly cancellation_reason: string;
             readonly compliance_warnings: string[];
             /** Format: date-time */
             readonly created_at: string;
+        };
+        /**
+         * @description The `GET /trips/{id}/availability/` envelope —
+         *     docs/specs/10-booking-modes.md.
+         *
+         *     Replaced a bare array of seat rows. The array could not distinguish
+         *     "no vehicle assigned yet" from "every seat taken" — both were `[]` —
+         *     so the customer app rendered a departure nobody had assigned a bus
+         *     to as "sold out". `status` is the field that separates them.
+         *
+         *     `seats` is always `[]` for open seating, and `capacity_remaining` is
+         *     always `null` for reservation mode; each mode fills the half that
+         *     means something for it rather than the API returning two shapes.
+         */
+        TripBookability: {
+            booking_mode: string;
+            status: string;
+            seats: components["schemas"]["SeatAvailability"][];
+            capacity_remaining: number | null;
+            seat_selection_enabled: boolean;
         };
         /**
          * @description Manual (one-off) Trip creation. `schedule` is never accepted here
@@ -5861,7 +5920,7 @@ export interface operations {
             };
         };
     };
-    trips_availability_list: {
+    trips_availability_retrieve: {
         parameters: {
             query: {
                 from_stop: string;
@@ -5880,7 +5939,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SeatAvailability"][];
+                    "application/json": components["schemas"]["TripBookability"];
                 };
             };
         };
@@ -5978,7 +6037,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": components["schemas"]["TicketValidate"];
                 "application/x-www-form-urlencoded": components["schemas"]["TicketValidate"];

@@ -12,12 +12,30 @@ const ALIGHT_STOP = 'Gate B';
 // the fixture and this spec agree on the same value.
 const TOKEN = 'e2e-tap-credential-fixed-token';
 
+// The bookable fixture's route, which is prepaid — seeded for today
+// among others, so it is in this picker too as of
+// docs/specs/10-booking-modes.md's universal tap.
+const PREPAID_ROUTE_NAME = 'Ikeja → CMS';
+
 async function signIn(page: Page): Promise<void> {
   await page.goto('/login');
   await page.getByLabel('Email').fill(EMAIL);
   await page.getByLabel('Password').fill(PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page).toHaveURL(/\/record$/);
+}
+
+/**
+ * Picks a trip by route name rather than by index. The picker lists
+ * both fare collection modes now, and this dev/CI database seeds
+ * several routes for today — an index would silently select whichever
+ * trip happens to depart earliest.
+ */
+async function selectTripByRoute(page: Page, routeName: string): Promise<void> {
+  const select = page.getByLabel('Trip');
+  const option = select.locator('option', { hasText: routeName }).first();
+  await expect(option).toBeAttached();
+  await select.selectOption(await option.getAttribute('value'));
 }
 
 function waitForTapPost(page: Page) {
@@ -27,14 +45,19 @@ function waitForTapPost(page: Page) {
 }
 
 test.describe('validator-app record-tap', () => {
-  test('renders an axe-clean screen with today\'s tap-and-go trip available', async ({
+  test("renders an axe-clean screen listing today's trips in both fare modes", async ({
     page,
   }) => {
     await signIn(page);
 
     const tripOptions = page.getByLabel('Trip').locator('option');
-    await expect(tripOptions).toHaveCount(2);
-    await expect(tripOptions.nth(1)).toContainText(ROUTE_NAME);
+    // Both modes, because a tap credential is universal fare media —
+    // filtering either out would make one of its two meanings
+    // unreachable from this screen. Counted as "at least one", not
+    // exactly one: this dev/CI database accumulates duplicate trips on
+    // the bookable route from every earlier e2e run.
+    await expect(tripOptions.filter({ hasText: ROUTE_NAME }).first()).toBeAttached();
+    await expect(tripOptions.filter({ hasText: PREPAID_ROUTE_NAME }).first()).toBeAttached();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
@@ -47,7 +70,7 @@ test.describe('validator-app record-tap', () => {
   test('records a board tap then an alight tap, closing the fare journey', async ({ page }) => {
     await signIn(page);
 
-    await page.getByLabel('Trip').selectOption({ index: 1 });
+    await selectTripByRoute(page, ROUTE_NAME);
     await expect(page.getByLabel('Stop').locator('option')).toHaveCount(4);
 
     await page.getByLabel('Tap credential (scan or type)').fill(TOKEN);
@@ -83,6 +106,56 @@ test.describe('validator-app record-tap', () => {
     expect(alightResponse.ok()).toBeTruthy();
     await expect(page.getByRole('alert')).toContainText('Recorded. Journey closed');
     await expect(page.getByRole('alert')).toContainText('300.00');
+
+    const results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
+  });
+
+  /**
+   * The prepaid half of the universal tap — docs/specs/10-booking-modes.md
+   * slice 3. What this pins down is the *branch*: the same credential,
+   * on a prepaid trip, goes to ticket validation rather than opening a
+   * fare journey, and the two pay-as-you-go questions disappear because
+   * a prepaid passenger's journey was fixed when they bought it.
+   *
+   * It deliberately does **not** assert a status code. The fixture
+   * credential's passenger accumulates real bookings on this shared
+   * route across runs and manual verification, so whether a tap finds
+   * no ticket (404), a boardable one (200) or an already-boarded one
+   * (409) depends on this database's history — pinning one would be a
+   * flake dressed up as an assertion. Boarding a known-fresh ticket
+   * needs a paid-booking fixture, which arrives with slice 4's
+   * open-seating purchase spec.
+   */
+  test('validates a ticket instead of opening a journey on a prepaid trip', async ({ page }) => {
+    await signIn(page);
+
+    await selectTripByRoute(page, PREPAID_ROUTE_NAME);
+
+    await expect(page.getByText('Prepaid')).toBeVisible();
+    await expect(page.getByLabel('Stop')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Board', exact: true })).toHaveCount(0);
+
+    const tapPosts: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().includes('/taps/')) {
+        tapPosts.push(request.url());
+      }
+    });
+
+    await page.getByLabel('Tap credential (scan or type)').fill(TOKEN);
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (res) => res.request().method() === 'POST' && res.url().includes('/tickets/validate/')
+      ),
+      page.getByRole('button', { name: 'Board ticket' }).click(),
+    ]);
+
+    expect(response.url()).toContain('/tickets/validate/');
+    // The whole point: no fare journey is opened on a prepaid trip.
+    expect(tapPosts).toEqual([]);
+    // Whatever the backend decided, the operator is told.
+    await expect(page.getByRole('alert')).not.toBeEmpty();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);

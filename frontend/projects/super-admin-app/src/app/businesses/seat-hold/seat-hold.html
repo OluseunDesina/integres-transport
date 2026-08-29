@@ -17,6 +17,16 @@
     <p class="text-sm text-slate-500">
       How long a held seat stays reserved before the expiry sweep releases it back to inventory.
     </p>
+    <!-- Said here rather than by disabling the field: the value must
+         still be editable, because a Business can switch back to
+         reservation mode and should find its setting intact. -->
+    @if (inert()) {
+      <ui-alert variant="warning">
+        This business uses open seating, where nothing is held — a place is counted when a
+        ticket is issued. This setting is saved but has no effect unless the business switches
+        to reservation mode.
+      </ui-alert>
+    }
     @if (successMessage(); as message) {
       <ui-alert variant="success">{{ message }}</ui-alert>
     }

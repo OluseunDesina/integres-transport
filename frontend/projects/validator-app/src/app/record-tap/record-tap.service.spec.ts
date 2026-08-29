@@ -15,7 +15,8 @@ function makeTrip(overrides: Record<string, unknown> = {}) {
     status_changed_at: null,
     vehicle: null,
     driver: null,
-    booking_mode: 'tap_and_go',
+    booking_mode: 'open_seating',
+    fare_collection_mode: 'pay_as_you_go',
     cancellation_reason: '',
     compliance_warnings: [],
     created_at: '2026-08-06T00:00:00Z',
@@ -38,7 +39,7 @@ describe('RecordTapService', () => {
   });
 
   describe('loadTripsForDate', () => {
-    it('merges scheduled and in_progress trips and filters to tap_and_go', async () => {
+    it('merges scheduled and in_progress trips in both fare collection modes', async () => {
       apiClient.GET.withArgs(
         '/api/v1/trips/',
         jasmine.objectContaining({ params: jasmine.objectContaining({ query: jasmine.objectContaining({ status: 'scheduled' }) }) })
@@ -47,7 +48,7 @@ describe('RecordTapService', () => {
           count: 2,
           results: [
             makeTrip({ id: 'a', scheduled_departure_at: '2026-09-01T08:00:00Z' }),
-            makeTrip({ id: 'b', booking_mode: 'reservation' }),
+            makeTrip({ id: 'b', fare_collection_mode: 'prepaid' }),
           ],
         },
       });
@@ -60,8 +61,11 @@ describe('RecordTapService', () => {
 
       const trips = await service.loadTripsForDate('2026-09-01');
 
-      // Only tap_and_go trips ('b' excluded), sorted by departure time.
-      expect(trips.map((trip) => trip.id)).toEqual(['c', 'a']);
+      // Sorted by departure time, and the prepaid trip ('b') is kept:
+      // a credential is valid fare media in both modes as of
+      // docs/specs/10-booking-modes.md, so filtering one out would make
+      // it unreachable from this screen.
+      expect(trips.map((trip) => trip.id)).toEqual(['c', 'b', 'a']);
     });
 
     it('returns an empty list when both requests fail', async () => {

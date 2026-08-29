@@ -78,9 +78,13 @@ test.describe('client-admin-app businesses', () => {
     await signIn(page);
     await page.goto('/businesses/new');
 
-    // Vertical/Booking mode already default to the values this test
-    // wants (shuttle/reservation per business-form.ts's FormBuilder
-    // defaults) — Tab past both selects without changing them.
+    // Every mode control already defaults to what this test wants
+    // (shuttle / reservation / prepaid / flat, plus seat selection on,
+    // per business-form.ts's FormBuilder defaults) — Tab past them
+    // without changing anything. Each stop is named, because the count
+    // is what breaks when a control is added: the seat-selection switch
+    // and the fare-collection select both landed here in
+    // docs/specs/10-booking-modes.md slice 4, and this test caught it.
     await page.getByLabel('Vertical').focus();
     await page.keyboard.press('Tab');
     await page.keyboard.type(name);
@@ -88,8 +92,11 @@ test.describe('client-admin-app businesses', () => {
     await page.keyboard.type('NGN');
     await page.keyboard.press('Tab');
     await page.keyboard.type('Africa/Lagos');
-    await page.keyboard.press('Tab'); // past Booking mode select
-    await page.keyboard.press('Tab'); // to the Create business button
+    await page.keyboard.press('Tab'); // Booking mode select
+    await page.keyboard.press('Tab'); // seat-selection switch
+    await page.keyboard.press('Tab'); // Fare collection mode select
+    await page.keyboard.press('Tab'); // Fare pricing mode select
+    await page.keyboard.press('Tab'); // Create business button
     await page.keyboard.press('Enter');
 
     await expect(page).toHaveURL(/\/businesses$/);

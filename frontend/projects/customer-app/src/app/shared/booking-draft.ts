@@ -44,12 +44,25 @@ export interface SeatPickerRequest {
   notice?: string;
 }
 
-/** What `seat-picker` hands to `booking-confirm`. */
-export interface BookingRequest extends SeatPickerRequest {
-  seats: SeatRef[];
+/**
+ * What `seat-picker` hands to `booking-confirm`.
+ *
+ * A discriminated union rather than one shape with optional halves —
+ * docs/specs/10-booking-modes.md. There are two genuinely different
+ * things a passenger can buy: named seats they chose, or a number of
+ * places (open seating, or reservation mode with seat choice turned
+ * off). Modelling that as `seats?` plus `passengerCount?` would make
+ * "both" and "neither" representable, and `booking-confirm` sends a
+ * *different request body* for each — the one place where getting it
+ * wrong books the wrong thing.
+ */
+export type BookingRequest = SeatPickerRequest & {
   farePerSeat: string;
   currency: string;
-}
+} & (
+    | { kind: 'seats'; seats: SeatRef[] }
+    | { kind: 'places'; passengerCount: number }
+  );
 
 export function readSeatPickerRequest(router: Router): SeatPickerRequest | null {
   const state = readNavigationState(router);
@@ -97,14 +110,15 @@ function isBookingRequest(value: unknown): value is BookingRequest {
   if (!isSeatPickerRequest(value) || !isRecord(value)) {
     return false;
   }
+  if (!isString(value['farePerSeat']) || !isString(value['currency'])) {
+    return false;
+  }
+  if (value['kind'] === 'places') {
+    const count = value['passengerCount'];
+    return typeof count === 'number' && Number.isInteger(count) && count > 0;
+  }
   const seats = value['seats'];
-  return (
-    Array.isArray(seats) &&
-    seats.length > 0 &&
-    seats.every(isSeatRef) &&
-    isString(value['farePerSeat']) &&
-    isString(value['currency'])
-  );
+  return value['kind'] === 'seats' && Array.isArray(seats) && seats.length > 0 && seats.every(isSeatRef);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

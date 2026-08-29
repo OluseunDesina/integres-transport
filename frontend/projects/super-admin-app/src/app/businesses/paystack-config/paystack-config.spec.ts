@@ -20,6 +20,7 @@ function makeBusiness(overrides: Partial<BusinessSuperAdmin> = {}): BusinessSupe
     currency: 'NGN',
     is_active: true,
     kyb_status: 'approved',
+    booking_mode_default: 'reservation',
     created_at: '2026-08-06T00:00:00Z',
     ...overrides,
   };

@@ -1,7 +1,7 @@
 @if (request(); as journey) {
   <div class="flex flex-col gap-6">
     <div>
-      <h1 class="text-lg font-semibold text-slate-900">Choose your seats</h1>
+      <h1 class="text-lg font-semibold text-slate-900">{{ heading() }}</h1>
       <p class="mt-1 text-sm text-slate-500">
         {{ journey.routeName }} — {{ journey.fromStop.name }} to {{ journey.toStop.name }}
       </p>
@@ -27,12 +27,64 @@
 
     @if (loading()) {
       <p class="text-sm text-slate-500">Loading seats…</p>
-    } @else if (!loadError() && !hasSeats()) {
+    } @else if (loadError()) {
+      <!-- The retry alert above is the whole message; nothing below it
+           can be trusted until the load succeeds. -->
+    } @else if (notConfigured()) {
       <ui-empty-state
-        title="Seating not yet configured"
-        description="No vehicle has been assigned to this departure yet, so there are no seats to choose."
+        title="Not open for booking yet"
+        description="No vehicle has been assigned to this departure yet. It should open for booking once the operator assigns one."
       />
-    } @else if (hasSeats()) {
+    } @else if (soldOut()) {
+      <!-- Deliberately different words from the state above: this
+           departure is genuinely full, and the passenger's next move is
+           another departure rather than waiting on an operator. -->
+      <ui-empty-state
+        title="This departure is full"
+        description="Every place on this journey has been sold. Try another departure."
+      />
+    } @else if (buysPlaces()) {
+      <section class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-4">
+          <label for="passenger-count" class="text-sm font-medium text-slate-700">
+            Passengers
+          </label>
+          <select
+            id="passenger-count"
+            class="min-h-11 w-full max-w-40 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+            [value]="passengerCount()"
+            (change)="setPassengerCount($any($event.target).value)"
+          >
+            @for (option of placeOptions(); track option) {
+              <option [value]="option">{{ option }}</option>
+            }
+          </select>
+          <p class="text-sm text-slate-500">{{ placesHint() }}</p>
+        </div>
+
+        <div
+          class="flex flex-wrap items-center justify-between gap-4 rounded-md border border-slate-200 bg-white p-4"
+        >
+          <div class="text-sm">
+            @if (fareLabel(); as fare) {
+              <p class="text-slate-500">{{ fare }} per passenger</p>
+            }
+            <p class="font-medium text-slate-900">
+              {{ selectedCount() }} {{ selectedCount() === 1 ? 'passenger' : 'passengers' }}
+              @if (totalLabel(); as total) {
+                — total {{ total }}
+              }
+            </p>
+          </div>
+          <div class="flex gap-2">
+            <ui-button variant="secondary" (pressed)="back()">Back</ui-button>
+            <ui-button [disabled]="!canContinue()" (pressed)="continueToConfirm()">
+              Continue
+            </ui-button>
+          </div>
+        </div>
+      </section>
+    } @else {
       <section class="flex flex-col gap-4">
         <div class="flex flex-wrap items-center gap-4 text-xs text-slate-600">
           <span class="inline-flex items-center gap-2">

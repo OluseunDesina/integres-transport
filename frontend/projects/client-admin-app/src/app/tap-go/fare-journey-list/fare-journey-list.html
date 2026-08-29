@@ -1,6 +1,6 @@
 <div class="flex flex-col gap-6">
   <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Tap & Go journeys</h1>
+    <h1 class="text-lg font-semibold text-slate-900">Pay-as-you-go journeys</h1>
   </div>
 
   <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -17,8 +17,8 @@
     <ui-alert>{{ store.error() }}</ui-alert>
   } @else if (store.isEmpty()) {
     <ui-empty-state
-      title="No tap-and-go journeys found"
-      description="Passenger board/alight taps recorded on tap-and-go trips will appear here."
+      title="No pay-as-you-go journeys found"
+      description="Board and alight taps recorded on pay-as-you-go trips will appear here."
     />
   } @else {
     <ui-table [loading]="store.loading()">

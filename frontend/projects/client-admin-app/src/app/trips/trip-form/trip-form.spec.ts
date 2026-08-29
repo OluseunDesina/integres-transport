@@ -82,6 +82,7 @@ describe('TripForm', () => {
         vehicle: null,
         driver: null,
         booking_mode: 'reservation',
+        fare_collection_mode: 'prepaid',
         cancellation_reason: '',
         compliance_warnings: [],
         created_at: '2026-08-06T00:00:00Z',

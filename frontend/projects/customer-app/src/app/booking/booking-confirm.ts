@@ -63,9 +63,24 @@ export class BookingConfirm implements OnInit {
   protected readonly submitting = signal(false);
   protected readonly submitError = signal<string | null>(null);
 
-  protected readonly seatNumbers = computed(() =>
-    (this.request()?.seats ?? []).map((seat) => seat.seatNumber).join(', ')
-  );
+  /** Null when the passenger bought places rather than seats — the
+   * screen shows a passenger count instead. Not an empty string: a
+   * blank "Seats:" row reads as a rendering bug rather than as a
+   * service that does not assign seats. */
+  protected readonly seatNumbers = computed(() => {
+    const request = this.request();
+    return request?.kind === 'seats'
+      ? request.seats.map((seat) => seat.seatNumber).join(', ')
+      : null;
+  });
+
+  protected readonly passengerCount = computed(() => {
+    const request = this.request();
+    if (!request) {
+      return 0;
+    }
+    return request.kind === 'seats' ? request.seats.length : request.passengerCount;
+  });
 
   protected readonly totalLabel = computed(() => {
     const request = this.request();
@@ -73,7 +88,7 @@ export class BookingConfirm implements OnInit {
       return '';
     }
     return formatMoney(
-      multiplyDecimal(request.farePerSeat, request.seats.length),
+      multiplyDecimal(request.farePerSeat, this.passengerCount()),
       request.currency
     );
   });
@@ -102,14 +117,26 @@ export class BookingConfirm implements OnInit {
       // operation, so it travels in params.header — unlike
       // Authorization, which every call attaches ad hoc.
       params: { header: { 'Idempotency-Key': this.idempotencyKey } },
-      body: {
-        trip: request.tripId,
-        seats: request.seats.map((seat) => ({
-          seat: seat.id,
-          from_stop: request.fromStop.id,
-          to_stop: request.toStop.id,
-        })),
-      },
+      // Two genuinely different bodies, and the backend refuses the
+      // wrong one rather than ignoring the parts that do not apply
+      // (docs/specs/10-booking-modes.md) — so this branch is what
+      // decides whether the passenger gets what they asked for.
+      body:
+        request.kind === 'seats'
+          ? {
+              trip: request.tripId,
+              seats: request.seats.map((seat) => ({
+                seat: seat.id,
+                from_stop: request.fromStop.id,
+                to_stop: request.toStop.id,
+              })),
+            }
+          : {
+              trip: request.tripId,
+              passenger_count: request.passengerCount,
+              from_stop: request.fromStop.id,
+              to_stop: request.toStop.id,
+            },
       headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 

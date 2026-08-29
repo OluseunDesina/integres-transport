@@ -75,7 +75,12 @@ export class TripForm implements OnInit {
     if (!business) {
       return null;
     }
-    return business.booking_mode_default === 'tap_and_go' ? 'Tap and go' : 'Reservation';
+    // Both axes, because a Trip snapshots both and the pair is what
+    // actually determines how this departure behaves
+    // (docs/specs/10-booking-modes.md).
+    const seating = business.booking_mode_default === 'open_seating' ? 'Open seating' : 'Reservation';
+    const collection = business.fare_collection_mode === 'pay_as_you_go' ? 'pay as you go' : 'prepaid';
+    return `${seating}, ${collection}`;
   });
 
   // `business` has no field in the template any more — it's resolved

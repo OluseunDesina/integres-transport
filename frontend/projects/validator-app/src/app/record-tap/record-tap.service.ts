@@ -46,14 +46,19 @@ export class RecordTapService {
   }
 
   /**
-   * Trips open for tapping on `serviceDate`. `TripListQuerySerializer.status`
-   * only accepts one value per request, so `scheduled` and `in_progress`
-   * are fetched separately and merged; there is no server-side
-   * `booking_mode` filter (docs/specs/4b-tap-and-go.md doesn't add one),
-   * so tap_and_go trips are filtered client-side. A generous `limit`
-   * accepts the same "unpaginated picker" tradeoff CLAUDE.md already
-   * documents for other pickers in this codebase, rather than adding new
-   * backend filtering for a first cut of this screen.
+   * Every trip open for tapping on `serviceDate`, in **both** fare
+   * collection modes. `TripListQuerySerializer.status` only accepts one
+   * value per request, so `scheduled` and `in_progress` are fetched
+   * separately and merged. A generous `limit` accepts the same
+   * "unpaginated picker" tradeoff CLAUDE.md already documents for other
+   * pickers in this codebase.
+   *
+   * **No `fare_collection_mode` filter any more.** A tap credential is
+   * universal fare media as of docs/specs/10-booking-modes.md — on a
+   * pay-as-you-go trip it opens or closes a journey, on a prepaid one it
+   * boards the ticket the passenger already holds. Filtering either mode
+   * out of this picker would make one of those unreachable; the screen
+   * branches on the *selected* trip's mode instead.
    */
   async loadTripsForDate(serviceDate: string): Promise<Trip[]> {
     const headers = this.authHeader();
@@ -68,9 +73,9 @@ export class RecordTapService {
       }),
     ]);
     const trips = [...(scheduled.data?.results ?? []), ...(inProgress.data?.results ?? [])];
-    return trips
-      .filter((trip) => trip.booking_mode === 'tap_and_go')
-      .sort((a, b) => a.scheduled_departure_at.localeCompare(b.scheduled_departure_at));
+    return trips.sort((a, b) =>
+      a.scheduled_departure_at.localeCompare(b.scheduled_departure_at)
+    );
   }
 
   /**

@@ -54,6 +54,51 @@
         [invalid]="!!fieldError('booking_mode_default')"
         [errorMessage]="fieldError('booking_mode_default')"
       />
+      <!-- Only one of the two switches is meaningful in a given booking
+           mode, so only one is shown. Neither is reset or disabled when
+           hidden: the backend stores both regardless, so a Business
+           that switches mode and back finds its old setting intact
+           (docs/specs/10-booking-modes.md). -->
+      @if (isOpenSeating()) {
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-sm font-medium text-slate-700">Enforce vehicle capacity</p>
+            <p id="capacity-enforced-hint" class="mt-1 text-sm text-slate-500">
+              {{ capacityEnforcedHint }}
+            </p>
+          </div>
+          <ui-toggle
+            label="Enforce vehicle capacity"
+            describedBy="capacity-enforced-hint"
+            [checked]="flag('capacity_enforced')"
+            (toggled)="setFlag('capacity_enforced', $event)"
+          />
+        </div>
+      } @else {
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <p class="text-sm font-medium text-slate-700">Let passengers choose their seat</p>
+            <p id="seat-selection-hint" class="mt-1 text-sm text-slate-500">
+              {{ seatSelectionHint }}
+            </p>
+          </div>
+          <ui-toggle
+            label="Let passengers choose their seat"
+            describedBy="seat-selection-hint"
+            [checked]="flag('seat_selection_enabled')"
+            (toggled)="setFlag('seat_selection_enabled', $event)"
+          />
+        </div>
+      }
+
+      <ui-select
+        label="Fare collection mode"
+        [options]="fareCollectionModeOptions"
+        [hint]="fareCollectionModeHint"
+        formControlName="fare_collection_mode"
+        [invalid]="!!fieldError('fare_collection_mode')"
+        [errorMessage]="fieldError('fare_collection_mode')"
+      />
       <ui-select
         label="Fare pricing mode"
         [options]="farePricingModeOptions"

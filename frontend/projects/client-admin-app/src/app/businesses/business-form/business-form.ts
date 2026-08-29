@@ -6,11 +6,12 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import { AuthStore } from '@auth';
-import { Alert, Button, Select, StatusPill, TextField } from '@shared-ui';
+import { Alert, Button, Select, StatusPill, TextField, Toggle } from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
 import { CURRENCY_SELECT_OPTIONS } from '../../shared/currency-options';
@@ -24,10 +25,34 @@ const VERTICAL_OPTIONS: SelectOption[] = [
   { value: 'metro', label: 'Metro' },
 ];
 
+// docs/specs/10-booking-modes.md. `tap_and_go` is gone from this list
+// because it was never a booking mode — it bundled "no assigned seat"
+// with "pay after travel", which are now independent, and each has its
+// own control below.
 const BOOKING_MODE_OPTIONS: SelectOption[] = [
-  { value: 'reservation', label: 'Reservation' },
-  { value: 'tap_and_go', label: 'Tap and go' },
+  { value: 'reservation', label: 'Reservation — passengers pick a seat' },
+  { value: 'open_seating', label: 'Open seating — any seat, no reservation' },
 ];
+
+const FARE_COLLECTION_MODE_OPTIONS: SelectOption[] = [
+  { value: 'prepaid', label: 'Prepaid — passengers pay before travelling' },
+  { value: 'pay_as_you_go', label: 'Pay as you go — fare charged after travel' },
+];
+
+/** The axis most often confused with "Fare pricing mode" directly
+ * below it. One is *when* money is collected, the other is *how much*
+ * — naming them apart in the hint costs a line and saves the mix-up. */
+const FARE_COLLECTION_MODE_HINT =
+  'When the fare is collected, not how it is calculated. Pay as you go prices a journey ' +
+  'from a board and alight tap, so those passengers book nothing in advance.';
+
+const SEAT_SELECTION_HINT =
+  'Off means passengers buy a place on the departure and are allocated a seat, without ' +
+  'choosing one themselves.';
+
+const CAPACITY_ENFORCED_HINT =
+  'On refuses new bookings once every place on the vehicle is sold. Off keeps selling — ' +
+  'use it only where standing room is normal.';
 
 const FARE_PRICING_MODE_OPTIONS: SelectOption[] = [
   { value: 'flat', label: 'Flat — one fare per route' },
@@ -88,6 +113,7 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
     Select,
     StatusPill,
     TextField,
+    Toggle,
   ],
   templateUrl: './business-form.html',
 })
@@ -103,6 +129,10 @@ export class BusinessForm implements OnInit {
   protected readonly bookingModeOptions = BOOKING_MODE_OPTIONS;
   protected readonly farePricingModeOptions = FARE_PRICING_MODE_OPTIONS;
   protected readonly farePricingModeHint = FARE_PRICING_MODE_HINT;
+  protected readonly fareCollectionModeOptions = FARE_COLLECTION_MODE_OPTIONS;
+  protected readonly fareCollectionModeHint = FARE_COLLECTION_MODE_HINT;
+  protected readonly seatSelectionHint = SEAT_SELECTION_HINT;
+  protected readonly capacityEnforcedHint = CAPACITY_ENFORCED_HINT;
   // A leading empty option, not just the raw list: the form control
   // defaults to '' and a <select> with no matching <option> would
   // render the first real currency as if it were chosen while the
@@ -135,8 +165,29 @@ export class BusinessForm implements OnInit {
     currency: ['', Validators.required],
     timezone: ['', Validators.required],
     booking_mode_default: ['reservation', Validators.required],
+    fare_collection_mode: ['prepaid', Validators.required],
     fare_pricing_mode: ['flat', Validators.required],
+    seat_selection_enabled: [true],
+    capacity_enforced: [true],
   });
+
+  /**
+   * Which of the two mode-specific switches applies. Each is meaningful
+   * in exactly one booking mode, and the backend deliberately does not
+   * validate them against it — an inert value is harmless and keeps a
+   * Business's settings stable across a mode switch and back
+   * (docs/specs/10-booking-modes.md). So this hides rather than
+   * disables or resets: the stored value must survive being irrelevant.
+   *
+   * `toSignal`, not a read of `form.controls.….value`: a `computed`
+   * over a plain form-control value depends on no signal at all and
+   * caches its first result forever — the exact bug both validator
+   * screens carried until slice 3.
+   */
+  private readonly bookingMode = toSignal(this.form.controls.booking_mode_default.valueChanges, {
+    initialValue: 'reservation',
+  });
+  protected readonly isOpenSeating = computed(() => this.bookingMode() === 'open_seating');
 
   async ngOnInit(): Promise<void> {
     const id = this.route.snapshot.paramMap.get('id');
@@ -162,6 +213,13 @@ export class BusinessForm implements OnInit {
       // as `undefined`, which `patchValue` would treat as "no change"
       // and silently leave showing 'flat' regardless of the real value.
       fare_pricing_mode: business.fare_pricing_mode ?? 'flat',
+      fare_collection_mode: business.fare_collection_mode ?? 'prepaid',
+      // `?? true` matches the model default. Defaulting a *boolean* to
+      // the wrong value is worse than defaulting a select: a switch
+      // silently reading "on" while the record says off would be saved
+      // back as on by an unrelated edit.
+      seat_selection_enabled: business.seat_selection_enabled ?? true,
+      capacity_enforced: business.capacity_enforced ?? true,
     });
   }
 
@@ -181,6 +239,13 @@ export class BusinessForm implements OnInit {
       timezone: values.timezone,
       booking_mode_default: values.booking_mode_default as Business['booking_mode_default'],
       fare_pricing_mode: values.fare_pricing_mode as Business['fare_pricing_mode'],
+      fare_collection_mode: values.fare_collection_mode as Business['fare_collection_mode'],
+      // Both are always sent, including the one the current mode makes
+      // inert. The backend stores it deliberately (see `isOpenSeating`),
+      // and omitting it here would let a mode switch quietly reset the
+      // other mode's setting to its default.
+      seat_selection_enabled: values.seat_selection_enabled,
+      capacity_enforced: values.capacity_enforced,
     };
 
     const authHeader = {
@@ -220,12 +285,27 @@ export class BusinessForm implements OnInit {
       | 'currency'
       | 'timezone'
       | 'booking_mode_default'
-      | 'fare_pricing_mode',
+      | 'fare_pricing_mode'
+      | 'fare_collection_mode',
   ): string | null {
     const control = this.form.controls[field];
     if (!control.touched || control.valid) {
       return null;
     }
     return 'This field is required.';
+  }
+
+  /** `ui-toggle` is deliberately not a `ControlValueAccessor` (see its
+   * own docstring), so it is bound by hand here rather than through
+   * `formControlName`. That stays within its contract — state in via
+   * `checked`, intent out via `toggled` — and keeps one switch
+   * component across the app instead of introducing a second. */
+  protected setFlag(field: 'seat_selection_enabled' | 'capacity_enforced', value: boolean): void {
+    this.form.controls[field].setValue(value);
+    this.form.controls[field].markAsTouched();
+  }
+
+  protected flag(field: 'seat_selection_enabled' | 'capacity_enforced'): boolean {
+    return this.form.controls[field].value;
   }
 }

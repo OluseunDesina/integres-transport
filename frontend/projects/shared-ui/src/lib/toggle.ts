@@ -31,6 +31,7 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
       [disabled]="isDisabled()"
       [attr.aria-checked]="checked()"
       [attr.aria-label]="label()"
+      [attr.aria-describedby]="describedBy() || null"
       (click)="toggled.emit(!checked())"
       class="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-not-allowed"
       [class.bg-emerald-600]="checked() && !isDisabled()"
@@ -58,6 +59,19 @@ export class Toggle {
   readonly label = input.required<string>();
   readonly disabled = input(false);
   readonly pending = input(false);
+  /**
+   * Id of an element explaining what the switch does, for a settings
+   * form where the guidance is not inferable from the label alone
+   * (docs/specs/10-booking-modes.md's business form is the first such
+   * caller). The same reasoning `ui-select`'s `hint` records: a loose
+   * `<p>` beside a control reaches sighted users only, and this control
+   * renders no text of its own to attach it to.
+   *
+   * An id rather than the text itself, because a switch in a settings
+   * form wants its description laid out beside the label, not inside
+   * the control — unlike `ui-select`, which owns its own hint slot.
+   */
+  readonly describedBy = input('');
 
   /** Emits the *requested* next state, not the current one. */
   readonly toggled = output<boolean>();

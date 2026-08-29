@@ -68,7 +68,7 @@ describe('FareJourneyList', () => {
     store.isEmpty.set(true);
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('No tap-and-go journeys found');
+    expect(fixture.nativeElement.textContent).toContain('No pay-as-you-go journeys found');
   });
 
   it('renders a row per journey with route, stops, and status', () => {

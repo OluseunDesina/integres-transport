@@ -2,7 +2,10 @@
   <div class="flex flex-col gap-6">
     <div>
       <h1 class="text-lg font-semibold text-slate-900">Review your booking</h1>
-      <p class="mt-1 text-sm text-slate-500">Check the details below, then reserve your seats.</p>
+      <p class="mt-1 text-sm text-slate-500">
+        Check the details below, then
+        {{ seatNumbers() ? 'reserve your seats' : 'reserve your places' }}.
+      </p>
     </div>
 
     @if (submitError(); as message) {
@@ -20,23 +23,45 @@
       <dd>{{ journey.toStop.name }}</dd>
       <dt class="text-slate-500">Departs</dt>
       <dd>{{ journey.scheduledDepartureAt | date: 'medium' }}</dd>
-      <dt class="text-slate-500">Seats</dt>
-      <dd>{{ seatNumbers() }}</dd>
+      <!-- Seats only where the passenger actually chose some. On a
+           service that does not assign them, a blank "Seats" row would
+           read as a rendering fault rather than as how the service
+           works. -->
+      @if (seatNumbers(); as seats) {
+        <dt class="text-slate-500">Seats</dt>
+        <dd>{{ seats }}</dd>
+      } @else {
+        <dt class="text-slate-500">Passengers</dt>
+        <dd>{{ passengerCount() }}</dd>
+      }
       <dt class="text-slate-500">Fare</dt>
-      <dd>{{ fareLabel() }} × {{ journey.seats.length }}</dd>
+      <dd>{{ fareLabel() }} × {{ passengerCount() }}</dd>
       <dt class="text-slate-500">Total</dt>
       <dd class="font-medium text-slate-900">{{ totalLabel() }}</dd>
     </dl>
 
+    <!-- The "held" promise is only made where it is true. Choosing
+         seats genuinely holds them until the expiry sweep; buying
+         places may not — open seating holds nothing at all, a place is
+         counted when a ticket is issued at payment
+         (docs/specs/10-booking-modes.md). This screen cannot tell open
+         seating from quick book (both arrive as `places`), so the
+         wording it uses there is one that is true of both. -->
     <p class="text-sm text-slate-500">
-      Payment is not collected yet — your seats are held once you reserve.
+      @if (seatNumbers()) {
+        Payment is not collected yet — your seats are held once you reserve.
+      } @else {
+        Payment is not collected yet — your booking is confirmed once you pay.
+      }
     </p>
 
     <div class="flex gap-2">
       <ui-button variant="secondary" [disabled]="submitting()" (pressed)="backToSeats()">
         Back
       </ui-button>
-      <ui-button [loading]="submitting()" (pressed)="submit()">Reserve seats</ui-button>
+      <ui-button [loading]="submitting()" (pressed)="submit()">
+        {{ seatNumbers() ? 'Reserve seats' : 'Reserve places' }}
+      </ui-button>
     </div>
   </div>
 }
