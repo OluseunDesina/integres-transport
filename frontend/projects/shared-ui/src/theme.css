@@ -1,0 +1,209 @@
+/*
+ * Design tokens — docs/specs/14-design-system-and-ui-rebuild.md.
+ *
+ * Imported by every app's `styles.css`, immediately after
+ * `@import "tailwindcss";`. Before this file existed, all four
+ * stylesheets contained nothing but that one import: there was no brand
+ * colour, no type scale, no elevation, and every value was written
+ * literally into 58 templates.
+ *
+ * Two rules govern edits here.
+ *
+ * 1. **Do not clear Tailwind's default palette** (`--color-*: initial`).
+ *    The app templates still use `slate-*`/`red-*` literals until their
+ *    own rebuild slices land; clearing would break all of them at once.
+ *
+ * 2. **Every colour pairing is measured, not judged.** See
+ *    `lib/theme/color.spec.ts`, which fails the build on anything under
+ *    WCAG AA. The values below are the ones that passed; one proposal
+ *    did not survive that check and is noted where it changed.
+ */
+
+/*
+ * `static`, not a bare `@theme`, and this is load-bearing rather than
+ * stylistic. Tailwind v4 prunes theme variables whose utilities are not
+ * used anywhere, so a plain `@theme` emitted almost none of these into
+ * `:root` — verified in the built CSS. Runtime tenant theming works by
+ * *overriding* these custom properties on the document element, which
+ * requires them to exist in the cascade whether or not a utility happens
+ * to reference them today.
+ */
+@theme static {
+  /* --- Brand: "Transit Blue" ------------------------------------------
+   * Blue reads as infrastructure and signage rather than retail, works
+   * across the three target markets without cultural collision, and sits
+   * far enough from the semantic green/amber/red that a brand-coloured
+   * control never reads as a status.
+   *
+   * 600 is the anchor: the primary action fill. White on it measures
+   * 6.50:1.
+   */
+  --color-brand-50: #eff4ff;
+  --color-brand-100: #dbe5fe;
+  --color-brand-200: #bfd1fe;
+  --color-brand-300: #93b4fd;
+  --color-brand-400: #608dfa;
+  --color-brand-500: #3b6bf6;
+  --color-brand-600: #2549eb;
+  --color-brand-700: #1d37d8;
+  --color-brand-800: #1e30af;
+  --color-brand-900: #1e2f8a;
+  --color-brand-950: #172054;
+
+  /* --- Neutrals --------------------------------------------------------
+   * Deliberately the existing slate values, not a bespoke ramp. The
+   * identity budget goes on brand, type and structure; replacing a
+   * proven neutral scale buys nothing and risks contrast regressions
+   * across every screen at once.
+   */
+  --color-ink-50: #f8fafc;
+  --color-ink-100: #f1f5f9;
+  --color-ink-200: #e2e8f0;
+  --color-ink-300: #cbd5e1;
+  --color-ink-400: #94a3b8;
+  --color-ink-500: #64748b;
+  --color-ink-600: #475569;
+  --color-ink-700: #334155;
+  --color-ink-800: #1e293b;
+  --color-ink-900: #0f172a;
+  --color-ink-950: #020617;
+
+  /* --- Semantic roles --------------------------------------------------
+   * What components actually reference. Aliased with `var()` so a
+   * runtime override of a brand step (BrandThemeService, for a
+   * white-labelled tenant) cascades through every one of these without
+   * the service having to know they exist.
+   */
+  --color-primary: var(--color-brand-600);
+  --color-primary-hover: var(--color-brand-700);
+  --color-primary-active: var(--color-brand-800);
+  --color-primary-subtle: var(--color-brand-50);
+  /* Flipped to a dark ink by BrandThemeService when a tenant's brand is
+   * too light for white to meet AA. */
+  --color-on-primary: #ffffff;
+
+  --color-surface: #ffffff;
+  --color-surface-muted: var(--color-ink-50);
+  --color-surface-sunken: var(--color-ink-100);
+
+  --color-strong: var(--color-ink-900);
+  --color-default: var(--color-ink-700);
+  --color-muted: var(--color-ink-500);
+  --color-on-solid: #ffffff;
+
+  /* Two border roles, and the distinction is load-bearing.
+   *
+   * `border` is decorative — table rules, card outlines — and carries no
+   * contrast requirement.
+   *
+   * `control` is the visible boundary of an input or switch, which WCAG
+   * 1.4.11 requires at 3:1. The old `slate-300` measured **1.48:1** and
+   * had been the input border on every form in the workspace. axe does
+   * not check non-text contrast on input borders, so it never surfaced.
+   * This value measures 4.76:1.
+   */
+  --color-border: var(--color-ink-200);
+  --color-control: var(--color-ink-500);
+  --color-focus: var(--color-brand-600);
+
+  /* --- Status tones ----------------------------------------------------
+   * Darker than the Tailwind defaults these replace: several of those sat
+   * within a tenth of the AA floor as text on their own tint.
+   */
+  --color-success: #047857;
+  --color-success-surface: #ecfdf5;
+  --color-success-border: #a7f3d0;
+  --color-warning: #b45309;
+  --color-warning-surface: #fffbeb;
+  --color-warning-border: #fde68a;
+  --color-danger: #b91c1c;
+  --color-danger-surface: #fef2f2;
+  --color-danger-border: #fecaca;
+  --color-danger-hover: #991b1b;
+  --color-info: var(--color-brand-700);
+  --color-info-surface: var(--color-brand-50);
+  --color-info-border: var(--color-brand-200);
+
+  /* --- Type ------------------------------------------------------------
+   * Inter, self-hosted (see each app's styles.css) — chosen for
+   * legibility at 12–14px, which is most of an operations console. No
+   * external font request: this workspace has no CDN dependencies and
+   * must not acquire one.
+   */
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  --shadow-xs: 0 1px 2px 0 rgb(15 23 42 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(15 23 42 / 0.08), 0 1px 2px -1px rgb(15 23 42 / 0.06);
+  --shadow-md: 0 4px 12px -2px rgb(15 23 42 / 0.1), 0 2px 6px -2px rgb(15 23 42 / 0.06);
+}
+
+/* --- Surface profiles ------------------------------------------------
+ * One token set, two densities. Set once on <html> in each app's
+ * index.html — components read these and never branch on the profile
+ * themselves, which is what stops the two from becoming two designs.
+ *
+ * `console` is the three operator apps: data-dense, compact, tight grid.
+ * `consumer` is customer-app: spacious, larger type, mobile-first.
+ *
+ * Not inside @theme: these are runtime-switched by an attribute, and
+ * @theme values are global rather than scoped.
+ */
+:root,
+[data-surface='console'] {
+  --ui-control-height: 2.25rem;
+  --ui-row-height: 2.5rem;
+  --ui-gutter: 1rem;
+  --ui-section-gap: 1.5rem;
+  --ui-text-body: 0.875rem;
+  --ui-text-heading: 1.125rem;
+}
+
+[data-surface='consumer'] {
+  --ui-control-height: 2.75rem;
+  --ui-row-height: 3.25rem;
+  --ui-gutter: 1.25rem;
+  --ui-section-gap: 2rem;
+  --ui-text-body: 1rem;
+  --ui-text-heading: 1.25rem;
+}
+
+/* --- Base ------------------------------------------------------------- */
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: var(--color-surface-muted);
+    color: var(--color-default);
+  }
+
+  /* Money and table figures must line up column-to-column. Proportional
+   * digits make a column of fares impossible to scan, and it is the most
+   * common typographic failure in an operations table. */
+  table,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A system preference already expressed should not need finding a
+   * setting in this app. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

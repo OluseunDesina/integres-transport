@@ -11,6 +11,8 @@ from apps.network.models import Route
 from .models import Schedule, Trip
 from .services import (
     TRIP_TRANSITIONS,
+    TripClassNotAvailableOnRoute,
+    VehicleClassMismatch,
     create_manual_trip,
     create_schedule,
     update_schedule,
@@ -27,6 +29,19 @@ def _get_business(value: Any) -> Business:
 def _get_route(value: Any) -> Route:
     try:
         return Route.objects.get(pk=value)
+    except Route.DoesNotExist:
+        raise serializers.ValidationError("Unknown route.", code="unknown_route") from None
+
+
+def _get_active_route(value: Any) -> Route:
+    """Passenger-facing route resolution — unlike `_get_route` (shared
+    by every staff serializer in this module), this only matches
+    `status=active`. docs/specs/19-route-lifecycle.md's edge case table:
+    a passenger sees `active` routes only, invisible rather than merely
+    unbookable, so a draft/inactive/archived route gets the same message
+    as an unknown id rather than one that would confirm it exists."""
+    try:
+        return Route.objects.get(pk=value, status=Route.Status.ACTIVE)
     except Route.DoesNotExist:
         raise serializers.ValidationError("Unknown route.", code="unknown_route") from None
 
@@ -67,27 +82,43 @@ def _validate_days_of_week(value: list[int]) -> list[int]:
 
 
 class ScheduleSerializer(serializers.ModelSerializer[Schedule]):
+    # A Schedule has no name of its own, so every consumer needs its
+    # route's. `client-admin-app`'s list screen used to resolve that
+    # through the shared root RouteStore, which meant a schedule whose
+    # route sat outside that store's loaded page rendered as a raw UUID —
+    # and any other screen paginating or filtering that same store could
+    # make it happen mid-session. `select_related("route")` is already on
+    # the queryset, so this costs no extra query.
+    route_name = serializers.CharField(source="route.name", read_only=True)
+
     class Meta:
         model = Schedule
         fields = [
             "id",
             "route",
+            "route_name",
             "business",
             "days_of_week",
             "departure_time",
             "effective_from",
             "effective_until",
+            "trip_class",
             "is_active",
             "created_at",
         ]
-        read_only_fields = ["id", "route", "business", "created_at"]
+        read_only_fields = ["id", "route", "route_name", "business", "created_at"]
 
     def validate_days_of_week(self, value: list[int]) -> list[int]:
         return _validate_days_of_week(value)
 
     def update(self, instance: Schedule, validated_data: dict[str, Any]) -> Schedule:
         request = self.context["request"]
-        return update_schedule(schedule=instance, updated_by=request.user, **validated_data)
+        try:
+            return update_schedule(schedule=instance, updated_by=request.user, **validated_data)
+        except TripClassNotAvailableOnRoute as exc:
+            raise serializers.ValidationError(
+                {"trip_class": str(exc)}, code="class_not_available_on_route"
+            ) from exc
 
 
 class ScheduleCreateSerializer(serializers.Serializer):
@@ -96,6 +127,10 @@ class ScheduleCreateSerializer(serializers.Serializer):
     departure_time = serializers.TimeField()
     effective_from = serializers.DateField()
     effective_until = serializers.DateField(required=False, allow_null=True, default=None)
+    # No `default=` — see the note on VehicleTypeCreateSerializer.trip_class
+    # for why a serializer default would make this a required field in
+    # the generated frontend types.
+    trip_class = serializers.ChoiceField(choices=Business.TripClass.choices, required=False)
 
     def validate_route(self, value: Any) -> Route:
         return _get_route(value)
@@ -105,15 +140,31 @@ class ScheduleCreateSerializer(serializers.Serializer):
 
     def create(self, validated_data: dict[str, Any]) -> Schedule:
         request = self.context["request"]
-        return create_schedule(created_by=request.user, **validated_data)
+        try:
+            return create_schedule(created_by=request.user, **validated_data)
+        except TripClassNotAvailableOnRoute as exc:
+            raise serializers.ValidationError(
+                {"trip_class": str(exc)}, code="class_not_available_on_route"
+            ) from exc
 
 
 class SchedulingListQuerySerializer(serializers.Serializer):
-    """Validates `?business=<uuid>` on GET /schedules/ — same
-    unknown-or-foreign-id-→400 convention as
-    apps.network.serializers.NetworkListQuerySerializer."""
+    """Validates `?business=<uuid>&search=&is_active=` on GET /schedules/
+    — same unknown-or-foreign-id-→400 convention as
+    apps.network.serializers.NetworkListQuerySerializer.
+
+    A Schedule has no name of its own — it is a Route plus a departure
+    time — so `search` matches on the route's name. That is the useful
+    thing to type, not a gap: an operator looking for "the 06:30 Yaba
+    run" is looking for its route.
+    """
 
     business = serializers.UUIDField(required=False)
+    # `allow_blank`: the frontend filter bar emits '' when its search box
+    # is cleared, and rejecting that would 400 on the way back to the
+    # unfiltered list.
+    search = serializers.CharField(required=False, allow_blank=True)
+    is_active = serializers.BooleanField(required=False)
 
     def validate_business(self, value: Any) -> Business:
         return _get_business(value)
@@ -155,9 +206,16 @@ class TripSerializer(serializers.ModelSerializer[Trip]):
             "scheduled_departure_at",
             "status",
             "status_changed_at",
+            # docs/specs/16-operational-analytics.md slice 1. Null until
+            # the Trip actually departs/arrives, and null forever on a
+            # Trip cancelled beforehand or predating that spec.
+            "actual_departure_at",
+            "actual_arrival_at",
             "vehicle",
             "driver",
             "booking_mode",
+            "fare_collection_mode",
+            "trip_class",
             "cancellation_reason",
             "compliance_warnings",
             "created_at",
@@ -201,6 +259,7 @@ class TripCreateSerializer(serializers.Serializer):
     departure_time = serializers.TimeField()
     vehicle = serializers.UUIDField(required=False, allow_null=True, default=None)
     driver = serializers.UUIDField(required=False, allow_null=True, default=None)
+    trip_class = serializers.ChoiceField(choices=Business.TripClass.choices, required=False)
 
     def validate_route(self, value: Any) -> Route:
         return _get_route(value)
@@ -229,7 +288,16 @@ class TripCreateSerializer(serializers.Serializer):
 
     def create(self, validated_data: dict[str, Any]) -> Trip:
         request = self.context["request"]
-        return create_manual_trip(created_by=request.user, **validated_data)
+        try:
+            return create_manual_trip(created_by=request.user, **validated_data)
+        except TripClassNotAvailableOnRoute as exc:
+            raise serializers.ValidationError(
+                {"trip_class": str(exc)}, code="class_not_available_on_route"
+            ) from exc
+        except VehicleClassMismatch as exc:
+            raise serializers.ValidationError(
+                {"vehicle": str(exc)}, code="vehicle_class_mismatch"
+            ) from exc
 
 
 class TripAssignmentSerializer(serializers.Serializer):
@@ -259,7 +327,35 @@ class TripAssignmentSerializer(serializers.Serializer):
                 {"driver": "This driver belongs to a different Business."},
                 code="driver_business_mismatch",
             )
+        if vehicle is not None and vehicle.vehicle_type.trip_class != trip.trip_class:
+            # docs/specs/15-trip-classes.md. Checked here so the operator
+            # gets a field error naming both classes; the service raises
+            # VehicleClassMismatch independently, so a caller that
+            # bypasses this serializer still cannot create the mismatch.
+            raise serializers.ValidationError(
+                {
+                    "vehicle": (
+                        f"This is a {trip.trip_class} service and "
+                        f"{vehicle.registration_number} is a "
+                        f"{vehicle.vehicle_type.trip_class} vehicle."
+                    )
+                },
+                code="vehicle_class_mismatch",
+            )
         return attrs
+
+
+class TripClassSerializer(serializers.Serializer):
+    """POST /trips/{id}/class/ body — docs/specs/15-trip-classes.md.
+
+    Its own endpoint rather than a field on the assignment PATCH: that
+    body's `vehicle` and `driver` both default to None and therefore
+    *clear* on omission, so a class edit that forgot to resend the
+    vehicle would silently unassign it. Mirrors TripStatusSerializer's
+    shape, which is the other guarded single-field Trip mutation.
+    """
+
+    trip_class = serializers.ChoiceField(choices=Business.TripClass.choices)
 
 
 class TripStatusSerializer(serializers.Serializer):
@@ -298,24 +394,50 @@ class TripSearchQuerySerializer(serializers.Serializer):
     apps.seating.serializers.TripAvailabilityQuerySerializer already use
     for their own required params.
 
-    Note what is deliberately *absent*: no `status` or `booking_mode`
-    field. Both are forced server-side by the view, so a passenger
-    cannot widen the filter to reach a cancelled or tap_and_go Trip by
-    guessing query values.
+    Note what is deliberately *absent*: no `status` or
+    `fare_collection_mode` field. Both are forced server-side by the
+    view, so a passenger cannot widen the filter to reach a cancelled
+    or pay-as-you-go Trip by guessing query values.
     """
 
     route = serializers.UUIDField()
     service_date = serializers.DateField()
+    # Optional, unlike the two above: a passenger who has not chosen a
+    # class should see every class on the route, not none of them.
+    trip_class = serializers.ChoiceField(choices=Business.TripClass.choices, required=False)
 
     def validate_route(self, value: Any) -> Route:
-        return _get_route(value)
+        return _get_active_route(value)
 
 
 class TripListQuerySerializer(serializers.Serializer):
+    # `business` mirrors NetworkListQuerySerializer/FleetListQuerySerializer's
+    # own `?business=` param. Its absence here was the one gap that left
+    # client-admin's Trip list unable to scope to the active Business the
+    # way every sibling list screen already does — the list component had
+    # to work around it by only scoping its *filter dropdowns*, while the
+    # rows themselves still spanned every Business under the Client.
+    business = serializers.UUIDField(required=False)
     route = serializers.UUIDField(required=False)
     schedule = serializers.UUIDField(required=False)
     service_date = serializers.DateField(required=False)
     status = serializers.ChoiceField(choices=Trip.Status.choices, required=False)
+    trip_class = serializers.ChoiceField(choices=Business.TripClass.choices, required=False)
+    # A Trip has no name of its own, so `search` matches its route's —
+    # the same reasoning SchedulingListQuerySerializer already records.
+    # `allow_blank`, because the filter bar emits '' when cleared.
+    search = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_business(self, value: Any) -> Business:
+        # Same tenant-scoped-lookup-or-400 convention the sibling apps
+        # use: an unknown OR another Client's Business id must 400, not
+        # silently return an unfiltered list.
+        try:
+            return Business.objects.get(pk=value)
+        except Business.DoesNotExist:
+            raise serializers.ValidationError(
+                "Unknown business.", code="unknown_business"
+            ) from None
 
     def validate_route(self, value: Any) -> Route:
         return _get_route(value)

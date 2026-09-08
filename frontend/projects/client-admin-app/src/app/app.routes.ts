@@ -29,8 +29,16 @@ export const routes: Routes = [
     loadComponent: () => import('./app-shell').then((m) => m.AppShell),
     children: [
       {
+        // Spec 16 slice 3 replaced `home` with the dashboard, at the same
+        // path so every existing landing redirect keeps working.
+        //
+        // Deliberately still gated on `client-admin:access`, not
+        // `analytics.view`: this is where every user lands after signing
+        // in, and the Staff preset does not carry `analytics.view`.
+        // Gating it would forbid Staff their own landing page. The
+        // component asks for the codename itself and renders accordingly.
         path: 'home',
-        loadComponent: () => import('./home/home').then((m) => m.Home),
+        loadComponent: () => import('./dashboard/dashboard').then((m) => m.Dashboard),
         canActivate: [permissionGuard],
         data: { permissions: ['client-admin:access'] },
       },
@@ -78,6 +86,13 @@ export const routes: Routes = [
         loadComponent: () => import('./routes/route-form/route-form').then((m) => m.RouteForm),
         canActivate: [permissionGuard],
         data: { permissions: ['network.manage'] },
+      },
+      {
+        path: 'routes/:id',
+        loadComponent: () =>
+          import('./routes/route-detail/route-detail').then((m) => m.RouteDetail),
+        canActivate: [permissionGuard],
+        data: { permissions: ['network.view'] },
       },
       {
         path: 'routes/:id/edit',
@@ -203,6 +218,45 @@ export const routes: Routes = [
         data: { permissions: ['scheduling.view'] },
       },
       {
+        // `scheduling.view`: live monitoring is scheduling visibility,
+        // not a new capability — docs/specs/20-live-operations.md's own
+        // reasoning for why this needed no new permission codename.
+        path: 'live-operations',
+        loadComponent: () =>
+          import('./live-operations/live-operations').then((m) => m.LiveOperations),
+        canActivate: [permissionGuard],
+        data: { permissions: ['scheduling.view'] },
+      },
+      {
+        // Gated on `analytics.view`, not `scheduling.view`: this is
+        // revenue reporting for one departure, and the same sensitivity
+        // line slice 1 drew (Owner and Manager, not Staff) applies here.
+        path: 'trips/:id/performance',
+        loadComponent: () =>
+          import('./trips/trip-performance/trip-performance').then((m) => m.TripPerformance),
+        canActivate: [permissionGuard],
+        data: { permissions: ['analytics.view'] },
+      },
+      {
+        // `booking.view`, deliberately not the `analytics.view` its
+        // neighbour above carries. The manifest is not revenue
+        // reporting — it is the list a conductor reads at the door, and
+        // the Staff preset holds `booking.view` precisely so frontline
+        // staff can reach exactly this sort of thing.
+        path: 'trips/:id/manifest',
+        loadComponent: () =>
+          import('./trips/trip-manifest/trip-manifest').then((m) => m.TripManifest),
+        canActivate: [permissionGuard],
+        data: { permissions: ['booking.view'] },
+      },
+      {
+        path: 'revenue',
+        loadComponent: () =>
+          import('./revenue/revenue-report').then((m) => m.RevenueReport),
+        canActivate: [permissionGuard],
+        data: { permissions: ['analytics.view'] },
+      },
+      {
         path: 'trips/new',
         loadComponent: () => import('./trips/trip-form/trip-form').then((m) => m.TripForm),
         canActivate: [permissionGuard],
@@ -214,6 +268,17 @@ export const routes: Routes = [
           import('./bookings/booking-list/booking-list').then((m) => m.BookingList),
         canActivate: [permissionGuard],
         data: { permissions: ['booking.view'] },
+      },
+      {
+        // `booking.manage`, not `booking.view` — Owner and Manager hold
+        // it and Staff deliberately do not. Reading who is aboard and
+        // creating a financial obligation for someone else are
+        // different authorities (spec 18 slice 2).
+        path: 'bookings/counter',
+        loadComponent: () =>
+          import('./bookings/counter-booking/counter-booking').then((m) => m.CounterBooking),
+        canActivate: [permissionGuard],
+        data: { permissions: ['booking.manage'] },
       },
       {
         path: 'fares',
@@ -243,6 +308,36 @@ export const routes: Routes = [
           import('./tap-go/fare-journey-list/fare-journey-list').then((m) => m.FareJourneyList),
         canActivate: [permissionGuard],
         data: { permissions: ['tapngo.view'] },
+      },
+      {
+        path: 'incidents',
+        loadComponent: () =>
+          import('./incidents/incident-list/incident-list').then((m) => m.IncidentList),
+        canActivate: [permissionGuard],
+        data: { permissions: ['incidents.view'] },
+      },
+      {
+        path: 'incidents/new',
+        loadComponent: () =>
+          import('./incidents/incident-form/incident-form').then((m) => m.IncidentForm),
+        canActivate: [permissionGuard],
+        data: { permissions: ['incidents.manage'] },
+      },
+      {
+        // Above `incidents/:id` — a literal segment would otherwise be
+        // read as an id and 404 against the detail endpoint.
+        path: 'incidents/:id/edit',
+        loadComponent: () =>
+          import('./incidents/incident-form/incident-form').then((m) => m.IncidentForm),
+        canActivate: [permissionGuard],
+        data: { permissions: ['incidents.manage'] },
+      },
+      {
+        path: 'incidents/:id',
+        loadComponent: () =>
+          import('./incidents/incident-detail/incident-detail').then((m) => m.IncidentDetail),
+        canActivate: [permissionGuard],
+        data: { permissions: ['incidents.view'] },
       },
       {
         path: 'payments',

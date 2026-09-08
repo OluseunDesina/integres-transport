@@ -47,6 +47,69 @@ def test_client_staff_can_create_a_business() -> None:
     assert business.client_id == client.id
 
 
+def test_currency_must_be_a_3_letter_iso_4217_code() -> None:
+    """A currency *name* like "Naira" instead of the code "NGN" used to
+    pass every check up to this app's own boundary and only fail once
+    apps.payments sent it on to Paystack's API — see docs/specs/
+    7-passenger-wallet.md's Implementation note for the incident this
+    closes."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+
+    response = _auth_client(staff).post(
+        reverse("business-list-create"), _create_payload(currency="Naira")
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "currency" in response.data
+
+
+def test_a_well_formed_but_unsupported_currency_is_rejected() -> None:
+    """The old RegexValidator only checked the *shape*, so `GBP` — a real
+    ISO 4217 code the platform cannot actually collect in — saved
+    cleanly and only failed later at Paystack. `currency` is a choice
+    list now, not a pattern."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+
+    response = _auth_client(staff).post(
+        reverse("business-list-create"), _create_payload(currency="GBP")
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "currency" in response.data
+
+
+def test_botswana_pula_is_accepted_despite_having_no_psp() -> None:
+    """docs/adr/0007 treats Botswana as a named open gap, not a market
+    to quietly make unonboardable — so BWP stays selectable even though
+    Paystack doesn't operate there."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+
+    response = _auth_client(staff).post(
+        reverse("business-list-create"),
+        _create_payload(currency="BWP", timezone="Africa/Gaborone"),
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+
+
+def test_timezone_must_be_a_real_iana_zone() -> None:
+    """`timezone` was previously an unvalidated free-text field — a typo
+    saved fine and only surfaced much later as a ZoneInfoNotFoundError
+    inside trip generation or settlement-period arithmetic."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+
+    response = _auth_client(staff).post(
+        reverse("business-list-create"), _create_payload(timezone="Africa/Lagoss")
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "timezone" in response.data
+
+
 def test_business_creation_allowed_while_client_kyc_still_pending() -> None:
     """§6: KYB review is independent of the owning Client's own KYC."""
     client = ClientFactory(kyc_status=Client.KycStatus.PENDING)
@@ -172,3 +235,133 @@ def test_cross_client_patch_is_a_404_not_a_403() -> None:
         reverse("business-update", kwargs={"pk": str(business_b.id)}), {"name": "Hijacked"}
     )
     assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_the_three_booking_mode_axes_default_when_omitted() -> None:
+    """All three have model defaults, so DRF marks them `required=False`
+    and leaves them out of `validated_data` entirely when a request
+    omits them. `BusinessSerializer.create()` indexes explicitly rather
+    than splatting, so each needs its own `.get()` fallback — the exact
+    gap that bit `fare_pricing_mode` when Phase 4 added it
+    (docs/specs/10-booking-modes.md)."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+
+    response = _auth_client(staff).post(reverse("business-list-create"), _create_payload())
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["fare_collection_mode"] == Business.FareCollectionMode.PREPAID
+    assert response.data["seat_selection_enabled"] is True
+    assert response.data["capacity_enforced"] is True
+
+
+def test_client_staff_can_create_an_open_seating_pay_as_you_go_business() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+
+    response = _auth_client(staff).post(
+        reverse("business-list-create"),
+        _create_payload(
+            booking_mode_default="open_seating",
+            fare_collection_mode="pay_as_you_go",
+            capacity_enforced="false",
+        ),
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    with tenant_context(str(client.id)):
+        business = Business.objects.get(pk=response.data["id"])
+    assert business.booking_mode_default == Business.BookingMode.OPEN_SEATING
+    assert business.fare_collection_mode == Business.FareCollectionMode.PAY_AS_YOU_GO
+    assert business.capacity_enforced is False
+
+
+def test_tap_and_go_is_no_longer_a_bookable_mode() -> None:
+    """It was never a booking mode — it conflated what you buy with when
+    you pay. Rejecting it here is what stops a caller re-creating the
+    conflation the backfill just undid."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+
+    response = _auth_client(staff).post(
+        reverse("business-list-create"), _create_payload(booking_mode_default="tap_and_go")
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "booking_mode_default" in response.data
+
+
+def test_the_two_mode_specific_booleans_are_not_validated_against_the_mode() -> None:
+    """Storing an inert value is harmless and keeps a Business's settings
+    stable across a mode switch and back. The UI hides the irrelevant
+    one; the model deliberately does not reject it."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+
+    response = _auth_client(staff).post(
+        reverse("business-list-create"),
+        _create_payload(
+            booking_mode_default="reservation",
+            # Meaningful only for open seating, set on a reservation
+            # business.
+            capacity_enforced="false",
+        ),
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["capacity_enforced"] is False
+
+
+# --- ?search= on the Client-scoped GET /businesses/ --------------------
+# docs/specs/14-design-system-and-ui-rebuild.md slice 3b. This endpoint's
+# first query param; the cross-client super-admin list has had its own
+# since Phase 5.
+
+
+def test_business_list_search_matches_name_case_insensitively() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        match = BusinessFactory(client=client, name="Lagos Shuttle Co")
+        BusinessFactory(client=client, name="Abuja Intercity")
+
+    response = _auth_client(staff).get(reverse("business-list-create"), {"search": "lagos"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+def test_business_list_search_with_no_match_returns_empty_not_everything() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        BusinessFactory(client=client, name="Lagos Shuttle Co")
+
+    response = _auth_client(staff).get(reverse("business-list-create"), {"search": "nothing"})
+
+    assert response.data["count"] == 0
+
+
+def test_business_list_blank_search_is_accepted_and_ignored() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        BusinessFactory(client=client, name="Lagos Shuttle Co")
+
+    response = _auth_client(staff).get(reverse("business-list-create"), {"search": ""})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 1
+
+
+def test_business_list_search_never_reaches_another_clients_rows() -> None:
+    client_a = ClientFactory()
+    client_b = ClientFactory()
+    staff_a = ClientStaffUserFactory(client=client_a)
+    with tenant_context(str(client_b.id)):
+        BusinessFactory(client=client_b, name="Lagos Shuttle Co")
+
+    response = _auth_client(staff_a).get(reverse("business-list-create"), {"search": "lagos"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 0

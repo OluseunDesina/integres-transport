@@ -1,1 +1,19 @@
-@import "tailwindcss";
+/* Self-hosted Inter, latin subsets only — no external font request, and
+   no Cyrillic/Greek weight this UI never renders. */
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
+
+@import 'tailwindcss';
+
+/* Design tokens — must come after the Tailwind import so its `@theme`
+   block extends the default theme rather than being overwritten by it.
+   See docs/specs/14-design-system-and-ui-rebuild.md. */
+@import '../../shared-ui/src/theme.css';
+
+/* `ui-map` (spec 20 slice 4 — passenger vehicle tracking). See
+   client-admin-app/src/styles.css's own comment on this import: only
+   the map *tiles* fetch over the network at runtime, and markers are
+   custom `L.divIcon`s styled from this app's own tokens. */
+@import 'leaflet/dist/leaflet.css';

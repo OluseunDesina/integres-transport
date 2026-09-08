@@ -1,6 +1,14 @@
 <app-auth-layout>
-  <h1 class="mb-1 text-lg font-semibold text-slate-900">Integra Validator</h1>
-  <p class="mb-6 text-sm text-slate-500">{{ subtitle }}</p>
+  <!-- Mark plus "Validator": a conductor must be able to tell this app
+       from the passenger one at a glance, and a tenant logo alone
+       cannot say which it is. -->
+  <div class="mb-6 flex flex-col items-center gap-1">
+    <app-brand-mark [height]="36" />
+    <span class="text-sm font-semibold tracking-wide text-muted uppercase">Validator</span>
+  </div>
+
+  <h1 class="mb-1 text-xl font-semibold text-strong">Sign in</h1>
+  <p class="mb-6 text-muted">{{ subtitle }}</p>
 
   @if (errorMessage(); as message) {
     <ui-alert class="mb-4">{{ message }}</ui-alert>

@@ -69,8 +69,10 @@ test.describe('client-admin-app registration', () => {
     await page.getByRole('button', { name: 'Create account' }).click();
 
     await expect(page).toHaveURL(/\/home$/);
-    await expect(page.getByRole('heading')).toContainText(email);
-    await expect(page.getByText('You have client-admin-app access.')).toBeVisible();
+    // A brand-new Client has no Businesses, so the dashboard renders its
+    // answered-but-empty state — which is the correct landing for a
+    // freshly registered account, and still an axe target.
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);

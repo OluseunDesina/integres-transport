@@ -142,6 +142,35 @@ describe('NotificationBell', () => {
     expect(fixture.nativeElement.textContent).toContain('License expiring soon');
   });
 
+  /**
+   * Unread was signalled by a `bg-slate-50` tint and nothing else —
+   * colour as the only status indicator, against this repo's own bar,
+   * and a tint faint enough to be barely a colour. A screen-reader user
+   * got no signal at all.
+   */
+  it('marks an unread row with more than a background tint', async () => {
+    apiClient.GET.and.resolveTo({
+      data: { count: 1, results: [makeNotification({ read_at: null })] },
+    });
+    await createComponent();
+    await openMenu();
+
+    const row = (fixture.nativeElement as HTMLElement).querySelector('[role="menuitem"]');
+    expect(row?.querySelector('.sr-only')?.textContent?.trim()).toBe('Unread.');
+    expect(row?.querySelector('[aria-hidden="true"]')).not.toBeNull();
+  });
+
+  it('says nothing extra about a row that has been read', async () => {
+    apiClient.GET.and.resolveTo({
+      data: { count: 0, results: [makeNotification({ read_at: '2026-08-19T00:00:00Z' })] },
+    });
+    await createComponent();
+    await openMenu();
+
+    const row = (fixture.nativeElement as HTMLElement).querySelector('[role="menuitem"]');
+    expect(row?.textContent).not.toContain('Unread');
+  });
+
   it('closes on Escape and returns focus to the trigger', async () => {
     await createComponent();
     await openMenu();

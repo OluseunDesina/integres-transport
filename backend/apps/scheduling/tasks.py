@@ -50,6 +50,14 @@ def generate_trips_for_schedule(schedule: Schedule, horizon_days: int) -> list[T
                     schedule.business, service_date, schedule.departure_time
                 ),
                 "booking_mode": schedule.business.booking_mode_default,
+                "fare_collection_mode": schedule.business.fare_collection_mode,
+                # Snapshotted from the *Schedule*, not the Business —
+                # class is a per-service decision, not a Business-wide
+                # default. A Schedule edited between two generation runs
+                # produces Trips of different classes on different days,
+                # which is correct and matches how days_of_week edits
+                # already behave (docs/specs/15-trip-classes.md).
+                "trip_class": schedule.trip_class,
                 "status": Trip.Status.SCHEDULED,
             },
         )

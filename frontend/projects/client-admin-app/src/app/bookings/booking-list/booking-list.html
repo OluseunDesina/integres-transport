@@ -1,64 +1,198 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Bookings</h1>
-  </div>
-
-  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-    <ui-select
-      label="Trip"
-      [options]="tripFilterOptions()"
-      [ngModel]="store.query().trip ?? ''"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onTripFilterChange($event)"
-    />
-    <ui-select
-      label="Status"
-      [options]="statusFilterOptions"
-      [ngModel]="store.query().status ?? ''"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onStatusFilterChange($event)"
-    />
-  </div>
+  <ui-page-header
+    title="Bookings"
+    description="Every booking made against this business's trips. Cancelling stays the passenger's own action."
+  >
+    <!-- Hidden without `booking.manage`, which Staff do not hold. The
+         list itself needs only `booking.view`, so this button is the
+         one part of the screen that is not for everyone who can read
+         it. -->
+    <a
+      actions
+      *appHasPermission="'booking.manage'"
+      routerLink="/bookings/counter"
+      class="inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm font-medium text-on-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      >Book for a passenger</a
+    >
+  </ui-page-header>
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state
-      title="No bookings found"
-      description="Bookings made by passengers against your trips will appear here."
-    />
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Route</th>
-          <th class="px-4 py-2">Service date</th>
-          <th class="px-4 py-2">Departure</th>
-          <th class="px-4 py-2">Seats</th>
-          <th class="px-4 py-2">Total</th>
-          <th class="px-4 py-2">Status</th>
-          <th class="px-4 py-2">Booked</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (booking of store.items(); track booking.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ booking.trip.route.name }}</td>
-            <td class="px-4 py-2">{{ booking.trip.service_date }}</td>
-            <td class="px-4 py-2">{{ booking.trip.scheduled_departure_at | date: 'short' }}</td>
-            <td class="px-4 py-2">{{ seatNumbers(booking) }}</td>
-            <td class="px-4 py-2">{{ totalLabel(booking) }}</td>
-            <td class="px-4 py-2">
-              <ui-status-pill
-                [tone]="statusTone[booking.status]"
-                [label]="statusLabel[booking.status]"
-              />
-            </td>
-            <td class="px-4 py-2">{{ booking.created_at | date: 'short' }}</td>
-          </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search bookings"
+        placeholder="Search by route or passenger email…"
+        ariaLabel="Booking filters"
+        [chips]="filters.chips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      >
+        <div filters class="w-48">
+          <ui-select
+            label="Status"
+            [options]="statusFilterOptions"
+            [ngModel]="filters.extra('status')"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onStatusFilterChange($event)"
+          />
+        </div>
+      </ui-filter-bar>
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No bookings yet"
+        description="Bookings made by passengers against your trips will appear here."
+      />
+    } @else {
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Bookings"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No bookings match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Route</th>
+              <th class="hidden py-2 md:table-cell">Service date</th>
+              <th class="hidden py-2 lg:table-cell">Departure</th>
+              <th class="hidden py-2 lg:table-cell">Seats</th>
+              <th class="hidden py-2 md:table-cell">Total</th>
+              <th class="py-2">Status</th>
+              <th class="hidden py-2 lg:table-cell">Booked</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="10rem" /></td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="8rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="4rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="5rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="5rem" /></td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="8rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
+              }
+            } @else {
+              @for (booking of store.items(); track booking.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    {{ booking.trip.route.name }}
+                    <!-- The columns hidden below `md`, re-flowed. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ summaryLine(booking) }}
+                    </span>
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ booking.trip.service_date }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ booking.trip.scheduled_departure_at | date: 'short' }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ seatNumbers(booking) }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ totalLabel(booking) }}
+                  </td>
+                  <td [class]="cellClass()">
+                    <ui-status-pill
+                      [tone]="statusTone[booking.status]"
+                      [label]="statusLabel[booking.status]"
+                    />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ booking.created_at | date: 'short' }}
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    <ui-action-menu
+                      [items]="menuItems"
+                      [label]="
+                        'Actions for the ' +
+                        booking.trip.route.name +
+                        ' booking on ' +
+                        booking.trip.service_date
+                      "
+                      (selected)="onMenuSelected(booking)"
+                    />
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
+
+<ng-template #detailBody>
+  @if (selected(); as booking) {
+    <dl class="flex flex-col gap-4 text-sm">
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Status</dt>
+        <dd>
+          <ui-status-pill
+            [tone]="statusTone[booking.status]"
+            [label]="statusLabel[booking.status]"
+          />
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Departure</dt>
+        <dd class="text-default">
+          {{ booking.trip.scheduled_departure_at | date: 'medium' }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Seats</dt>
+        <dd class="text-default">
+          @if (booking.seats.length === 0) {
+            No seat reserved — this trip is open seating.
+          } @else {
+            <ul class="list-disc pl-5">
+              @for (seat of booking.seats; track seat.seat) {
+                <li>{{ seat.seat }} · {{ seat.from_stop }} → {{ seat.to_stop }}</li>
+              }
+            </ul>
+          }
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Total</dt>
+        <dd class="text-default">{{ totalLabel(booking) }}</dd>
+      </div>
+      @if (booking.cancellation_reason) {
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Cancellation reason</dt>
+          <dd class="text-default">{{ booking.cancellation_reason }}</dd>
+        </div>
+      }
+    </dl>
+  }
+</ng-template>

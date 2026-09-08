@@ -1,13 +1,28 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, request, test, type Page } from '@playwright/test';
+import { expect, request, test, type Locator, type Page } from '@playwright/test';
 
-import { findVehicleByRegistration } from '../fixture-lookup';
+import { findBrowseRouteByName, findVehicleByRegistration } from '../fixture-lookup';
 
 const PASSENGER_EMAIL = 'e2e-passenger@example.com';
 const STAFF_EMAIL = 'e2e-client-staff@example.com';
 const PASSWORD = 'e2e-test-password-123';
 const ROUTE_NAME = 'Ikeja → CMS';
 const BACKEND_URL = 'http://localhost:8000';
+
+/**
+ * Opens a booking row's action menu and picks Cancel.
+ *
+ * Cancel moved out of the row's cells and into `ui-action-menu` in spec
+ * 14 slice 5 — the cell held a bare checkbox, a breakdown paragraph and
+ * up to three buttons, which squeezed the Route column at 390px.
+ */
+async function openCancelDialog(page: Page, row: Locator): Promise<Locator> {
+  await row.getByRole('button', { name: 'Actions for' }).click();
+  await page.getByRole('menuitem', { name: 'Cancel booking' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
 
 async function signIn(page: Page): Promise<void> {
   await page.goto('/login');
@@ -44,16 +59,58 @@ async function selectFixtureRoute(page: Page): Promise<void> {
   await select.selectOption((await option.getAttribute('value')) ?? '');
 }
 
-async function searchAndOpenSeatPicker(page: Page, serviceDate: string): Promise<void> {
+/** Runs the search and returns the "Continue with …" buttons. */
+async function runSearch(page: Page, serviceDate: string): Promise<Locator> {
   await page.goto('/search');
   await selectFixtureRoute(page);
   await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
   await page.getByLabel('To').selectOption({ label: '3. CMS' });
   await page.getByLabel('Travel date').fill(serviceDate);
   await page.getByRole('button', { name: 'Search' }).click();
-  await expect(page.getByRole('button', { name: 'Choose seats' }).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Choose seats' }).first().click();
-  await expect(page.getByRole('group', { name: 'Seat map' })).toBeVisible();
+  const options = page.getByRole('button', { name: 'Continue with' });
+  await expect(options.first()).toBeVisible();
+  return options;
+}
+
+/**
+ * Opens the seat picker on the first departure that actually has one.
+ *
+ * **Not simply `.first()`.** The earliest departure on this route each
+ * day is a Celery-generated trip from the seeded Schedule, and nothing
+ * ever assigns it a vehicle — so it is `not_configured`, has no seats,
+ * and opens an empty picker. It is only *in* the results during the
+ * morning window before it departs, which is why this passed every
+ * afternoon for months and failed at 07:20 while spec 18 slice 1 was
+ * being verified. The same "do not trust the first row" lesson
+ * `fixture-lookup.ts` already carries, arriving in the search results.
+ *
+ * The search is re-run per candidate rather than navigating back:
+ * `seat-picker` reads its subject from router state, so `goBack()`
+ * lands on an empty `/search` rather than restoring the results.
+ */
+async function searchAndOpenSeatPicker(page: Page, serviceDate: string): Promise<number> {
+  const candidates = await (await runSearch(page, serviceDate)).count();
+  for (let index = 0; index < candidates; index += 1) {
+    const options = await runSearch(page, serviceDate);
+    await options.nth(index).click();
+    // `expect(...).toBeVisible()`, not `isVisible()`: the latter does
+    // not retry, so it answers "no" in the instant before the picker
+    // has loaded its availability — and every candidate would then look
+    // unbookable. The same non-retrying trap CLAUDE.md records for
+    // `locator.count()`.
+    const seatMap = page.getByRole('group', { name: 'Seat map' });
+    const opened = await expect(seatMap)
+      .toBeVisible({ timeout: 5000 })
+      .then(() => true)
+      .catch(() => false);
+    if (opened) {
+      return index;
+    }
+  }
+  throw new Error(
+    `No departure on ${ROUTE_NAME} for ${serviceDate} has a vehicle assigned, so none ` +
+      `has a seat map. Is seed_e2e_users up to date?`
+  );
 }
 
 // Books whichever seat is offered first — the happy-path/keyboard/focus
@@ -94,7 +151,9 @@ test.describe('customer-app booking flow', () => {
     expect(results.violations).toEqual([]);
 
     await pickFirstAvailableSeat(page);
-    await expect(page.getByText('1 seat(s) selected')).toBeVisible();
+    // "1 seat selected", not "1 seat(s) selected" — slice 5 replaced
+    // the parenthesised plural with @shared-ui's own plural() helper.
+    await expect(page.getByText('1 seat selected')).toBeVisible();
     await page.getByRole('button', { name: 'Continue' }).click();
 
     await expect(page.getByRole('heading', { name: 'Review your booking' })).toBeVisible();
@@ -107,13 +166,15 @@ test.describe('customer-app booking flow', () => {
     await expect(page).toHaveURL(/\/my-bookings$/);
     const row = page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first();
     await expect(row).toBeVisible();
-    await expect(row.getByText('Pending payment')).toBeVisible();
+    // toContainText, not getByText: the status pill renders in both
+    // responsive tiers (the md:hidden sub-line and the md:table-cell
+    // column), so a text locator is a strict-mode violation — the
+    // same duplication the responsive-tables slice already hit.
+    await expect(row).toContainText('Pending payment');
     results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
 
-    await row.getByRole('button', { name: 'Cancel' }).click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible();
+    const dialog = await openCancelDialog(page, row);
     // toBeVisible() resolves as soon as the dialog is in the DOM with a
     // non-zero box — it does not wait for the CDK dialog's own entrance
     // transition to settle. Checking axe immediately catches the danger
@@ -129,8 +190,18 @@ test.describe('customer-app booking flow', () => {
 
     await dialog.getByRole('button', { name: 'Cancel booking' }).click();
     await expect(dialog).not.toBeVisible();
-    await expect(row.getByText('Cancelled')).toBeVisible();
-    await expect(row.getByRole('button', { name: 'Cancel' })).not.toBeVisible();
+    await expect(row).toContainText('Cancelled');
+    // The menu is still there, but Cancel is gone from it. It used to
+    // disappear entirely, because Cancel and View tickets were its only
+    // two items and a cancelled booking offers neither. Spec 17 slice 3
+    // added "Report a problem" to every row whatever its status —
+    // deliberately, since "the reader would not take my card, so I
+    // cancelled" is exactly the story worth reporting.
+    await row.getByRole('button', { name: 'Actions for' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Report a problem' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Cancel booking' })).toHaveCount(0);
+    await expect(page.getByRole('menuitem', { name: 'View tickets' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
   });
 
   test('shows an axe-clean empty state when nothing runs on the chosen date', async ({ page }) => {
@@ -150,6 +221,8 @@ test.describe('customer-app booking flow', () => {
   test('the search-through-confirm flow is completable by keyboard alone', async ({ page }) => {
     await signIn(page);
 
+    const bookableIndex = await searchAndOpenSeatPicker(page, todayISO());
+
     await page.goto('/search');
     await selectFixtureRoute(page);
     await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
@@ -158,8 +231,14 @@ test.describe('customer-app booking flow', () => {
     await page.getByRole('button', { name: 'Search' }).focus();
     await page.keyboard.press('Enter');
 
-    await expect(page.getByRole('button', { name: 'Choose seats' }).first()).toBeVisible();
-    await page.getByRole('button', { name: 'Choose seats' }).first().focus();
+    const options = page.getByRole('button', { name: 'Continue with' });
+    await expect(options.first()).toBeVisible();
+    // The **bookable** departure, not the first one — see
+    // `searchAndOpenSeatPicker`'s own note. Discovered by mouse in a
+    // throwaway pass above and then driven by keyboard here: what this
+    // test proves is that the flow is *completable* by keyboard, not
+    // that a vehicle-less trip has a seat map.
+    await options.nth(bookableIndex).focus();
     await page.keyboard.press('Enter');
 
     const seatButton = page
@@ -183,8 +262,8 @@ test.describe('customer-app booking flow', () => {
     // Clean up via the confirm dialog so this reusable fixture seat isn't
     // permanently consumed by every test run.
     const row = page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first();
-    await row.getByRole('button', { name: 'Cancel' }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Cancel booking' }).click();
+    const dialog = await openCancelDialog(page, row);
+    await dialog.getByRole('button', { name: 'Cancel booking' }).click();
   });
 
   test('the cancel dialog is dismissible with Escape, restoring focus to the row', async ({
@@ -198,19 +277,16 @@ test.describe('customer-app booking flow', () => {
 
     await expect(page).toHaveURL(/\/my-bookings$/);
     const row = page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first();
-    const cancelButton = row.getByRole('button', { name: 'Cancel' });
-    await cancelButton.click();
+    const dialog = await openCancelDialog(page, row);
 
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
     await expect(row).toBeVisible();
 
     // The booking is still pending_payment (Escape did not confirm) —
     // clean it up for real so the fixture seat is released.
-    await cancelButton.click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Cancel booking' }).click();
+    const reopened = await openCancelDialog(page, row);
+    await reopened.getByRole('button', { name: 'Cancel booking' }).click();
   });
 
   test('a seat taken mid-booking by a concurrent passenger surfaces as a conflict, not a double-booking', async ({
@@ -231,12 +307,14 @@ test.describe('customer-app booking flow', () => {
       ).json()
     ).access as string;
 
-    const routes = await (
-      await api.get(`${BACKEND_URL}/api/v1/routes/browse/`, {
-        headers: { Authorization: `Bearer ${staffToken}` },
-      })
-    ).json();
-    const route = routes.results.find((r: { name: string }) => r.name === ROUTE_NAME);
+    // Paged, like the vehicle lookup below and for the identical
+    // reason: this was one unbounded `GET /routes/browse/` plus
+    // `.find()`, and accumulated e2e routes (43 against a page size of
+    // 25) had pushed the fixture off page 1 — failing as
+    // `Cannot read properties of undefined (reading 'stops')`, the exact
+    // symptom `findBrowseRouteByName` was written for and which this one
+    // call site never adopted.
+    const route = await findBrowseRouteByName(api, staffToken, ROUTE_NAME);
     const fromStop = route.stops[0];
     const toStop = route.stops[route.stops.length - 1];
 
@@ -291,8 +369,8 @@ test.describe('customer-app booking flow', () => {
       await page.getByLabel('To').selectOption({ label: `${toStop.sequence}. ${toStop.name}` });
       await page.getByLabel('Travel date').fill(serviceDate.toISOString().slice(0, 10));
       await page.getByRole('button', { name: 'Search' }).click();
-      await expect(page.getByRole('button', { name: 'Choose seats' }).first()).toBeVisible();
-      await page.getByRole('button', { name: 'Choose seats' }).first().click();
+      await expect(page.getByRole('button', { name: 'Continue with' }).first()).toBeVisible();
+      await page.getByRole('button', { name: 'Continue with' }).first().click();
       await expect(page.getByRole('group', { name: 'Seat map' })).toBeVisible();
     }
 

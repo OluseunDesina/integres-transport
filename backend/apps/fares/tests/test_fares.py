@@ -472,3 +472,35 @@ def test_trip_fare_endpoint_rejects_an_unauthenticated_request() -> None:
     )
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_fare_serializers_carry_the_names_their_ids_point_at() -> None:
+    # Spec 14 slice 3b. client-admin's fare list used to resolve these
+    # through the shared root RouteStore/StopStore, so a fare whose
+    # route or stop sat outside those stores' loaded pages rendered as a
+    # raw UUID — and any other screen filtering those stores could cause
+    # it mid-session.
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    route = _route(client)
+    with tenant_context(str(client.id)):
+        stop_a = StopFactory(client=client, business=route.business)
+        stop_b = StopFactory(client=client, business=route.business)
+        FareRuleFactory(client=client, route=route, business=route.business)
+        FareSegmentRuleFactory(
+            client=client,
+            route=route,
+            business=route.business,
+            from_stop=stop_a,
+            to_stop=stop_b,
+        )
+
+    api = _auth_client(staff)
+    flat = api.get(reverse("fare-rule-list-create"))
+    segment = api.get(reverse("fare-segment-rule-list-create"))
+
+    assert flat.status_code == status.HTTP_200_OK
+    assert flat.data["results"][0]["route_name"] == route.name
+    assert segment.data["results"][0]["route_name"] == route.name
+    assert segment.data["results"][0]["from_stop_name"] == stop_a.name
+    assert segment.data["results"][0]["to_stop_name"] == stop_b.name

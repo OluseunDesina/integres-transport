@@ -1,7 +1,56 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 
-import { Icon } from './icon';
+import { Icon, type IconName } from './icon';
+
+/**
+ * Every name in the union, listed exhaustively. `Record<IconName, true>`
+ * is the point: adding a name to the union without adding it here fails
+ * the build, so this list cannot silently fall behind. Adding a name
+ * without a path renders `d=""` — an icon-shaped hole that no existing
+ * test would have caught.
+ */
+const ALL_ICON_NAMES: Record<IconName, true> = {
+  home: true,
+  'building-office': true,
+  map: true,
+  'map-pin': true,
+  users: true,
+  identification: true,
+  swatch: true,
+  'clipboard-document-check': true,
+  'document-check': true,
+  'user-plus': true,
+  'arrow-right-start-on-rectangle': true,
+  'chevron-double-left': true,
+  'chevron-double-right': true,
+  'chevron-up-down': true,
+  check: true,
+  truck: true,
+  'squares-2x2': true,
+  'user-circle': true,
+  'calendar-days': true,
+  clock: true,
+  banknotes: true,
+  'book-open': true,
+  'credit-card': true,
+  tag: true,
+  bolt: true,
+  bell: true,
+  'ellipsis-horizontal': true,
+  'x-mark': true,
+  'magnifying-glass': true,
+  'arrow-down-tray': true,
+  'chevron-down': true,
+  'bars-3': true,
+  'bars-4': true,
+  funnel: true,
+  'arrow-up': true,
+  'arrow-down': true,
+  'chart-bar': true,
+  'exclamation-triangle': true,
+  signal: true,
+};
 
 describe('Icon', () => {
   let fixture: ComponentFixture<Icon>;
@@ -76,5 +125,33 @@ describe('Icon', () => {
     await render('bell');
     const path = fixture.debugElement.query(By.css('path'));
     expect(path.nativeElement.getAttribute('d')).toContain('M14.857 17.082');
+  });
+
+  it('has real path data for every name in the union', async () => {
+    // Replaces adding one near-identical test per icon. The failure this
+    // catches is a name declared in IconName with no entry in PATHS,
+    // which renders an empty `d` — visually an icon-shaped hole, and
+    // silent.
+    for (const name of Object.keys(ALL_ICON_NAMES) as IconName[]) {
+      // `render` reconfigures the TestBed, which throws once a module has
+      // been instantiated — so each icon needs a fresh one.
+      TestBed.resetTestingModule();
+      await render(name);
+      const d = fixture.debugElement.query(By.css('path')).nativeElement.getAttribute('d');
+      expect(d).withContext(`icon "${name}"`).toBeTruthy();
+      expect(d.length).withContext(`icon "${name}"`).toBeGreaterThan(10);
+    }
+  });
+
+  it('renders the ellipsis icon that triggers every ui-action-menu', async () => {
+    await render('ellipsis-horizontal');
+    const path = fixture.debugElement.query(By.css('path'));
+    expect(path.nativeElement.getAttribute('d')).toContain('M6.75 12a.75.75');
+  });
+
+  it('renders the x-mark icon used to close a drawer and remove a chip', async () => {
+    await render('x-mark');
+    const path = fixture.debugElement.query(By.css('path'));
+    expect(path.nativeElement.getAttribute('d')).toBe('M6 18 18 6M6 6l12 12');
   });
 });

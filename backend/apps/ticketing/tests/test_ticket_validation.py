@@ -23,6 +23,8 @@ from apps.identity.serializers import ClientAdminTokenObtainSerializer
 from apps.identity.services import create_default_roles
 from apps.identity.tests.factories import ClientStaffUserFactory, PassengerUserFactory
 from apps.payments.tests.booking_helpers import booking_with_a_held_seat
+from apps.seating.services import create_reservation
+from apps.seating.tests.factories import SeatFactory
 
 from .. import signing
 from ..models import Ticket
@@ -75,6 +77,57 @@ def test_staff_can_validate_a_ticket_and_board_it() -> None:
     assert ticket.status == Ticket.Status.BOARDED
     assert ticket.boarded_at is not None
     assert AuditLog.objects.filter(action="ticket.boarded", target_id=str(ticket.id)).exists()
+
+
+def test_boarding_the_only_ticket_on_a_booking_reports_it_completed() -> None:
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+    booking, ticket, staff = _issue_ticket(client, business)
+
+    response = _auth_client(staff).post(
+        reverse("ticket-validate", kwargs={"trip_id": str(booking.trip_id)}),
+        {"payload": ticket.signed_payload},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="validate-completes",
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["booking_status"] == "completed"
+
+
+def test_boarding_one_of_two_tickets_reports_the_booking_still_paid() -> None:
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+    booking, first_reservation = booking_with_a_held_seat(client, business)
+    with tenant_context(str(client.id)):
+        second_seat = SeatFactory(client=client, vehicle_type=first_reservation.seat.vehicle_type)
+        create_reservation(
+            trip=booking.trip,
+            seat=second_seat,
+            from_stop=first_reservation.from_stop,
+            to_stop=first_reservation.to_stop,
+            booking=booking,
+            hold_minutes=business.seat_hold_minutes,
+            amount=first_reservation.amount,
+            fare_rule=first_reservation.fare_rule,
+        )
+    mark_booking_paid(booking=booking)
+    roles = create_default_roles(client)
+    staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
+    with platform_staff_bypass():
+        first_ticket = Ticket.all_objects.get(seat_reservation=first_reservation)
+
+    response = _auth_client(staff).post(
+        reverse("ticket-validate", kwargs={"trip_id": str(booking.trip_id)}),
+        {"payload": first_ticket.signed_payload},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="validate-partial",
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["booking_status"] == "paid"
 
 
 def test_validated_passenger_name_falls_back_to_email_when_no_name_set() -> None:
@@ -230,6 +283,9 @@ def test_validate_returns_404_for_a_payload_with_no_matching_ticket() -> None:
         business = BusinessFactory(client=client)
     booking, _ticket, staff = _issue_ticket(client, business)
     bogus_payload = signing.sign_ticket(
+        # A ticket_id nothing was ever issued under — this is what makes
+        # the payload unresolvable now that ticket_id is the lookup key.
+        ticket_id="00000000-0000-0000-0000-000000000000",
         booking_id=str(booking.id),
         seat_reservation_id="00000000-0000-0000-0000-000000000000",
         trip_id=str(booking.trip_id),

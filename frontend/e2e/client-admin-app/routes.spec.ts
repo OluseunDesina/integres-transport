@@ -45,6 +45,17 @@ async function createRoute(page: Page, name: string): Promise<void> {
   await expect(page).toHaveURL(/\/routes\/[^/]+\/edit$/);
 }
 
+/**
+ * Row actions moved from bare text links plus an in-table switch into
+ * one `ui-action-menu` per row — docs/specs/14 slice 3a.
+ */
+async function openRowMenu(page: Page, rowName: string): Promise<void> {
+  await page
+    .getByRole('row', { name: new RegExp(rowName) })
+    .getByRole('button', { name: new RegExp('^Actions for') })
+    .click();
+}
+
 test.describe('client-admin-app routes', () => {
   test('renders an axe-clean routes screen behind the nav shell', async ({ page }) => {
     await signIn(page);
@@ -96,10 +107,10 @@ test.describe('client-admin-app routes', () => {
     await page.getByLabel('Route name').fill(updatedName);
     await page.getByRole('button', { name: 'Save changes' }).click();
     // Route's edit mode deliberately stays on the same page after saving
-    // (the stop-order section below needs to stay usable) — the "Saved."
-    // confirmation, not the input's own value, is what actually confirms
-    // the PATCH completed before navigating away to check the list.
-    await expect(page.getByText('Saved.')).toBeVisible();
+    // (the Stops tab needs to stay usable) — the confirmation, not the
+    // input's own value, is what actually confirms the PATCH completed
+    // before navigating away to check the list.
+    await expect(page.getByText('Route details saved.')).toBeVisible();
 
     await page.goto('/routes');
     await expect(page.getByText(updatedName)).toBeVisible();
@@ -121,6 +132,9 @@ test.describe('client-admin-app routes', () => {
     await createStop(page, stopB);
     await createRoute(page, routeName);
 
+    // Details and Stops are tabs now — the two halves of a route are
+    // unrelated and both already loaded (docs/specs/14 slice 4).
+    await page.getByRole('tab', { name: 'Stops' }).click();
     await expect(page.getByText('No stops added yet.')).toBeVisible();
 
     await page.getByLabel('Add a stop').selectOption({ label: stopB });
@@ -134,14 +148,18 @@ test.describe('client-admin-app routes', () => {
     await expect(items.nth(1)).toContainText(stopA);
 
     // Move stopA (currently second) up so the final order is A, B.
-    await items.nth(1).getByRole('button', { name: 'Move up' }).click();
+    // Named for the stop it moves: a list of identical "Move up"
+    // buttons is ambiguous to a screen reader and to a locator alike.
+    await items.nth(1).getByRole('button', { name: `Move ${stopA} earlier` }).click();
     await expect(items.nth(0)).toContainText(stopA);
     await expect(items.nth(1)).toContainText(stopB);
 
     await page.getByRole('button', { name: 'Save stop order' }).click();
-    await expect(page.getByText('Saved.')).toBeVisible();
+    await expect(page.getByText('Stop order saved.')).toBeVisible();
 
     await page.reload();
+    // A reload lands on the first tab, as a fresh visit should.
+    await page.getByRole('tab', { name: 'Stops' }).click();
     const reloadedItems = page.locator('ol li');
     await expect(reloadedItems).toHaveCount(2);
     await expect(reloadedItems.nth(0)).toContainText(stopA);
@@ -149,5 +167,95 @@ test.describe('client-admin-app routes', () => {
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
+  });
+
+  // --- docs/specs/14 slice 3a ---
+
+  test('deactivates a route only after confirming, and shows the new status', async ({ page }) => {
+    const name = uniqueName('E2E Deactivate Route');
+
+    await signIn(page);
+    await selectActiveBusiness(page, NETWORK_BUSINESS);
+    await createRoute(page, name);
+    await page.goto('/routes');
+
+    const row = page.getByRole('row', { name: new RegExp(name) });
+    await expect(row.getByText('Active')).toBeVisible();
+
+    // Opening the menu must not itself change anything — the whole point
+    // of replacing the in-table switch.
+    await openRowMenu(page, name);
+    await page.getByRole('menuitem', { name: 'Deactivate' }).click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: `Deactivate ${name}?` })).toBeVisible();
+    // Asserted through a CSS locator, not getByRole: CDK marks the page
+    // behind an open modal aria-hidden, so role queries correctly find
+    // nothing there.
+    await expect(page.locator('tbody tr', { hasText: name }).locator('text=Active')).toBeVisible();
+
+    await dialog.getByRole('button', { name: 'Deactivate' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(row.getByText('Inactive')).toBeVisible();
+
+    const results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
+  });
+
+  test('leaves the route untouched when the confirmation is cancelled', async ({ page }) => {
+    const name = uniqueName('E2E Cancel Route');
+
+    await signIn(page);
+    await selectActiveBusiness(page, NETWORK_BUSINESS);
+    await createRoute(page, name);
+    await page.goto('/routes');
+
+    await openRowMenu(page, name);
+    await page.getByRole('menuitem', { name: 'Deactivate' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+
+    await expect(
+      page.getByRole('row', { name: new RegExp(name) }).getByText('Active'),
+    ).toBeVisible();
+  });
+
+  test('narrows the list with a server-side search, and clears it from the chip', async ({
+    page,
+  }) => {
+    // The reason slice 3a added `?search=` to the backend: a search that
+    // only filtered the loaded page would be indistinguishable from this
+    // until the list outgrew one page.
+    const name = uniqueName('E2E Searchable Route');
+    const other = uniqueName('E2E Unrelated Route');
+
+    await signIn(page);
+    await selectActiveBusiness(page, NETWORK_BUSINESS);
+    await createRoute(page, other);
+    await createRoute(page, name);
+    await page.goto('/routes');
+
+    await expect(page.getByRole('row', { name: new RegExp(other) })).toBeVisible();
+
+    await page.getByLabel('Search routes').fill(name);
+    await expect(page.getByRole('row', { name: new RegExp(name) })).toBeVisible();
+    await expect(page.getByRole('row', { name: new RegExp(other) })).toBeHidden();
+
+    // The chip is what tells an operator the list is filtered at all.
+    const chip = page.getByRole('button', { name: new RegExp('^Remove filter Search') });
+    await expect(chip).toBeVisible();
+    await chip.click();
+
+    await expect(page.getByRole('row', { name: new RegExp(other) })).toBeVisible();
+  });
+
+  test('creates a route from the shell quick-create menu', async ({ page }) => {
+    await signIn(page);
+    await selectActiveBusiness(page, NETWORK_BUSINESS);
+    await page.goto('/routes');
+
+    await page.getByRole('button', { name: 'Create a new record' }).click();
+    await page.getByRole('menuitem', { name: 'New route' }).click();
+
+    await expect(page).toHaveURL(/\/routes\/new$/);
   });
 });

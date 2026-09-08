@@ -71,12 +71,18 @@ class WalletTopupInitiateSerializer(serializers.Serializer):
 
 class PaymentInitiateSerializer(serializers.Serializer):
     """POST /payments/ body — exactly one of `booking_id` (pay for a
-    booking via a fresh Paystack charge) or `wallet_topup` (fund the
-    passenger's wallet with no Booking attached). A blend of the two
-    isn't supported — see docs/specs/7-passenger-wallet.md's own
-    non-goals."""
+    booking) or `wallet_topup` (fund the passenger's wallet with no
+    Booking attached). `use_wallet_balance` is only meaningful
+    alongside `booking_id`: when set, the wallet's current balance is
+    applied first and only the remainder (if any) is charged via
+    Paystack — see `apps.payments.services.initiate_payment_with_wallet`.
+    This revisits docs/specs/7-passenger-wallet.md's original "a blend
+    of the two isn't supported" non-goal; see that spec's own
+    Implementation note for why the reconciliation risk it named no
+    longer blocks this."""
 
     booking_id = serializers.UUIDField(required=False)
+    use_wallet_balance = serializers.BooleanField(required=False, default=False)
     wallet_topup = WalletTopupInitiateSerializer(required=False)
 
     def validate_booking_id(self, value: Any) -> Booking:
@@ -89,6 +95,11 @@ class PaymentInitiateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 "Provide exactly one of booking_id or wallet_topup.",
                 code="ambiguous_payment_target",
+            )
+        if has_topup and attrs.get("use_wallet_balance"):
+            raise serializers.ValidationError(
+                "use_wallet_balance is only valid alongside booking_id.",
+                code="use_wallet_balance_requires_booking",
             )
         return attrs
 
@@ -122,11 +133,16 @@ class PaymentIntentSerializer(serializers.ModelSerializer[PaymentIntent]):
             "business",
             "passenger",
             "amount",
+            "wallet_component_amount",
             "currency",
             "status",
             "psp_provider",
             "psp_reference",
             "psp_authorization_url",
+            # docs/specs/16-operational-analytics.md slice 1. Blank on
+            # every historical row and on anything that never succeeded
+            # — a reader must treat that as "unknown", not as a channel.
+            "channel",
             "succeeded_at",
             "failed_at",
             "requires_manual_refund",
@@ -138,6 +154,10 @@ class PaymentIntentSerializer(serializers.ModelSerializer[PaymentIntent]):
 class PaymentIntentListQuerySerializer(serializers.Serializer):
     business = serializers.UUIDField(required=False)
     status = serializers.ChoiceField(choices=PaymentIntent.Status.choices, required=False)
+    # The PSP reference is what a passenger or Paystack quotes back
+    # during a dispute, so it is the one thing worth typing here.
+    # `allow_blank`, because the filter bar emits '' when cleared.
+    search = serializers.CharField(required=False, allow_blank=True)
 
 
 # --- GET/POST /settlement-runs/ (Phase 5 Slice 3) ---------------------------

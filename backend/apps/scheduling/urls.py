@@ -15,4 +15,5 @@ urlpatterns = [
         name="trip-assignment-update",
     ),
     path("trips/<uuid:pk>/status/", views.TripStatusView.as_view(), name="trip-status"),
+    path("trips/<uuid:pk>/class/", views.TripClassView.as_view(), name="trip-class"),
 ]

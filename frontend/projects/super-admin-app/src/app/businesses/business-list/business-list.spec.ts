@@ -1,7 +1,8 @@
 import { signal } from '@angular/core';
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
+import { expectColumnVisibilityParity } from '@shared-ui';
 
 import { BusinessList } from './business-list';
 import {
@@ -85,19 +86,90 @@ describe('BusinessList', () => {
     expect(fixture.nativeElement.textContent).toContain('Failed to load businesses.');
   });
 
-  it('calls store.updateQuery() with the trimmed search term on submit', () => {
-    fixture.componentInstance['onSearchTermChange']('  Lagos  ');
-    fixture.componentInstance['onSearchSubmit']();
+  // --- Search, now through ui-filter-bar (docs/specs/14 slice 2) ---
+  //
+  // Driven through the rendered input rather than the component method,
+  // per the lesson recorded in docs/self-check-2026-08-26-spec11.md: a
+  // test that calls the handler directly passes whether or not the
+  // control is actually wired to it.
+
+  function typeSearch(value: string): void {
+    const input = fixture.debugElement.query(By.css('input[type="search"]'))
+      .nativeElement as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event('input'));
+  }
+
+  it('queries the store with the trimmed search term once the debounce elapses', fakeAsync(() => {
+    typeSearch('  Lagos  ');
+    tick(300);
 
     expect(store.updateQuery).toHaveBeenCalledWith({ search: 'Lagos' });
-  });
+  }));
 
-  it('sends an undefined search when the field is cleared', () => {
-    fixture.componentInstance['onSearchTermChange']('   ');
-    fixture.componentInstance['onSearchSubmit']();
+  it('does not query the store on every keystroke', fakeAsync(() => {
+    // The whole reason this screen submitted on a button before: an
+    // undebounced box is one cross-client query per character.
+    store.updateQuery.calls.reset();
+    typeSearch('L');
+    typeSearch('La');
+    typeSearch('Lag');
+    expect(store.updateQuery).not.toHaveBeenCalled();
+
+    tick(300);
+    expect(store.updateQuery).toHaveBeenCalledTimes(1);
+  }));
+
+  it('sends an undefined search when the field holds only whitespace', fakeAsync(() => {
+    typeSearch('   ');
+    tick(300);
 
     expect(store.updateQuery).toHaveBeenCalledWith({ search: undefined });
-  });
+  }));
+
+  it('renders the active search as a removable chip', fakeAsync(() => {
+    // A filtered list with nothing on screen saying so is
+    // indistinguishable from a list with no data.
+    typeSearch('Lagos');
+    tick(300);
+    fixture.detectChanges();
+
+    const chip = fixture.debugElement
+      .queryAll(By.css('button'))
+      .find((el) =>
+        (el.nativeElement as HTMLElement).getAttribute('aria-label')?.startsWith('Remove filter'),
+      );
+    expect(chip).toBeDefined();
+    expect((chip!.nativeElement as HTMLElement).textContent).toContain('Name: Lagos');
+  }));
+
+  it('clears the search from the chip, restoring the unfiltered list', fakeAsync(() => {
+    typeSearch('Lagos');
+    tick(300);
+    fixture.detectChanges();
+
+    const chip = fixture.debugElement
+      .queryAll(By.css('button'))
+      .find((el) =>
+        (el.nativeElement as HTMLElement).getAttribute('aria-label')?.startsWith('Remove filter'),
+      )!;
+    (chip.nativeElement as HTMLButtonElement).click();
+    fixture.detectChanges();
+
+    expect(store.updateQuery).toHaveBeenCalledWith({ search: undefined });
+    const input = fixture.debugElement.query(By.css('input[type="search"]'))
+      .nativeElement as HTMLInputElement;
+    expect(input.value).toBe('');
+  }));
+
+  it('shows a search-specific empty state rather than the generic one', fakeAsync(() => {
+    typeSearch('Nothing matches this');
+    tick(300);
+    store.isEmpty.set(true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('No business matches that name');
+  }));
 
   it('links each row to its Paystack and Settlements screens', () => {
     store.items.set([makeBusiness()]);
@@ -119,4 +191,13 @@ describe('BusinessList', () => {
 
     expect(store.changePage).toHaveBeenCalledWith(25);
   });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makeBusiness()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'business-list');
+  });
+
 });

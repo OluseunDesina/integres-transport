@@ -53,6 +53,16 @@ INSTALLED_APPS = [
     "apps.wallet",
     "apps.ticketing",
     "apps.notifications",
+    "apps.incidents",
+    # No models of its own — a read layer over the operational tables,
+    # same shape apps.wallet takes over apps.ledger
+    # (docs/specs/16-operational-analytics.md).
+    "apps.analytics",
+    "apps.telemetry",
+    # No models of its own — a read layer composing across payments,
+    # ticketing and tapngo for one passenger's own history
+    # (docs/specs/20-live-operations.md slice 4).
+    "apps.activity",
 ]
 
 MIDDLEWARE = [
@@ -162,6 +172,35 @@ REST_FRAMEWORK = {
         "auth_login_super_admin": "10/min",
         "auth_register": "10/min",
         "auth_invite_accept": "10/min",
+        # docs/specs/16-operational-analytics.md slice 4. These endpoints
+        # are two to three orders of magnitude more expensive than
+        # anything else in this API — one request can aggregate a
+        # quarter's payments and build a multi-megabyte body — so an
+        # unthrottled export is a cheap self-DoS. Generous enough that no
+        # operator meets it in normal use.
+        "export": "6/min",
+        # docs/specs/17-incidents.md. Passenger issue reporting is the
+        # only place in this API where an ordinary passenger can create
+        # rows that land in front of operations staff, which the spec
+        # names as an abuse vector. `ScopedRateThrottle` keys on the
+        # authenticated user, so this is per passenger — well above any
+        # honest reporting rate, and far below a useful flood.
+        "incident_report": "20/hour",
+        # docs/specs/18-manifest-and-staff-booking.md slice 2. Exact
+        # match, one result, no partial search — but that is still an
+        # oracle answering "is this address registered here?" one
+        # request at a time. `ScopedRateThrottle` keys on the
+        # authenticated staff user, so this is per agent: far above a
+        # counter's real rate (a busy desk serves nothing like sixty
+        # walk-ups an hour) and far below a useful enumeration run.
+        "passenger_lookup": "60/hour",
+        # docs/specs/20-live-operations.md. Keyed per device (see
+        # apps.telemetry.views.DeviceRateThrottle), not per user — a
+        # device has no JWT. Generous enough for a 10-second real-device
+        # cadence with headroom for retried batches, far below a useful
+        # flood from one compromised token (bounded further by
+        # revocation and the vehicle binding being server-side).
+        "telemetry_ingest": "30/min",
     },
 }
 
@@ -174,6 +213,29 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "SCHEMA_PATH_PREFIX": "/api/v1/",
+    # Several models call a field `status` over different choice sets,
+    # and drf-spectacular resolves that collision by appending a hash of
+    # the choices — `StatusD05Enum` and eleven siblings. Those names are
+    # what `schema.ts` exports, and the hash is derived from the choice
+    # set, so adding a value to one enum silently renames the *type* a
+    # frontend imports.
+    #
+    # Only the incidents one is named here, deliberately. It is new
+    # (docs/specs/17-incidents.md) with a frontend consumer arriving in
+    # slice 2, so it costs nothing now; renaming the twelve that already
+    # ship would churn generated types across four apps for no
+    # functional gain. Any future enum in this position should be named
+    # here at birth rather than left to a hash.
+    "ENUM_NAME_OVERRIDES": {
+        "IncidentStatusEnum": "apps.incidents.models.INCIDENT_STATUS_CHOICES",
+        "ManifestKindEnum": "apps.booking.manifest.MANIFEST_KIND_CHOICES",
+        "StaffBookingPaymentStatusEnum": (
+            "apps.booking.staff.STAFF_BOOKING_PAYMENT_STATUS_CHOICES"
+        ),
+        "RouteStatusEnum": "apps.network.models.ROUTE_STATUS_CHOICES",
+        "FarePricingModeEnum": "apps.businesses.models.FARE_PRICING_MODE_CHOICES",
+        "TelemetrySourceEnum": "apps.telemetry.models.TELEMETRY_SOURCE_CHOICES",
+    },
 }
 
 # distinct audiences per app, per the brief's locked auth decision
@@ -182,10 +244,33 @@ JWT_AUDIENCE_CLIENT_ADMIN = "integra-client-admin-app"
 JWT_AUDIENCE_SUPER_ADMIN = "integra-super-admin-app"
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    # 60, not 15 — docs/specs/13-session-resilience.md. Fifteen minutes
+    # with no refresh-on-401 anywhere meant any idle session silently
+    # started failing every request. The frontend now refreshes on 401
+    # (@auth's authMiddleware), and this lifetime is the accepted trade
+    # between that and the theft window.
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    # Rotation stays on: every refresh returns a NEW refresh token, and
+    # the client must persist it (AuthStore.updateTokens) or it destroys
+    # its own session.
     "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": True,
+    # False, deliberately, and this is a downgrade from what this file
+    # used to *claim*. It read True, but `rest_framework_simplejwt
+    # .token_blacklist` is not in INSTALLED_APPS, and SimpleJWT swallows
+    # the resulting AttributeError (its serializers.py: "If blacklist app
+    # not installed, `blacklist` method will not be present") — so the
+    # setting has always been a no-op and a rotated-away refresh token
+    # has always stayed valid for its full REFRESH_TOKEN_LIFETIME.
+    #
+    # Saying so is better than a security control that silently does
+    # nothing. **Revocation is bounded by REFRESH_TOKEN_LIFETIME alone.**
+    # Turning this back on means installing the blacklist app, its
+    # migrations, and a periodic flush (no cron on the target hosting —
+    # it would need an apps.core internal task endpoint), and it makes
+    # concurrent refreshes from two browser tabs able to kill each
+    # other's session, which the frontend does not yet coordinate.
+    "BLACKLIST_AFTER_ROTATION": False,
     "ALGORITHM": "HS256",
     "SIGNING_KEY": SECRET_KEY,
     "AUTH_HEADER_TYPES": ("Bearer",),
@@ -205,6 +290,21 @@ CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", default="", cast=Csv())
 # local: every hosted frontend hits the same wall, and it follows from
 # the API contract, not from the environment.
 CORS_ALLOW_HEADERS = (*default_headers, "idempotency-key")
+
+# The CSV export names its own file in `Content-Disposition`, and a
+# browser will not let JavaScript read that header cross-origin unless it
+# is explicitly exposed — the SPA runs on :4201 while the API runs on
+# :8000, so this is not a production-only concern. Without it the
+# download still succeeds and silently gets the wrong filename, which is
+# the same "works, but quietly wrong" shape the header above was added
+# for. docs/specs/16-operational-analytics.md slice 4.
+#
+# `ETag` is the same trap one endpoint further: `GET /trips/live/`
+# (docs/specs/20-live-operations.md slice 2) sets it so a client can
+# echo it back as `If-None-Match`, and without exposing it
+# `response.headers.get('etag')` reads `null` cross-origin — the poll
+# would "work" while silently never short-circuiting to a 304.
+CORS_EXPOSE_HEADERS = ["Content-Disposition", "ETag"]
 
 # --- Cache (throttle state, and anything else cache-backed later) ---
 # Redis-backed, not per-process LocMemCache: throttle counters must be
@@ -313,12 +413,40 @@ TICKET_SIGNING_ACTIVE_KID = config("TICKET_SIGNING_ACTIVE_KID", default="")
 TICKET_VALID_BEFORE_MINUTES = config("TICKET_VALID_BEFORE_MINUTES", default=1440, cast=int)
 TICKET_VALID_AFTER_MINUTES = config("TICKET_VALID_AFTER_MINUTES", default=240, cast=int)
 
+# docs/specs/16-operational-analytics.md. Over this many rows an export
+# is a 400 naming the cap, never a truncated file that looks complete.
+# Not a secret, so it carries a real default here — a bare no-default
+# config() call crashes CI, for the reason recorded further down this
+# file against PAYSTACK_SECRET_KEY.
+EXPORT_MAX_ROWS = config("EXPORT_MAX_ROWS", default=50_000, cast=int)
+
 # Gates apps.core.views.GenerateTripsView/ExpireSeatHoldsView — only
 # meaningful on config.settings.vercel, which has no Celery Beat process
 # to run these on a schedule instead. Safe empty default here for the
 # same reason TICKET_SIGNING_KEYS has one: keeps local/ci/every other
 # environment importable without ever needing this value.
 INTERNAL_TASK_SECRET = config("INTERNAL_TASK_SECRET", default="")
+
+# docs/specs/20-live-operations.md. At a 10-second ingest cadence one
+# vehicle produces ~8 600 rows a day, so retention is part of Slice 1,
+# not a follow-up — apps.telemetry.services.prune_positions, driven by
+# POST /internal/tasks/prune-telemetry/ the same way INTERNAL_TASK_SECRET
+# drives the other periodic sweeps above. Real defaults, not secrets, for
+# the same CI-importability reason as EXPORT_MAX_ROWS.
+TELEMETRY_RETENTION_DAYS = config("TELEMETRY_RETENTION_DAYS", default=30, cast=int)
+# A `recorded_at` further than this from server time is stored as sent
+# (never rejected — the device's clock is not this system's problem to
+# fix) but flagged in the ingest response and excluded from advancing
+# VehicleLiveState, so a badly-skewed device can't make the live map
+# jump.
+TELEMETRY_CLOCK_SKEW_HOURS = config("TELEMETRY_CLOCK_SKEW_HOURS", default=6, cast=int)
+# Server-controlled poll interval for /trips/live/ (spec's Slice 2) —
+# defined here now so both slices read the one setting.
+TELEMETRY_POLL_INTERVAL_SECONDS = config("TELEMETRY_POLL_INTERVAL_SECONDS", default=12, cast=int)
+# GET /activity/mine/ (spec 20 slice 4) — a passenger's own history
+# changes far less often than a vehicle's position, so this is wider
+# than TELEMETRY_POLL_INTERVAL_SECONDS rather than sharing it.
+ACTIVITY_POLL_INTERVAL_SECONDS = config("ACTIVITY_POLL_INTERVAL_SECONDS", default=30, cast=int)
 
 # --- Structured logging (JSON), request-ID propagation is added in apps.core
 # middleware; this is the minimal Phase 0 baseline. ---

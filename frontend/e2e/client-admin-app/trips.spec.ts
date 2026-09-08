@@ -55,23 +55,37 @@ async function createDriver(page: Page, name: string, licenseNumber: string): Pr
   await expect(page).toHaveURL(/\/drivers$/);
 }
 
-async function selectAndWaitForAssignment(page: Page, select: Locator, label: string): Promise<void> {
-  // A native selectOption() sets the DOM's selected option directly —
-  // it does not wait for the async PATCH-then-refetch round trip the
-  // change triggers (see trip-list.ts's onVehicleChange/onDriverChange:
-  // each assignment PATCH sends the row's *current* vehicle+driver
-  // together, so a second change fired before the first's refetch lands
-  // would race against stale data). Waiting for the PATCH response and
-  // its follow-up GET refetch here mirrors a real user who isn't faster
-  // than the network.
+/**
+ * Assigns a vehicle and driver through the row menu's drawer.
+ *
+ * They used to be two inline selects that PATCHed on change; docs/specs/14
+ * slice 3b made assignment one explicit action with an explicit save, so
+ * both fields go in one round trip and there is no race between them.
+ */
+async function assignThroughDrawer(
+  page: Page,
+  rowName: string,
+  vehicleLabel: string,
+  driverLabel: string
+): Promise<void> {
+  await page
+    .getByRole('row', { name: new RegExp(rowName) })
+    .getByRole('button', { name: new RegExp('^Actions for') })
+    .click();
+  await page.getByRole('menuitem', { name: 'Assign vehicle & driver' }).click();
+
+  const drawer = page.getByRole('dialog');
+  await expect(drawer).toBeVisible();
+  await drawer.getByLabel('Vehicle').selectOption({ label: vehicleLabel });
+  await drawer.getByLabel('Driver').selectOption({ label: driverLabel });
+
   const patchResponse = page.waitForResponse(
-    (response) => response.request().method() === 'PATCH' && response.url().includes('/api/v1/trips/')
+    (response) =>
+      response.request().method() === 'PATCH' && response.url().includes('/api/v1/trips/')
   );
-  await select.selectOption({ label });
+  await drawer.getByRole('button', { name: 'Save assignment' }).click();
   await patchResponse;
-  await page.waitForResponse(
-    (response) => response.request().method() === 'GET' && response.url().includes('/api/v1/trips/?')
-  );
+  await drawer.getByRole('button', { name: 'Close panel' }).click();
 }
 
 async function createManualTrip(
@@ -87,14 +101,17 @@ async function createManualTrip(
   await expect(page).toHaveURL(/\/trips$/);
 }
 
-// Scopes the list to a single Route via the filter bar. Trip's default
-// ordering is by service_date (not created_at), and this whole file's
-// own repeated runs accumulate trips across many service dates — without
-// this, a freshly created trip can land past page 1's 25-row window and
-// make an unfiltered row lookup flaky/fail outright. A real user with a
-// specific trip in mind would filter too, so this also reads naturally.
+/**
+ * Narrows the list to one test's own trip.
+ *
+ * Uses the search box rather than the Route dropdown: this dev database
+ * has accumulated dozens of `E2E Trip … Route` rows across runs, and the
+ * dropdown selects a route without bounding the *result* list, so the
+ * row under test routinely lands past page 1. Server-side search
+ * (spec 14 slice 3b) is what makes this deterministic.
+ */
 async function filterByRoute(page: Page, routeName: string): Promise<void> {
-  await page.getByLabel('Route', { exact: true }).selectOption({ label: routeName });
+  await page.getByLabel('Search trips').fill(routeName);
   await expect(page.getByRole('row', { name: new RegExp(routeName) }).first()).toBeVisible();
 }
 
@@ -139,6 +156,9 @@ test.describe('client-admin-app trips', () => {
     await createManualTrip(page, routeName, '2026-09-20');
 
     await page.goto('/trips');
+    // Search first, so the date filter is asserted against this test's
+    // own row rather than page 1 of every accumulated fixture trip.
+    await page.getByLabel('Search trips').fill(routeName);
     await page.getByLabel('Service date').fill('2026-09-20');
 
     const row = page.getByRole('row', { name: new RegExp(routeName) });
@@ -151,7 +171,7 @@ test.describe('client-admin-app trips', () => {
     expect(results.violations).toEqual([]);
   });
 
-  test('assigns a vehicle and driver inline from the list', async ({ page }) => {
+  test('assigns a vehicle and driver through the row drawer', async ({ page }) => {
     const suffix = uniqueSuffix();
     const routeName = `E2E Trip Assign Route ${suffix}`;
     const vehicleTypeName = `E2E Trip VT ${suffix}`;
@@ -168,19 +188,17 @@ test.describe('client-admin-app trips', () => {
     await createManualTrip(page, routeName, '2026-09-22');
     await filterByRoute(page, routeName);
 
+    // Nothing in the row itself writes any more.
     const row = page.getByRole('row', { name: new RegExp(routeName) });
-    await selectAndWaitForAssignment(page, row.getByLabel('Vehicle'), registration);
-    await selectAndWaitForAssignment(page, row.getByLabel('Driver'), driverName);
+    await expect(row.getByRole('combobox')).toHaveCount(0);
+
+    await assignThroughDrawer(page, routeName, registration, driverName);
 
     await page.reload();
     await filterByRoute(page, routeName);
     const reloadedRow = page.getByRole('row', { name: new RegExp(routeName) });
-    await expect(reloadedRow.getByLabel('Vehicle').locator('option:checked')).toHaveText(
-      registration
-    );
-    await expect(reloadedRow.getByLabel('Driver').locator('option:checked')).toHaveText(
-      driverName
-    );
+    await expect(reloadedRow.getByText(registration)).toBeVisible();
+    await expect(reloadedRow.getByText(driverName)).toBeVisible();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
@@ -199,7 +217,8 @@ test.describe('client-admin-app trips', () => {
     await filterByRoute(page, routeName);
 
     const row = page.getByRole('row', { name: new RegExp(routeName) });
-    await row.getByRole('button', { name: 'Change status' }).click();
+    await row.getByRole('button', { name: new RegExp('^Actions for') }).click();
+    await page.getByRole('menuitem', { name: 'Change status' }).click();
 
     let dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
@@ -212,14 +231,20 @@ test.describe('client-admin-app trips', () => {
     await expect(dialog).not.toBeVisible();
     await expect(row.getByText('In progress')).toBeVisible();
 
-    await row.getByRole('button', { name: 'Change status' }).click();
+    await row.getByRole('button', { name: new RegExp('^Actions for') }).click();
+    await page.getByRole('menuitem', { name: 'Change status' }).click();
     dialog = page.getByRole('dialog');
     await dialog.getByLabel('Complete trip').check();
     await dialog.getByRole('button', { name: 'Complete trip' }).click();
 
     await expect(dialog).not.toBeVisible();
     await expect(row.getByText('completed')).toBeVisible();
-    await expect(row.getByRole('button', { name: 'Change status' })).not.toBeVisible();
+
+    // A terminal trip has no legal next status, so the menu offers only
+    // assignment.
+    await row.getByRole('button', { name: new RegExp('^Actions for') }).click();
+    await expect(page.getByRole('menuitem', { name: 'Change status' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
   });
 
   test('cancelling a trip requires a reason', async ({ page }) => {
@@ -233,7 +258,8 @@ test.describe('client-admin-app trips', () => {
     await filterByRoute(page, routeName);
 
     const row = page.getByRole('row', { name: new RegExp(routeName) });
-    await row.getByRole('button', { name: 'Change status' }).click();
+    await row.getByRole('button', { name: new RegExp('^Actions for') }).click();
+    await page.getByRole('menuitem', { name: 'Change status' }).click();
 
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Cancel trip').check();
@@ -265,8 +291,8 @@ test.describe('client-admin-app trips', () => {
     await filterByRoute(page, routeName);
 
     const row = page.getByRole('row', { name: new RegExp(routeName) });
-    const changeStatusButton = row.getByRole('button', { name: 'Change status' });
-    await changeStatusButton.click();
+    await row.getByRole('button', { name: new RegExp('^Actions for') }).click();
+    await page.getByRole('menuitem', { name: 'Change status' }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();

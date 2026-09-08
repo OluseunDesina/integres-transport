@@ -9,7 +9,10 @@ import { Button } from './button';
   host: { class: 'block' },
   imports: [Button],
   template: `
-    <div class="flex items-center justify-between gap-4 text-sm text-slate-600">
+    <div
+      style="font-size: var(--ui-text-body)"
+      class="flex items-center justify-between gap-4 text-muted"
+    >
       <span>{{ rangeLabel() }}</span>
       <div class="flex gap-2">
         <ui-button

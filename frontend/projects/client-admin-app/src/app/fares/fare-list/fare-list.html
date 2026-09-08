@@ -1,7 +1,13 @@
 <div class="flex flex-col gap-6">
-  <div class="flex flex-wrap items-center justify-between gap-3">
-    <h1 class="text-lg font-semibold text-slate-900">Fares</h1>
-    <div class="flex items-center gap-3">
+  <ui-page-header
+    title="Fares"
+    [description]="
+      isPerSegment()
+        ? 'This business prices every stop pair separately. Open a route to edit its whole grid at once.'
+        : 'One flat fare per route, whatever the journey.'
+    "
+  >
+    <div actions class="flex items-center gap-3">
       @if (isPerSegment()) {
         <!-- Deliberately to the route list rather than a route picker
              here: a grid belongs to one route, and this screen only
@@ -11,12 +17,16 @@
              lookup exists to end. -->
         <a
           routerLink="/routes"
-          class="inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center rounded-md border border-control px-4 py-2 text-sm font-medium text-default hover:bg-surface-muted hover:text-strong"
           >Price by stop pair</a
         >
       }
       <ui-button *appHasPermission="'fares.manage'" (pressed)="goToNewFare()">New fare</ui-button>
     </div>
+  </ui-page-header>
+
+  <div class="flex justify-end">
+    <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
   </div>
 
   @if (isPerSegment()) {
@@ -29,35 +39,57 @@
       >
         <a
           routerLink="/routes"
-          class="inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center rounded-md border border-control px-4 py-2 text-sm font-medium text-default hover:bg-surface-muted hover:text-strong"
           >Price by stop pair</a
         >
       </ui-empty-state>
     } @else {
-      <ui-table [loading]="fareSegmentRuleStore.loading()">
+      <ui-table
+        label="Segment fares"
+        [stickyHeader]="true"
+        [loading]="fareSegmentRuleStore.loading()"
+      >
         <thead>
-          <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-            <th class="px-4 py-2">Route</th>
-            <th class="px-4 py-2">Segment</th>
-            <th class="px-4 py-2">Amount</th>
-            <th class="px-4 py-2">Effective</th>
+          <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+            <th class="py-2">Route</th>
+            <th class="hidden py-2 md:table-cell">Segment</th>
+            <!-- Not hidden at any width, unlike every other secondary
+                 column here. Two rules for one route differ *only* by
+                 class, so without this a Premium fare and an Any-class
+                 fare render as the same route at two prices with
+                 nothing on screen explaining why — which reads as
+                 duplicate data rather than as pricing. -->
+            <th class="py-2">Class</th>
+            <th class="py-2">Amount</th>
+            <th class="hidden py-2 md:table-cell">Effective</th>
           </tr>
         </thead>
         <tbody>
           @for (fare of fareSegmentRuleStore.items(); track fare.id) {
-            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-              <td class="px-4 py-2 font-medium text-slate-900">
-                {{ routeNames().get(fare.route) ?? fare.route }}
+            <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+              <td [class]="cellClass() + ' font-medium text-strong'">
+                {{ fare.route_name }}
+                <!-- The columns hidden below `md`, re-flowed. This screen
+                     has no row actions and so no detail drawer: every
+                     hidden column here is tier 2 and lands in this line,
+                     rather than being one tap away in a menu that does
+                     not exist. -->
+                <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                  {{ fare.from_stop_name }} → {{ fare.to_stop_name }} ·
+                  {{ fare.effective_from | date: 'short'
+                  }}{{ fare.effective_to ? ' – ' + (fare.effective_to | date: 'short') : '+' }}
+                </span>
               </td>
-              <td class="px-4 py-2">
-                {{ stopNames().get(fare.from_stop) ?? fare.from_stop }} →
-                {{ stopNames().get(fare.to_stop) ?? fare.to_stop }}
+              <td [class]="cellClass() + ' hidden md:table-cell'">
+                {{ fare.from_stop_name }} → {{ fare.to_stop_name }}
               </td>
-              <td class="px-4 py-2">{{ fare.amount }}</td>
-              <td class="px-4 py-2">
-                {{ fare.effective_from | date: 'short' }}{{
-                  fare.effective_to ? ' – ' + (fare.effective_to | date: 'short') : '+'
-                }}
+              <td [class]="cellClass()">
+                <ui-status-pill tone="neutral" [label]="tripClassLabel(fare.trip_class)" />
+              </td>
+              <td [class]="cellClass()">{{ fare.amount }}</td>
+              <td [class]="cellClass() + ' hidden md:table-cell'">
+                {{ fare.effective_from | date: 'short'
+                }}{{ fare.effective_to ? ' – ' + (fare.effective_to | date: 'short') : '+' }}
               </td>
             </tr>
           }
@@ -80,25 +112,39 @@
         <ui-button *appHasPermission="'fares.manage'" (pressed)="goToNewFare()">New fare</ui-button>
       </ui-empty-state>
     } @else {
-      <ui-table [loading]="fareRuleStore.loading()">
+      <ui-table
+        label="Route fares"
+        [stickyHeader]="true"
+        [loading]="fareRuleStore.loading()"
+      >
         <thead>
-          <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-            <th class="px-4 py-2">Route</th>
-            <th class="px-4 py-2">Amount</th>
-            <th class="px-4 py-2">Effective</th>
+          <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+            <th class="py-2">Route</th>
+            <!-- Always visible, for the same reason as the segment
+                 table above. -->
+            <th class="py-2">Class</th>
+            <th class="py-2">Amount</th>
+            <th class="hidden py-2 md:table-cell">Effective</th>
           </tr>
         </thead>
         <tbody>
           @for (fare of fareRuleStore.items(); track fare.id) {
-            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-              <td class="px-4 py-2 font-medium text-slate-900">
-                {{ routeNames().get(fare.route) ?? fare.route }}
+            <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+              <td [class]="cellClass() + ' font-medium text-strong'">
+                {{ fare.route_name }}
+                <!-- The Effective column, hidden below `md`. -->
+                <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                  {{ fare.effective_from | date: 'short'
+                  }}{{ fare.effective_to ? ' – ' + (fare.effective_to | date: 'short') : '+' }}
+                </span>
               </td>
-              <td class="px-4 py-2">{{ fare.amount }}</td>
-              <td class="px-4 py-2">
-                {{ fare.effective_from | date: 'short' }}{{
-                  fare.effective_to ? ' – ' + (fare.effective_to | date: 'short') : '+'
-                }}
+              <td [class]="cellClass()">
+                <ui-status-pill tone="neutral" [label]="tripClassLabel(fare.trip_class)" />
+              </td>
+              <td [class]="cellClass()">{{ fare.amount }}</td>
+              <td [class]="cellClass() + ' hidden md:table-cell'">
+                {{ fare.effective_from | date: 'short'
+                }}{{ fare.effective_to ? ' – ' + (fare.effective_to | date: 'short') : '+' }}
               </td>
             </tr>
           }

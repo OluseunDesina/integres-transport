@@ -9,26 +9,24 @@ import {
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, Select, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  FormSection,
+  PageHeader,
+  Select,
+  TextField,
+} from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
 import type { Route } from '../../shared/data/store/route.store';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
-
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
+import { applyServerErrors, clearServerErrors, fieldErrorMessage } from '../../shared/form-errors';
+import {
+  ANY_TRIP_CLASS,
+  TRIP_CLASS_OPTIONS_WITH_ANY,
+  type FareTripClass,
+} from '../../shared/trip-class';
 
 /**
  * Create-only — `PATCH .../{id}/` *supersedes* a fare (closes the old
@@ -44,20 +42,21 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-fare-form',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, RouterLink, Alert, Button, Select, TextField],
+  imports: [ReactiveFormsModule, RouterLink, Alert,
+    FormSection,
+    PageHeader, Button, Select, TextField],
   templateUrl: './fare-form.html',
 })
 export class FareForm implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
 
   protected readonly businessOptionsList = computed<SelectOption[]>(() =>
     this.selectedBusinessStore
       .items()
-      .map((business) => ({ value: business.id, label: business.name })),
+      .map((business) => ({ value: business.id, label: business.name }))
   );
   protected readonly routeOptionsList = signal<SelectOption[]>([]);
   protected readonly stopOptionsList = signal<SelectOption[]>([]);
@@ -76,11 +75,23 @@ export class FareForm implements OnInit {
   // and let a user create a record under a Business other than the one
   // every other screen was showing them. The control stays purely as
   // the value carrier for create.
+  protected readonly tripClassOptions = TRIP_CLASS_OPTIONS_WITH_ANY;
+
   protected readonly form = this.fb.nonNullable.group({
     business: ['', Validators.required],
     route: ['', Validators.required],
     from_stop: [''],
     to_stop: [''],
+    // Defaults to the wildcard, which is what every fare created before
+    // spec 15 effectively was — so a fare entered without thinking
+    // about classes still prices all of them, exactly as before.
+    //
+    // Deliberately **not** narrowed by the route's allow-list, unlike
+    // ScheduleForm and TripForm: that list constrains which classes may
+    // *run*, and pricing a class ahead of allowing it is a legitimate
+    // order to work in. Nothing breaks — an unused rule simply never
+    // resolves.
+    trip_class: [ANY_TRIP_CLASS as FareTripClass],
     amount: ['', Validators.required],
   });
 
@@ -117,14 +128,13 @@ export class FareForm implements OnInit {
     }
     const { data } = await this.api.GET('/api/v1/routes/', {
       params: { query: { limit: 100, offset: 0, business: businessId } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.routesForBusiness = data?.results ?? [];
     this.routeOptionsList.set(
       this.routesForBusiness.map((route) => ({
         value: route.id,
         label: route.name,
-      })),
+      }))
     );
   }
 
@@ -144,7 +154,7 @@ export class FareForm implements OnInit {
     this.stopOptionsList.set(
       [...route.stops]
         .sort((a, b) => a.sequence - b.sequence)
-        .map((stop) => ({ value: stop.id, label: stop.name })),
+        .map((stop) => ({ value: stop.id, label: stop.name }))
     );
   }
 
@@ -161,10 +171,8 @@ export class FareForm implements OnInit {
 
     this.submitting.set(true);
     this.errorMessage.set(null);
+    clearServerErrors(this.form);
     const values = this.form.getRawValue();
-    const authHeader = {
-      Authorization: `Bearer ${this.authStore.accessToken()}`,
-    };
 
     const { data, error } = perSegment
       ? await this.api.POST('/api/v1/fare-segment-rules/', {
@@ -173,27 +181,28 @@ export class FareForm implements OnInit {
             route: values.route,
             from_stop: values.from_stop,
             to_stop: values.to_stop,
+            trip_class: values.trip_class,
             amount: values.amount,
           },
-          headers: authHeader,
         })
       : await this.api.POST('/api/v1/fare-rules/', {
           body: {
             business: values.business,
             route: values.route,
+            trip_class: values.trip_class,
             amount: values.amount,
           },
-          headers: authHeader,
         });
 
     this.submitting.set(false);
 
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(
+        applyServerErrors(
+          this.form,
           error,
-          'Could not save this fare. Check your details and try again.',
-        ),
+          'Could not save this fare. Check your details and try again.'
+        )
       );
       return;
     }
@@ -201,11 +210,12 @@ export class FareForm implements OnInit {
     await this.router.navigate(['/fares']);
   }
 
-  protected fieldError(field: 'business' | 'route' | 'amount'): string | null {
-    const control = this.form.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+  /** Every field, not just those with a validator: any of them can
+   * come back rejected by the server, and `fieldErrorMessage`
+   * surfaces that the same way it surfaces a client-side failure. */
+  protected fieldError(
+    field: 'business' | 'route' | 'amount' | 'from_stop' | 'to_stop' | 'trip_class'
+  ): string | null {
+    return fieldErrorMessage(this.form.controls[field]);
   }
 }

@@ -95,7 +95,7 @@ describe('StaffInvite', () => {
     await fixture.componentInstance['onSubmit']();
     fixture.detectChanges();
 
-    expect(fixture.componentInstance['emailFieldError']()).toBe(
+    expect(fixture.componentInstance['fieldError']('email')).toBe(
       'This person is already a member of your team.'
     );
     expect(fixture.componentInstance['invitedEmail']()).toBeNull();
@@ -111,7 +111,11 @@ describe('StaffInvite', () => {
     await fixture.componentInstance['onSubmit']();
     fixture.detectChanges();
 
-    expect(fixture.componentInstance['roleFieldError']()).toBe('Unknown role.');
+    expect(fixture.componentInstance['fieldError']('role')).toBe('Unknown role.');
+    // Rendered, not merely computed: ui-select shows nothing unless the
+    // parent binds both `invalid` and `errorMessage`.
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Unknown role.');
   });
 
   it('resets the form and clears the confirmation on "Invite another"', async () => {

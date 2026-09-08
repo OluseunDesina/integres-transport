@@ -13,6 +13,7 @@ function makeVehicleType(overrides: Partial<VehicleType> = {}): VehicleType {
     business: 'biz-1',
     name: '33-seater coaster',
     capacity: 33,
+    trip_class: 'standard',
     is_active: true,
     created_at: '2026-08-06T00:00:00Z',
     ...overrides,
@@ -86,6 +87,61 @@ describe('VehicleTypeForm', () => {
       expect(fixture.nativeElement.querySelector('h1').textContent).toContain('New vehicle type');
     });
 
+    // docs/specs/15-trip-classes.md. Asserted on *rendered* output, not
+    // just on the request: docs/self-check-2026-08-26-spec11.md records
+    // that ui-select shows nothing at all unless the parent binds both
+    // [invalid] and [errorMessage], and a form that binds neither
+    // passes a "the POST didn't happen" test while showing the operator
+    // no reason why.
+    describe('service class', () => {
+      it('renders every class as an option', () => {
+        // The control name is on the `ui-select` host; the real
+        // `<select>` is inside it.
+        const select: HTMLSelectElement = fixture.nativeElement.querySelector(
+          'ui-select[formcontrolname="trip_class"] select'
+        );
+        const labels = Array.from(select.options).map((option) => option.textContent?.trim());
+
+        expect(labels).toEqual(['Premium', 'Exclusive', 'Standard', 'Mini']);
+      });
+
+      it('defaults to standard, the class every existing vehicle type backfilled to', () => {
+        expect(fixture.componentInstance['form'].controls.trip_class.value).toBe('standard');
+      });
+
+      it('renders a validation message when the class is cleared and submitted', async () => {
+        fixture.componentInstance['form'].controls.trip_class.setValue(
+          '' as unknown as 'standard'
+        );
+
+        await fixture.componentInstance['onSubmit']();
+        fixture.detectChanges();
+
+        expect(apiClient.POST).not.toHaveBeenCalled();
+        expect(fixture.nativeElement.textContent).toContain('This field is required.');
+      });
+
+      it('sends the chosen class when creating', async () => {
+        apiClient.POST.and.resolveTo({ data: makeVehicleType() });
+        spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
+        fixture.componentInstance['form'].patchValue({
+          business: 'biz-1',
+          name: 'Executive coach',
+          capacity: 20,
+          trip_class: 'premium',
+        });
+
+        await fixture.componentInstance['onSubmit']();
+
+        expect(apiClient.POST).toHaveBeenCalledWith(
+          '/api/v1/vehicle-types/',
+          jasmine.objectContaining({
+            body: jasmine.objectContaining({ trip_class: 'premium' }),
+          })
+        );
+      });
+    });
+
     it('does not submit an invalid (missing business/name) form', async () => {
       fixture.componentInstance['form'].patchValue({ business: '', name: '' });
       await fixture.componentInstance['onSubmit']();
@@ -101,6 +157,7 @@ describe('VehicleTypeForm', () => {
         business: 'biz-1',
         name: '33-seater coaster',
         capacity: 33,
+        trip_class: 'standard',
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -125,6 +182,7 @@ describe('VehicleTypeForm', () => {
         business: 'biz-1',
         name: 'X',
         capacity: 1,
+        trip_class: 'standard',
       });
 
       await fixture.componentInstance['onSubmit']();

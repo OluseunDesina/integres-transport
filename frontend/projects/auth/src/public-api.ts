@@ -5,6 +5,7 @@
 export * from './lib/auth-user';
 export * from './lib/auth-audience.token';
 export * from './lib/auth-store';
+export * from './lib/auth.middleware';
 export * from './lib/auth-api.service';
 export * from './lib/permissions.service';
 export * from './lib/permission.guard';

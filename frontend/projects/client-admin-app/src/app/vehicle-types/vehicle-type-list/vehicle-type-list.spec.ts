@@ -1,3 +1,4 @@
+import { expectColumnVisibilityParity } from '@shared-ui';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -101,20 +102,34 @@ describe('VehicleTypeList', () => {
       'r',
       makeUser({
         permissions: ['client-admin:access', 'fleet.view', 'seating.view'],
-      }),
+      })
     );
 
     fixture = TestBed.createComponent(VehicleTypeList);
     fixture.detectChanges();
   });
 
-  afterEach(() => localStorage.clear());
+  function openRowMenu(): HTMLButtonElement[] {
+    const trigger = fixture.debugElement
+      .queryAll(By.css('tbody button'))
+      .find((el) =>
+        (el.nativeElement as HTMLElement).getAttribute('aria-label')?.startsWith('Actions for')
+      )!;
+    (trigger.nativeElement as HTMLButtonElement).click();
+    fixture.detectChanges();
+    return Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+  }
+
+  afterEach(() => {
+    localStorage.clear();
+    fixture.destroy();
+  });
 
   it('scopes the query to the active Business on init', () => {
     expect(store.updateQuery).toHaveBeenCalledWith({ business: 'biz-1' });
   });
 
-  it('shows the empty state when the store has no rows', () => {
+  it('shows the empty state when the store has no rows and nothing is filtered', () => {
     store.isEmpty.set(true);
     fixture.detectChanges();
 
@@ -130,25 +145,33 @@ describe('VehicleTypeList', () => {
     expect(rows[0].nativeElement.textContent).toContain('33-seater coaster');
   });
 
-  it('shows a "Seat map" link with seating.view permission', () => {
+  // Row actions moved from bare text links into one ui-action-menu per
+  // row — docs/specs/14 slice 3a.
+
+  it('offers "Seat map" in the row menu with seating.view permission', () => {
     store.items.set([makeVehicleType()]);
     fixture.detectChanges();
 
-    const links = fixture.debugElement
-      .queryAll(By.css('a'))
-      .map((el) => (el.nativeElement.textContent as string).trim());
-    expect(links).toContain('Seat map');
+    expect(openRowMenu().map((el) => el.textContent?.trim())).toContain('Seat map');
   });
 
-  it('hides the "Seat map" link without seating.view permission', () => {
+  it('omits "Seat map" without seating.view permission', () => {
+    // Reading a vehicle type's seat layout is not a fleet edit, so it
+    // carries its own codename — the same split the two old row links
+    // already had.
     authStore.setSession('a', 'r', makeUser({ permissions: ['client-admin:access'] }));
     store.items.set([makeVehicleType()]);
     fixture.detectChanges();
 
-    const links = fixture.debugElement
-      .queryAll(By.css('a'))
-      .map((el) => (el.nativeElement.textContent as string).trim());
-    expect(links).not.toContain('Seat map');
+    expect(openRowMenu().map((el) => el.textContent?.trim())).not.toContain('Seat map');
+  });
+
+  it('renders status as a read-only pill, with no switch in the table', () => {
+    store.items.set([makeVehicleType()]);
+    fixture.detectChanges();
+
+    expect(fixture.debugElement.query(By.css('tbody [role="switch"]'))).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Active');
   });
 
   it('hides the "New vehicle type" button without fleet.manage permission', () => {
@@ -164,7 +187,7 @@ describe('VehicleTypeList', () => {
       'r',
       makeUser({
         permissions: ['client-admin:access', 'fleet.view', 'fleet.manage'],
-      }),
+      })
     );
     fixture.detectChanges();
 
@@ -180,7 +203,7 @@ describe('VehicleTypeList', () => {
       'r',
       makeUser({
         permissions: ['client-admin:access', 'fleet.view', 'fleet.manage'],
-      }),
+      })
     );
     fixture.detectChanges();
     const router = TestBed.inject(Router);
@@ -193,5 +216,20 @@ describe('VehicleTypeList', () => {
     await fixture.whenStable();
 
     expect(navigateSpy).toHaveBeenCalledWith(['/vehicle-types/new']);
+  });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makeVehicleType()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'vehicle-type-list rows');
+  });
+
+  it('keeps the skeleton row aligned with the header too', () => {
+    store.loading.set(true);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'vehicle-type-list skeleton');
   });
 });

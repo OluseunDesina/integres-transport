@@ -1,0 +1,54 @@
+<div class="flex flex-col gap-4">
+  <ui-page-header
+    title="Track your trip"
+    description="See your vehicle's position and how far it has to go."
+  />
+
+  @if (store.pollError(); as message) {
+    <ui-alert>{{ message }} Showing the last known position.</ui-alert>
+  }
+
+  @if (store.notFound()) {
+    <ui-empty-state
+      title="Trip not found"
+      description="This link may be wrong, or you may not hold a ticket for this trip."
+    />
+  } @else if (store.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (store.loading()) {
+    <div class="flex flex-col gap-4" aria-busy="true">
+      <ui-skeleton [lines]="2" />
+      <ui-skeleton variant="block" height="16rem" />
+    </div>
+  } @else if (store.data(); as envelope) {
+    @if (envelope.position?.source === 'simulated') {
+      <ui-alert variant="warning">
+        This position is simulated, not a real device — do not rely on it.
+      </ui-alert>
+    }
+
+    <div class="flex flex-col gap-2">
+      <h2 class="text-lg font-semibold text-strong">{{ envelope.trip.route }}</h2>
+      <p class="text-sm text-muted">
+        {{ envelope.trip.vehicle ?? notRecorded }} · {{ stalenessLabel(envelope) }}
+      </p>
+    </div>
+
+    <ui-map
+      title="Your vehicle's position"
+      [markers]="mapMarkers()"
+      height="16rem"
+      emptyMessage="No signal yet — this trip hasn't started reporting a position."
+    />
+
+    @if (envelope.progress; as progress) {
+      <div class="rounded-md border border-border p-4 text-sm">
+        <p class="text-default">
+          {{ progress.stops_completed }} / {{ progress.stops_total }} stops —
+          {{ progress.last_stop }} → {{ progress.next_stop ?? 'Terminus' }}
+        </p>
+        <p class="mt-1 text-muted">ETA to next stop: {{ etaLabel(envelope) }}</p>
+      </div>
+    }
+  }
+</div>

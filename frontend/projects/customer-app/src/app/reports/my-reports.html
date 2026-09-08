@@ -1,0 +1,90 @@
+<div class="flex flex-col gap-6">
+  <ui-page-header
+    title="My reports"
+    description="Problems you have reported, and what has happened to them."
+  >
+    <ui-button actions (pressed)="reportIssue()">Report an issue</ui-button>
+  </ui-page-header>
+
+  @if (filedReference(); as reference) {
+    <ui-alert variant="success">
+      Thanks — your report is with the operator. Its reference is {{ reference }}.
+    </ui-alert>
+  }
+
+  @if (store.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No reports yet"
+      description="If a card reader, a stop announcement or anything else goes wrong on a trip, tell the operator here."
+    >
+      <ui-button (pressed)="reportIssue()">Report an issue</ui-button>
+    </ui-empty-state>
+  } @else {
+    <ui-table label="My reports" [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-border text-xs uppercase tracking-wide text-muted">
+          <th class="py-2">What</th>
+          <th class="hidden py-2 md:table-cell">Reference</th>
+          <th class="hidden py-2 md:table-cell">What you said</th>
+          <th class="py-2">Status</th>
+          <th class="hidden py-2 md:table-cell">Reported</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (report of store.items(); track report.id) {
+          <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+            <td class="py-2 font-medium text-strong">
+              {{ categoryFor(report) }}
+              <!-- The columns hidden below `md`, re-flowed — and the
+                   passenger's own words with them, which is what they
+                   came back to recognise the row by. -->
+              <span class="mt-0.5 block text-sm font-normal text-muted md:hidden">
+                {{ summaryFor(report) }}
+              </span>
+              <span
+                class="mt-0.5 block text-sm font-normal text-muted [overflow-wrap:anywhere] md:hidden"
+              >
+                {{ descriptionFor(report) }}
+              </span>
+            </td>
+            <!-- `whitespace-nowrap`: a reference is one token, and the
+                 browser broke "INC-HXEWPC" after the hyphen into two
+                 lines. Half an identifier on each line is not something
+                 anyone can read back over a phone. -->
+            <td class="hidden py-2 whitespace-nowrap md:table-cell">{{ report.reference }}</td>
+            <td class="hidden max-w-xs py-2 md:table-cell">
+              <span class="block [overflow-wrap:anywhere]">{{ descriptionFor(report) }}</span>
+            </td>
+            <td class="py-2">
+              <ui-status-pill [tone]="statusToneFor(report)" [label]="statusLabelFor(report)" />
+              <!-- Beside the pill rather than in a sixth column: it is
+                   the one thing a passenger actually wants from a
+                   resolved row, and it is blank on most of them, so a
+                   column of its own would be mostly empty at every
+                   width. -->
+              @if (report.resolved_at) {
+                <span class="mt-0.5 block text-xs text-muted">
+                  {{ report.resolved_at | date: 'd MMM y' }}
+                </span>
+              }
+            </td>
+            <!-- `whitespace-nowrap` for the same reason as the reference
+                 above: "6 Sep 2026" was breaking to "6 Sep / 2026" in a
+                 column with room to spare, once the description column
+                 took its share of the width. -->
+            <td class="hidden py-2 whitespace-nowrap md:table-cell">
+              {{ report.created_at | date: 'd MMM y' }}
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator
+      [total]="store.total()"
+      [page]="store.page()"
+      (pageChange)="onPageChange($event)"
+    />
+  }
+</div>

@@ -12,6 +12,13 @@ checks `user.role.permissions`, seeded via
 `apps.identity.services.create_default_roles`. A factory function, not
 one class per codename, so call sites read
 `permission_classes = [HasPermission("business.manage")]`.
+
+`HasAnyPermission(*codenames)` is the same check widened to a set, for
+the one endpoint two different capabilities legitimately need — see
+`apps.identity.views.PassengerLookupView`. Deliberately **not** the
+default shape: an endpoint that accepts several codenames is an endpoint
+whose authority is hard to reason about, so it has to be argued for
+each time rather than reached for.
 """
 
 from rest_framework.permissions import BasePermission
@@ -43,3 +50,23 @@ def HasPermission(codename: str) -> type[BasePermission]:
             return role.permissions.filter(codename=codename).exists()
 
     return _HasPermission
+
+
+def HasAnyPermission(*codenames: str) -> type[BasePermission]:
+    """Passes if the caller's Role holds **any** of `codenames`.
+
+    One query regardless of how many codenames are named — `__in`, not a
+    loop of `.exists()` calls.
+    """
+
+    class _HasAnyPermission(BasePermission):
+        def has_permission(self, request: Request, view: APIView) -> bool:
+            user = request.user
+            if not (user and user.is_authenticated and getattr(user, "is_client_staff", False)):
+                return False
+            role = getattr(user, "role", None)
+            if role is None:
+                return False
+            return role.permissions.filter(codename__in=codenames).exists()
+
+    return _HasAnyPermission

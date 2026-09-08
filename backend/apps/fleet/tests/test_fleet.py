@@ -363,3 +363,199 @@ def test_compliance_warnings_for_driver_reports_expired_license() -> None:
     assert compliance_warnings_for(driver) == [
         f"Driver's license expired on {yesterday.isoformat()}"
     ]
+
+
+# --- ?search= / ?is_active= query filtering ---------------------------
+# docs/specs/14-design-system-and-ui-rebuild.md slice 3a.
+
+
+def test_vehicle_list_search_matches_registration_case_insensitively() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _business(client)
+    vehicle_type = _vehicle_type(client, business=business)
+    match = _vehicle(
+        client, business=business, vehicle_type=vehicle_type, registration_number="LAG-231-KJA"
+    )
+    _vehicle(
+        client, business=business, vehicle_type=vehicle_type, registration_number="ABJ-887-XYZ"
+    )
+
+    response = _auth_client(staff).get(reverse("vehicle-list-create"), {"search": "lag-231"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+def test_vehicle_list_search_with_no_match_returns_empty_not_everything() -> None:
+    # A filter silently falling back to unfiltered looks exactly like a
+    # working search that matched everything.
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _business(client)
+    vehicle_type = _vehicle_type(client, business=business)
+    _vehicle(
+        client, business=business, vehicle_type=vehicle_type, registration_number="LAG-231-KJA"
+    )
+
+    response = _auth_client(staff).get(reverse("vehicle-list-create"), {"search": "nope"})
+
+    assert response.data["count"] == 0
+
+
+def test_vehicle_list_search_never_reaches_another_clients_rows() -> None:
+    client_a = ClientFactory()
+    client_b = ClientFactory()
+    staff_a = ClientStaffUserFactory(client=client_a)
+    business_b = _business(client_b)
+    vehicle_type_b = _vehicle_type(client_b, business=business_b)
+    _vehicle(
+        client_b,
+        business=business_b,
+        vehicle_type=vehicle_type_b,
+        registration_number="LAG-231-KJA",
+    )
+
+    response = _auth_client(staff_a).get(reverse("vehicle-list-create"), {"search": "LAG"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 0
+
+
+def test_vehicle_list_filters_by_is_active() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _business(client)
+    vehicle_type = _vehicle_type(client, business=business)
+    active = _vehicle(
+        client, business=business, vehicle_type=vehicle_type, is_active=True
+    )
+    inactive = _vehicle(
+        client, business=business, vehicle_type=vehicle_type, is_active=False
+    )
+
+    api = _auth_client(staff)
+    actives = api.get(reverse("vehicle-list-create"), {"is_active": "true"})
+    inactives = api.get(reverse("vehicle-list-create"), {"is_active": "false"})
+
+    assert [row["id"] for row in actives.data["results"]] == [str(active.id)]
+    assert [row["id"] for row in inactives.data["results"]] == [str(inactive.id)]
+
+
+def test_vehicle_list_without_is_active_returns_both() -> None:
+    # The regression that mattered: DRF substitutes `False` for a missing
+    # BooleanField when the data looks like an HTML form, and a QueryDict
+    # does — so every unfiltered list would have returned only inactive
+    # rows. See _apply_list_query's own note.
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _business(client)
+    vehicle_type = _vehicle_type(client, business=business)
+    _vehicle(client, business=business, vehicle_type=vehicle_type, is_active=True)
+    _vehicle(client, business=business, vehicle_type=vehicle_type, is_active=False)
+
+    response = _auth_client(staff).get(reverse("vehicle-list-create"))
+
+    assert response.data["count"] == 2
+
+
+def test_driver_list_search_matches_name_phone_or_licence() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _business(client)
+    by_name = _driver(client, business=business, name="Ada Okafor", license_number="D-100")
+    by_licence = _driver(client, business=business, name="Bola Ade", license_number="ADA-77")
+    _driver(client, business=business, name="Chidi Eze", license_number="D-300")
+
+    response = _auth_client(staff).get(reverse("driver-list-create"), {"search": "ada"})
+
+    assert {row["id"] for row in response.data["results"]} == {
+        str(by_name.id),
+        str(by_licence.id),
+    }
+
+
+def test_vehicle_type_list_search_matches_name() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _business(client)
+    match = _vehicle_type(client, business=business, name="Coaster 33")
+    _vehicle_type(client, business=business, name="Minibus 14")
+
+    response = _auth_client(staff).get(reverse("vehicle-type-list-create"), {"search": "coaster"})
+
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+# --- Trip class (docs/specs/15-trip-classes.md) ---------------------------
+
+
+def test_a_vehicle_type_defaults_to_standard_class() -> None:
+    """The class every pre-existing VehicleType backfilled to — a drift
+    here silently changes which Trips an operator's whole fleet can be
+    assigned to."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _business(client)
+
+    response = _auth_client(staff).post(
+        reverse("vehicle-type-list-create"),
+        {"business": str(business.id), "name": "33-seater coaster", "capacity": 33},
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["trip_class"] == "standard"
+
+
+def test_a_vehicle_type_can_be_created_as_premium() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _business(client)
+
+    response = _auth_client(staff).post(
+        reverse("vehicle-type-list-create"),
+        {
+            "business": str(business.id),
+            "name": "Executive coach",
+            "capacity": 20,
+            "trip_class": "premium",
+        },
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    with tenant_context(str(client.id)):
+        vehicle_type = VehicleType.objects.get(pk=response.data["id"])
+    assert vehicle_type.trip_class == "premium"
+
+
+def test_a_vehicle_types_class_is_patchable() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        vehicle_type = VehicleTypeFactory(client=client)
+
+    response = _auth_client(staff).patch(
+        reverse("vehicle-type-update", kwargs={"pk": str(vehicle_type.id)}),
+        {"trip_class": "mini"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["trip_class"] == "mini"
+
+
+def test_an_unknown_vehicle_type_class_is_rejected() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _business(client)
+
+    response = _auth_client(staff).post(
+        reverse("vehicle-type-list-create"),
+        {
+            "business": str(business.id),
+            "name": "Sleeper",
+            "capacity": 20,
+            "trip_class": "sleeper",
+        },
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST

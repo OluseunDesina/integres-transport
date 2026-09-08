@@ -1,14 +1,18 @@
+import datetime
+
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from apps.businesses.models import Business, KybDocument
+from apps.businesses.models import Business, Director, KybDocument
 from apps.businesses.services import submit_kyb_document
 from apps.businesses.tests.factories import BusinessFactory
 from apps.clients.tests.factories import ClientFactory
 from apps.core.models import AuditLog
+from apps.core.rls import platform_staff_bypass
 from apps.core.tests.tenancy import tenant_context
 from apps.identity.models import User
 from apps.identity.serializers import (
@@ -66,6 +70,94 @@ def test_queue_query_count_does_not_scale_with_business_count(
     assert len(response.data["results"]) == 5
 
 
+def test_queue_is_ordered_oldest_submission_first() -> None:
+    """FIFO: the business waiting longest is reviewed first.
+
+    Ordering is by `kyb_submitted_at`, not by `Business.Meta.ordering`'s
+    inherited `-created_at` — a business registered long ago but
+    submitted today used to sink below everything created after it,
+    however long it had actually been waiting. This asserts the two
+    facts are distinguishable by creating the rows in one order and
+    submitting them in the reverse one.
+    """
+    platform_staff = PlatformStaffUserFactory()
+    first_created = _submitted_business_with_document()
+    second_created = _submitted_business_with_document()
+
+    # Second-created submits first, so creation order and submission
+    # order disagree — the only arrangement that can tell them apart.
+    with platform_staff_bypass():
+        second_created.kyb_submitted_at = timezone.now() - datetime.timedelta(days=3)
+        second_created.save(update_fields=["kyb_submitted_at"])
+        first_created.kyb_submitted_at = timezone.now()
+        first_created.save(update_fields=["kyb_submitted_at"])
+
+    response = _auth_client(platform_staff, platform_staff=True).get(reverse("kyb-queue-list"))
+
+    assert response.status_code == status.HTTP_200_OK
+    ids = [row["id"] for row in response.data["results"]]
+    assert ids == [str(second_created.id), str(first_created.id)]
+
+
+def test_queue_embeds_directors_so_a_reviewer_sees_who_they_are_approving() -> None:
+    """docs/specs/11-kyb-directors.md — before this, director identity
+    was only inferable from an ID document's filename."""
+    business = _submitted_business_with_document()
+    with tenant_context(str(business.client_id)):
+        Director.objects.create(
+            client=business.client,
+            business=business,
+            full_name="Ada Okafor",
+            id_type="nin",
+        )
+        # Soft-removed directors are included deliberately: one may still
+        # be attached to a document in this packet, and hiding them would
+        # leave a reviewer looking at an ID whose owner had vanished.
+        Director.objects.create(
+            client=business.client,
+            business=business,
+            full_name="Bola Adeyemi",
+            id_type="passport",
+            is_active=False,
+        )
+    platform_staff = PlatformStaffUserFactory()
+
+    response = _auth_client(platform_staff, platform_staff=True).get(
+        reverse("kyb-queue-list")
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    row = next(r for r in response.data["results"] if r["id"] == str(business.id))
+    assert [d["full_name"] for d in row["directors"]] == ["Ada Okafor", "Bola Adeyemi"]
+
+
+def test_queue_query_count_does_not_scale_with_director_count(
+    django_assert_max_num_queries,
+) -> None:
+    """The sibling test above this one uses businesses with no directors,
+    so it cannot catch a per-row director lookup — this one can. Same
+    batching requirement `get_documents` already had."""
+    platform_staff = PlatformStaffUserFactory()
+    for _ in range(5):
+        business = _submitted_business_with_document()
+        with tenant_context(str(business.client_id)):
+            for name in ("Ada Okafor", "Bola Adeyemi", "Chidi Nwosu"):
+                Director.objects.create(
+                    client=business.client,
+                    business=business,
+                    full_name=name,
+                    id_type="nin",
+                )
+
+    with django_assert_max_num_queries(15):
+        response = _auth_client(platform_staff, platform_staff=True).get(
+            reverse("kyb-queue-list")
+        )
+    assert response.status_code == status.HTTP_200_OK
+    assert len(response.data["results"]) == 5
+    assert all(len(row["directors"]) == 3 for row in response.data["results"])
+
+
 def test_queue_lists_only_submitted_businesses_with_client_context_and_documents() -> None:
     submitted = _submitted_business_with_document()
     with tenant_context(None, is_platform_staff=True):
@@ -115,6 +207,15 @@ def test_decide_approve_sets_status_and_is_audit_logged() -> None:
     entry = AuditLog.objects.get(action="business.kyb_decided")
     assert entry.metadata["decision"] == "approve"
 
+    # The document itself never advanced past `pending` on its own — a
+    # decision on the business is a decision on the bundle that earned
+    # it. Approved businesses used to render every document as pending.
+    with tenant_context(None, is_platform_staff=True):
+        document = KybDocument.all_objects.get(business=business)
+    assert document.status == KybDocument.Status.APPROVED
+    assert document.reviewed_by_id == platform_staff.id
+    assert document.reviewed_at is not None
+
 
 def test_decide_reject_requires_a_reason() -> None:
     business = _submitted_business_with_document()
@@ -141,6 +242,10 @@ def test_full_create_reject_resubmit_reapprove_flow() -> None:
     with tenant_context(None, is_platform_staff=True):
         business.refresh_from_db()
     assert business.kyb_status == Business.KybStatus.REJECTED
+    with tenant_context(None, is_platform_staff=True):
+        rejected_document = KybDocument.all_objects.get(business=business)
+    assert rejected_document.status == KybDocument.Status.REJECTED
+    assert rejected_document.rejection_reason == "Missing tax certificate"
 
     staff = User.objects.get(client=business.client, is_client_staff=True)
     upload = SimpleUploadedFile("tax.pdf", b"%PDF-1.4 fake", content_type="application/pdf")
@@ -162,3 +267,13 @@ def test_full_create_reject_resubmit_reapprove_flow() -> None:
         business.refresh_from_db()
     assert business.kyb_status == Business.KybStatus.APPROVED
     assert business.kyb_rejection_reason == ""
+
+    # The first document was decided at the rejection — a later approval
+    # must not silently relabel history onto it. Only the document
+    # submitted afterwards belongs to this approval.
+    with tenant_context(None, is_platform_staff=True):
+        documents = {
+            d.document_type: d for d in KybDocument.all_objects.filter(business=business)
+        }
+    assert documents["certificate_of_incorporation"].status == KybDocument.Status.REJECTED
+    assert documents["tax_certificate"].status == KybDocument.Status.APPROVED

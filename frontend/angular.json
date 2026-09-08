@@ -35,6 +35,9 @@
             ],
             "styles": [
               "projects/customer-app/src/styles.css"
+            ],
+            "allowedCommonJsDependencies": [
+              "leaflet"
             ]
           },
           "configurations": {
@@ -165,6 +168,9 @@
             ],
             "styles": [
               "projects/client-admin-app/src/styles.css"
+            ],
+            "allowedCommonJsDependencies": [
+              "leaflet"
             ]
           },
           "configurations": {

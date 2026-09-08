@@ -9,6 +9,7 @@ that silently empties for platform staff.
 """
 
 import uuid
+from decimal import Decimal
 
 from django.db import models
 from django.db.models import Q
@@ -61,7 +62,16 @@ class PaymentIntent(BaseModel):
     only the `Business` whose wallet is being funded. `business` itself
     stays set for both (denormalized from `booking.business` or equal
     to `wallet_business`) — every existing read path already filters/
-    groups by it."""
+    groups by it.
+
+    `wallet_component_amount` (blended wallet + Paystack booking
+    payment) stays `0` for every other shape — `amount` is what
+    Paystack actually processes for this intent (or the full booking
+    total for a wallet-only payment); `wallet_component_amount` is the
+    extra amount `apps.payments.services.initiate_payment_with_wallet`
+    intends to debit from the wallet at settlement, on top of `amount`.
+    Explicit rather than inferred, matching `intent_type`'s own role in
+    this model."""
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
@@ -85,11 +95,31 @@ class PaymentIntent(BaseModel):
     business = models.ForeignKey(Business, on_delete=models.PROTECT, related_name="+")
     passenger = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+")
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    wallet_component_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0")
+    )
     currency = models.CharField(max_length=8)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING)
     psp_provider = models.CharField(max_length=32, default="paystack")
     psp_reference = models.CharField(max_length=255, unique=True)
     psp_authorization_url = models.CharField(max_length=500, blank=True)
+    # docs/specs/16-operational-analytics.md slice 1. The payment method
+    # Paystack actually used — card / bank / ussd / bank_transfer /
+    # mobile_money / qr / eft, and whatever they add next.
+    #
+    # Free text, deliberately **not** `choices`: this is a value another
+    # company controls, and a ChoiceField that rejected an unrecognised
+    # one would drop the very data this field exists to capture.
+    # Normalising the raw strings into reporting buckets belongs to the
+    # breakdown that reads them, not to storage.
+    #
+    # Blank means "not captured" — every row predating this spec, and
+    # every intent that never succeeded. Reported as `unknown`, never
+    # guessed. Note too that a fully wallet-paid booking has no PSP leg
+    # at all, so a `GROUP BY channel` over this column alone would
+    # under-report wallet spend to zero; wallet is sourced from the
+    # ledger instead.
+    channel = models.CharField(max_length=32, blank=True, default="")
     succeeded_at = models.DateTimeField(null=True, blank=True)
     failed_at = models.DateTimeField(null=True, blank=True)
     journal_entry = models.OneToOneField(
@@ -99,6 +129,14 @@ class PaymentIntent(BaseModel):
 
     class Meta:
         ordering = ["-created_at"]
+        # docs/specs/16-operational-analytics.md slice 1 — composites
+        # matched to that spec's documented filter set. `business` alone
+        # is already indexed as an FK.
+        indexes = [
+            models.Index(fields=["business", "created_at"], name="paymentintent_biz_created"),
+            models.Index(fields=["business", "status"], name="paymentintent_biz_status"),
+            models.Index(fields=["business", "channel"], name="paymentintent_biz_channel"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["booking"],

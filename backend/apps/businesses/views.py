@@ -1,6 +1,6 @@
 from django.db.models import QuerySet
 from django.shortcuts import get_object_or_404
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import generics
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import BasePermission
@@ -10,16 +10,24 @@ from rest_framework.response import Response
 from apps.core.permissions import HasPermission, IsPlatformStaff
 from apps.identity.models import User
 
-from .models import Business
+from .models import Business, Director, KybDocument
 from .serializers import (
     BusinessKybQueueSerializer,
+    BusinessListQuerySerializer,
     BusinessSeatHoldSerializer,
     BusinessSerializer,
     BusinessSuperAdminSerializer,
+    DirectorSerializer,
     KybDecisionSerializer,
     KybDocumentSerializer,
 )
-from .services import decide_business_kyb, submit_kyb_document, update_business_seat_hold_minutes
+from .services import (
+    create_director,
+    decide_business_kyb,
+    submit_kyb_document,
+    update_business_seat_hold_minutes,
+    update_director,
+)
 
 
 def _own_businesses() -> QuerySet[Business]:
@@ -32,6 +40,16 @@ def _own_businesses() -> QuerySet[Business]:
     return Business.objects.all()
 
 
+_OWN_BUSINESS_SEARCH_QUERY_PARAM = OpenApiParameter(
+    "search",
+    str,
+    OpenApiParameter.QUERY,
+    required=False,
+    description="Case-insensitive substring match on the business name.",
+)
+
+
+@extend_schema_view(get=extend_schema(parameters=[_OWN_BUSINESS_SEARCH_QUERY_PARAM]))
 class BusinessListCreateView(generics.ListCreateAPIView[Business]):
     # §4 gates GET (client.view) and POST (business.manage) differently
     # on the same URL — ListCreateAPIView combines both HTTP methods in
@@ -44,7 +62,17 @@ class BusinessListCreateView(generics.ListCreateAPIView[Business]):
         return [HasPermission(codename)()]
 
     def get_queryset(self) -> QuerySet[Business]:
-        return _own_businesses()
+        queryset = _own_businesses()
+
+        query = BusinessListQuerySerializer(data=self.request.query_params.dict())
+        query.is_valid(raise_exception=True)
+        search = query.validated_data.get("search", "").strip()
+        if search:
+            # `_own_businesses()` is already Client-scoped, and this only
+            # narrows it.
+            queryset = queryset.filter(name__icontains=search)
+
+        return queryset
 
 
 class BusinessUpdateView(generics.UpdateAPIView[Business]):
@@ -56,23 +84,113 @@ class BusinessUpdateView(generics.UpdateAPIView[Business]):
         return _own_businesses()
 
 
-@extend_schema(request=KybDocumentSerializer, responses=KybDocumentSerializer)
+class DirectorListCreateView(generics.ListCreateAPIView[Director]):
+    """docs/specs/11-kyb-directors.md. Gated per-method the same way
+    BusinessListCreateView is, and on the same pair: reads are
+    `client.view` (there is no `business.view` codename — `apps.businesses`
+    seeds only a write one), writes are `business.manage`."""
+
+    serializer_class = DirectorSerializer
+
+    def get_permissions(self) -> list[BasePermission]:
+        codename = "business.manage" if self.request.method == "POST" else "client.view"
+        return [HasPermission(codename)()]
+
+    def get_queryset(self) -> QuerySet[Director]:
+        # A method, never a bare class attribute — see _own_businesses's
+        # comment for the import-time-evaluation trap this avoids.
+        return Director.objects.filter(business_id=self.kwargs["business_id"])
+
+    def create(self, request: Request, *args: object, **kwargs: object) -> Response:
+        # get_object_or_404 against the tenant-scoped manager: another
+        # Client's business_id 404s here rather than leaking its
+        # existence or letting a director be attached across tenants.
+        business = get_object_or_404(_own_businesses(), pk=self.kwargs["business_id"])
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        assert isinstance(user, User)
+        director = create_director(
+            business=business,
+            full_name=serializer.validated_data["full_name"],
+            id_type=serializer.validated_data["id_type"],
+            id_number=serializer.validated_data.get("id_number", ""),
+            created_by=user,
+        )
+        return Response(DirectorSerializer(director).data, status=201)
+
+
+class DirectorUpdateView(generics.UpdateAPIView[Director]):
+    permission_classes = [HasPermission("business.manage")]
+    serializer_class = DirectorSerializer
+    http_method_names = ["patch"]
+
+    def get_queryset(self) -> QuerySet[Director]:
+        return Director.objects.all()
+
+    def patch(self, request: Request, pk: str) -> Response:
+        director = get_object_or_404(self.get_queryset(), pk=pk)
+        serializer = self.get_serializer(director, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        assert isinstance(user, User)
+        updated = update_director(
+            director=director, updated_by=user, **serializer.validated_data
+        )
+        return Response(DirectorSerializer(updated).data)
+
+
+@extend_schema_view(
+    get=extend_schema(responses=KybDocumentSerializer(many=True)),
+    post=extend_schema(request=KybDocumentSerializer, responses=KybDocumentSerializer),
+)
 class KybDocumentUploadView(generics.GenericAPIView[Business]):
-    # kyb.submit, not business.manage — the permission seeded specifically
-    # for this endpoint ("Upload KYB documents for a Business",
+    # POST is kyb.submit — the permission seeded specifically for this
+    # endpoint ("Upload KYB documents for a Business",
     # apps/identity/migrations/0003_seed_permissions.py) was never wired
     # up here. No observable effect today (Owner/Manager hold both,
     # Staff holds neither), but this is what the seeded codename is for.
-    permission_classes = [HasPermission("kyb.submit")]
+    #
+    # GET is client.view, matching every other read in this app (there
+    # is no `business.view` codename). It was added for the KYB screen
+    # (docs/specs/11-kyb-directors.md): this endpoint was POST-only, so
+    # a client-admin had no way to see which documents they had already
+    # supplied — the screen could only ever offer another blank upload,
+    # never show outstanding vs done. Not enumerated in that spec's own
+    # API table, but required by its Form design section.
+    #
+    # `pagination_class = None` matters: GET returns a bare list, and
+    # without this drf-spectacular documents it as the paginated
+    # `{count, results}` envelope every other list endpoint uses — so
+    # the *generated types would not match what the endpoint actually
+    # returns*. Same reasoning and same fix as
+    # apps.seating.views.VehicleTypeSeatsView. A business's KYB packet
+    # is a handful of rows the screen always wants in full; paginating
+    # it would be ceremony for no gain.
+    pagination_class = None
     parser_classes = [MultiPartParser, FormParser]
+
+    def get_permissions(self) -> list[BasePermission]:
+        codename = "kyb.submit" if self.request.method == "POST" else "client.view"
+        return [HasPermission(codename)()]
 
     def get_queryset(self) -> QuerySet[Business]:
         return _own_businesses()
 
+    def get(self, request: Request, business_id: str) -> Response:
+        # get_object_or_404 against the tenant-scoped manager first, so
+        # another Client's business_id 404s rather than returning an
+        # empty list that reads as "no documents yet".
+        business = get_object_or_404(_own_businesses(), pk=business_id)
+        documents = KybDocument.objects.filter(business=business)
+        return Response(KybDocumentSerializer(documents, many=True).data)
+
     def post(self, request: Request, business_id: str) -> Response:
         business = get_object_or_404(Business, pk=business_id)
 
-        serializer = KybDocumentSerializer(data=request.data)
+        # `business` in context so the serializer can reject a director
+        # belonging to a different Business — see its validate().
+        serializer = KybDocumentSerializer(data=request.data, context={"business": business})
         serializer.is_valid(raise_exception=True)
 
         user = request.user
@@ -81,6 +199,7 @@ class KybDocumentUploadView(generics.GenericAPIView[Business]):
             business=business,
             document_type=serializer.validated_data["document_type"],
             file=serializer.validated_data["file"],
+            director=serializer.validated_data.get("director"),
             uploaded_by=user,
         )
         return Response(KybDocumentSerializer(document).data, status=201)
@@ -162,9 +281,19 @@ class KybQueueListView(generics.ListAPIView[Business]):
     # reads obj.client.name per row — without this, that's a second N+1
     # alongside the one fixed in get_documents (found in the same
     # Phase 1 self-check query-count audit).
-    queryset = Business.all_objects.filter(
-        kyb_status=Business.KybStatus.SUBMITTED
-    ).select_related("client")
+    # `order_by("kyb_submitted_at")` — oldest submission first, i.e. FIFO,
+    # the business that has been waiting longest gets reviewed first.
+    # Without it this inherits `Business.Meta.ordering = ["-created_at"]`,
+    # which ranks a review queue by when each business was *created*: one
+    # registered months ago but submitted for KYB this morning sank below
+    # everything created after it, no matter how long it had been waiting.
+    # Creation time and submission time are different facts, and only the
+    # second one is what a queue is about.
+    queryset = (
+        Business.all_objects.filter(kyb_status=Business.KybStatus.SUBMITTED)
+        .select_related("client")
+        .order_by("kyb_submitted_at")
+    )
 
 
 @extend_schema(request=KybDecisionSerializer, responses=BusinessKybQueueSerializer)

@@ -584,3 +584,54 @@ remaining 2 (`booking.spec.ts`, `kyb-queue.spec.ts`) have cruft rows
 with their own protected dependents (a `KybDocument`, a `Trip`) that a
 best-effort, non-cascading prune can't safely remove; deliberately not
 solved here.
+
+---
+
+## Implementation note (the reframe, docs/specs/10-booking-modes.md)
+
+**`tap_and_go` is no longer a booking mode.** Spec 10 split it in two,
+and this spec's history is left standing rather than rewritten — what
+follows is what changed under it, so a reader who arrives here from a
+code comment is not misled.
+
+### What this phase built that survived unchanged
+
+- **`TapCredential`.** Not one field changed. The credential became
+  *more* useful, not less: it is now valid fare media in any mode.
+  Presenting one on a prepaid trip resolves to the `Ticket` the
+  passenger already holds
+  (`apps.ticketing.services.validate_credential`, spec 10 slice 3)
+  instead of being refused.
+- **`FareJourney`, `TapEvent`, `record_tap`, and the whole board/alight
+  fare model.** Distance pricing is inherently pay-after, so it moved
+  wholesale onto `fare_collection_mode = pay_as_you_go`. The
+  one-open-journey-per-passenger index, the idempotency shape, and the
+  `needs_review` degradation all behave exactly as this spec describes.
+- **`validator-app`.** Its `record-tap` screen is now the one universal
+  scan screen: it lists trips in both fare collection modes and
+  branches on the selected trip's own. The screen keeps its name —
+  the passenger did tap, and tapping is precisely the half of "tap and
+  go" that became universal.
+
+### What changed
+
+| This spec says | Now |
+|---|---|
+| `Business.booking_mode_default = tap_and_go` | `open_seating` + `fare_collection_mode = pay_as_you_go` |
+| `record_tap` refuses a non-`tap_and_go` trip | refuses a non-`pay_as_you_go` trip |
+| A tap on a prepaid trip is meaningless | A tap on a prepaid trip boards a ticket |
+
+### Naming, settled
+
+`customer-app`'s `credentials` screen keeps its "Tap & Go" name, and so
+does the `seed_e2e_users` fixture. Both are about the *credential* —
+the half that genuinely stayed universal — so the name is still
+accurate and renaming them would churn the e2e specs and
+`prune_e2e_test_data` for nothing. **This is worth recording precisely
+so a future reader does not "fix" it.**
+
+What did get renamed is the fare model: `client-admin-app`'s nav item
+and journey list now read **Pay as you go**, because what they list is
+`FareJourney` rows, which only exist where the fare is charged after
+travel. The route path stays `/tap-go` — a URL nobody reads is not
+worth breaking every bookmark over.

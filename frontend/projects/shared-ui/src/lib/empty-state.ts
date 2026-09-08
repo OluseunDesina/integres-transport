@@ -6,11 +6,13 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
   host: { class: 'block' },
   template: `
     <div
-      class="flex flex-col items-center gap-2 rounded-md border border-dashed border-slate-300 p-8 text-center"
+      class="flex flex-col items-center gap-2 rounded-md border border-dashed border-control p-8 text-center"
     >
-      <h2 class="text-sm font-medium text-slate-900">{{ title() }}</h2>
+      <h2 style="font-size: var(--ui-text-body)" class="font-medium text-strong">
+        {{ title() }}
+      </h2>
       @if (description()) {
-        <p class="text-sm text-slate-500">{{ description() }}</p>
+        <p style="font-size: var(--ui-text-body)" class="text-muted">{{ description() }}</p>
       }
       <ng-content />
     </div>

@@ -67,7 +67,7 @@ test.describe('client-admin-app nav collapse', () => {
       'aria-expanded',
       'false'
     );
-    await expect(page.getByRole('link', { name: 'Home' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();
   });
 
   test('auto-collapses below the responsive breakpoint regardless of the stored preference', async ({
@@ -88,7 +88,7 @@ test.describe('client-admin-app nav collapse', () => {
       'aria-expanded',
       'false'
     );
-    await expect(page.getByRole('link', { name: 'Home' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();
 
     await page.setViewportSize({ width: 1280, height: 720 });
     await settleAfterToggle(page);

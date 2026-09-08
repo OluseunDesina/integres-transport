@@ -14,13 +14,18 @@ from apps.scheduling.models import Trip
 
 from .models import Seat
 from .serializers import (
-    SeatAvailabilitySerializer,
     SeatSerializer,
     TripAvailabilityQuerySerializer,
+    TripBookabilitySerializer,
     VehicleTypeSeatsGenerateSerializer,
     VehicleTypeSeatsUpdateSerializer,
 )
-from .services import SeatsInUse, generate_seat_layout, get_availability, replace_vehicle_type_seats
+from .services import (
+    SeatsInUse,
+    generate_seat_layout,
+    get_bookability,
+    replace_vehicle_type_seats,
+)
 
 
 @extend_schema(responses=SeatSerializer(many=True))
@@ -113,26 +118,43 @@ class VehicleTypeSeatsGenerateView(generics.GenericAPIView[VehicleType]):
         OpenApiParameter("from_stop", str, OpenApiParameter.QUERY, required=True),
         OpenApiParameter("to_stop", str, OpenApiParameter.QUERY, required=True),
     ],
-    responses=SeatAvailabilitySerializer(many=True),
+    responses=TripBookabilitySerializer,
 )
 class TripAvailabilityView(APIView):
-    """Seat availability for a Trip's segment —
-    docs/specs/4-fares-seating-booking.md §3. Not permission-codename
-    gated: same IsAuthenticated + ordinary tenancy scoping as
+    """Whether a Trip's segment can be booked —
+    docs/specs/4-fares-seating-booking.md §3 and
+    docs/specs/10-booking-modes.md. Not permission-codename gated: same
+    IsAuthenticated + ordinary tenancy scoping as
     apps.fares.views.TripFareView, and for the same reason (passengers
-    have no Role — see that view's own docstring)."""
+    have no Role — see that view's own docstring).
+
+    Returns an envelope rather than the bare seat array it used to,
+    because a bare array cannot say *why* it is empty. See
+    `TripBookabilitySerializer`.
+    """
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request: Request, pk: str) -> Response:
         trip = get_object_or_404(
-            Trip.objects.select_related("route", "vehicle__vehicle_type"), pk=pk
+            Trip.objects.select_related("route", "business", "vehicle__vehicle_type"), pk=pk
         )
         query = TripAvailabilityQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
-        availability = get_availability(
+        bookability = get_bookability(
             trip=trip,
             from_stop=query.validated_data["from_stop"],
             to_stop=query.validated_data["to_stop"],
         )
-        return Response(SeatAvailabilitySerializer(availability, many=True).data)
+        return Response(
+            TripBookabilitySerializer(
+                {
+                    "booking_mode": bookability.booking_mode,
+                    "trip_class": trip.trip_class,
+                    "status": bookability.status,
+                    "seats": bookability.seats,
+                    "capacity_remaining": bookability.capacity_remaining,
+                    "seat_selection_enabled": bookability.seat_selection_enabled,
+                }
+            ).data
+        )

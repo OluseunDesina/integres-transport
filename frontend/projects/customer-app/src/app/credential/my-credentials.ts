@@ -12,17 +12,20 @@ import {
 } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
 import {
   Alert,
   Button,
   CONFIRM_DIALOG_TITLE_ID,
   ConfirmDialog,
   EmptyState,
+  FormSection,
+  PageHeader,
+  Paginator,
   Select,
   StatusPill,
   Table,
   TextField,
+  summaryLine,
 } from '@shared-ui';
 import type { ConfirmDialogData, ConfirmDialogResult, SelectOption, StatusPillTone } from '@shared-ui';
 import { toDataURL } from 'qrcode';
@@ -83,6 +86,9 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
     Alert,
     Button,
     EmptyState,
+    FormSection,
+    PageHeader,
+    Paginator,
     Select,
     StatusPill,
     Table,
@@ -95,7 +101,6 @@ export class MyCredentials implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly dialog = inject(Dialog);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   @ViewChild('revokeBody') private readonly revokeBody!: TemplateRef<unknown>;
 
@@ -120,6 +125,10 @@ export class MyCredentials implements OnInit {
     void this.store.getAll();
   }
 
+  protected onPageChange(offset: number): void {
+    void this.store.changePage(offset);
+  }
+
   protected statusTone(credential: TapCredential): StatusPillTone {
     return credential.is_active ? 'positive' : 'neutral';
   }
@@ -128,13 +137,30 @@ export class MyCredentials implements OnInit {
     return credential.is_active ? 'Active' : 'Revoked';
   }
 
+  /** The columns hidden below `md`, re-flowed under the channel. */
+  protected summaryFor(credential: TapCredential): string {
+    return summaryLine([
+      credential.label || 'No name',
+      new Date(credential.created_at).toLocaleDateString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }),
+    ]);
+  }
+
+  /** Every active row renders a button reading "Revoke", so without
+   * this a screen reader announces the same thing for all of them. */
+  protected revokeLabel(credential: TapCredential): string {
+    return `Revoke ${credential.label || CHANNEL_LABEL[credential.channel]} credential`;
+  }
+
   protected async onIssue(): Promise<void> {
     this.issueError.set(null);
     this.issuing.set(true);
 
     const { data, error } = await this.api.POST('/api/v1/tap-credentials/', {
       body: this.form.getRawValue(),
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     this.issuing.set(false);
@@ -188,7 +214,6 @@ export class MyCredentials implements OnInit {
     const { error } = await this.api.PATCH('/api/v1/tap-credentials/{id}/', {
       params: { path: { id } },
       body: { is_active: false },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     return error

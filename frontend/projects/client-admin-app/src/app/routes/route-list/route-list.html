@@ -1,87 +1,173 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Routes</h1>
-    <ui-button *appHasPermission="'network.manage'" (pressed)="goToNewRoute()">New route</ui-button>
-  </div>
+  <ui-page-header
+    title="Routes"
+    description="The named journeys this business runs, and the ordered stops along each one."
+  >
+    <ui-button actions *appHasPermission="'network.manage'" (pressed)="goToNewRoute()"
+      >New route</ui-button
+    >
+  </ui-page-header>
 
-  <!-- A failed activate/deactivate is transient and must not replace the
-       table — the row it came from still needs to be visible, and its
-       switch has already rolled back. A load error still does replace
-       it, as before. -->
-  @if (activeError(); as message) {
+  <!-- A failed status change or duplicate is transient and must not
+       replace the table — the row it came from still needs to be
+       visible. A load error still does replace it, as before. -->
+  @if (actionError(); as message) {
     <ui-alert>{{ message }}</ui-alert>
   }
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state
-      title="No routes yet"
-      description="Add your first route, then order its stops."
-    >
-      <ui-button *appHasPermission="'network.manage'" (pressed)="goToNewRoute()">New route</ui-button>
-    </ui-empty-state>
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Name</th>
-          <th class="px-4 py-2">Code</th>
-          <th class="px-4 py-2">Stops</th>
-          <th class="px-4 py-2">Active</th>
-          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (route of store.items(); track route.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ route.name }}</td>
-            <td class="px-4 py-2">{{ route.code || '—' }}</td>
-            <td class="px-4 py-2">{{ route.stops.length }}</td>
-            <td class="px-4 py-2">
-              <!-- The switch is a write, so it's gated the same way the
-                   Edit link below already is — but a viewer without
-                   network.manage still needs to *see* the state, hence
-                   the read-only pill rather than an empty cell. -->
-              @if (canManage()) {
-                <!-- `?? true` mirrors the model default: is_active is
-                     optional in the generated schema because it has one. -->
-                <ui-toggle
-                  [checked]="route.is_active ?? true"
-                  [pending]="pendingId() === route.id"
-                  [label]="((route.is_active ?? true) ? 'Deactivate ' : 'Activate ') + route.name"
-                  (toggled)="onToggleActive(route, $event)"
-                />
-              } @else if (route.is_active) {
-                <ui-status-pill tone="positive" label="Active" />
-              } @else {
-                <ui-status-pill tone="neutral" label="Inactive" />
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search routes"
+        placeholder="Search by name or code…"
+        ariaLabel="Route filters"
+        [chips]="filters.chips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      >
+        <div filters class="w-44">
+          <ui-select
+            label="Status"
+            [options]="statusFilterOptions"
+            [ngModel]="filters.extra('status')"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onExtraFilterChange('status', $event)"
+          />
+        </div>
+      </ui-filter-bar>
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No routes yet"
+        description="Add your first route, then order its stops."
+      >
+        <ui-button *appHasPermission="'network.manage'" (pressed)="goToNewRoute()"
+          >New route</ui-button
+        >
+      </ui-empty-state>
+    } @else {
+      <!-- aria-busy carries the loading announcement for the region; the
+           skeleton rows themselves are aria-hidden, so one wait is one
+           announcement rather than one per placeholder. -->
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Routes"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No routes match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Name</th>
+              <th class="hidden py-2 md:table-cell">Code</th>
+              <th class="hidden py-2 md:table-cell">Stops</th>
+              <th class="py-2">Status</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="10rem" /></td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="4rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="2rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="4rem" /></td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
               }
-            </td>
-            <td class="px-4 py-2 text-right">
-              <div class="flex items-center justify-end gap-4">
-                <!-- The fare grid is per-route, so a route's own row is
-                     its natural entry point — docs/specs/12-fare-matrix.md.
-                     Gated on fares.view, not network.manage: reading
-                     what a route charges is not a network edit. -->
-                <a
-                  *appHasPermission="'fares.view'"
-                  [routerLink]="['/fares/fare-matrix', route.id]"
-                  class="text-sm font-medium text-slate-700 hover:text-slate-900"
-                  >Fares</a
-                >
-                <a
-                  *appHasPermission="'network.manage'"
-                  [routerLink]="['/routes', route.id, 'edit']"
-                  class="text-sm font-medium text-slate-700 hover:text-slate-900"
-                  >Edit</a
-                >
-              </div>
-            </td>
-          </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+            } @else {
+              @for (route of store.items(); track route.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    {{ route.name }}
+                    <!-- Where the columns hidden below `md` go. A narrow
+                         row loses columns, not information — see
+                         `ui-table`'s own note on the tier convention. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ summaryLine(route) }}
+                    </span>
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ route.code || '—' }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ route.stops.length }}
+                  </td>
+                  <td [class]="cellClass()">
+                    <!-- Read-only for everyone. Changing it is an
+                         explicit, confirmed action in the row menu. -->
+                    <ui-status-pill
+                      [tone]="statusTone(route.status)"
+                      [label]="statusLabel(route.status)"
+                    />
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    <ui-action-menu
+                      [items]="menuItems(route)"
+                      [label]="'Actions for ' + route.name"
+                      (selected)="onMenuSelected(route, $event)"
+                    />
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
+
+<ng-template #statusConfirmBody>
+  @if (selected(); as route) {
+    @if (pendingTarget(); as target) {
+      <p class="text-sm text-default">
+        @switch (target) {
+          @case ('active') {
+            {{ route.name }} will be available for new trips and bookings.
+          }
+          @case ('inactive') {
+            @if (route.status === 'archived') {
+              {{ route.name }} will be restored, paused rather than bookable — activating it again
+              is a separate, deliberate step.
+            } @else {
+              {{ route.name }} will stop being offered for new trips and bookings. Trips already
+              scheduled on it are not changed.
+            }
+          }
+          @case ('archived') {
+            {{ route.name }} will be hidden from the routes list by default and locked against
+            editing. Restoring it later is always possible.
+          }
+        }
+      </p>
+    }
+  }
+</ng-template>
+
+<ng-template #duplicateConfirmBody>
+  @if (selected(); as route) {
+    <p class="text-sm text-default">
+      A new draft route named "{{ route.name }} (copy)" will be created with the same stops.
+      Fares, schedules and trips are not copied — the copy must be priced before it can be
+      activated.
+    </p>
+  }
+</ng-template>

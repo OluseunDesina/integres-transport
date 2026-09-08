@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -24,7 +25,7 @@ from apps.identity.models import User
 from apps.network.models import Route, Stop
 from apps.scheduling.models import Trip
 
-from .models import FareRule, FareSegmentRule
+from .models import ANY_TRIP_CLASS, FareRule, FareSegmentRule
 
 
 class FareNotConfigured(Exception):
@@ -62,6 +63,26 @@ def _effective_at_filter(*, as_of: datetime) -> Q:
     return Q(effective_from__lte=as_of) & (Q(effective_to__isnull=True) | Q(effective_to__gt=as_of))
 
 
+# The trip_class values a Trip of `trip_class` may price from, and the
+# order they win in: the exact class first, the `""` wildcard as
+# fallback. See `_class_precedence_order` below for how that order is
+# expressed in SQL.
+def _class_candidates(trip_class: str) -> list[str]:
+    return [trip_class, ANY_TRIP_CLASS]
+
+
+# `ORDER BY trip_class DESC` puts any non-empty value before the empty
+# string, so it expresses "specific beats wildcard" without a CASE.
+#
+# That is a subtle thing for the correctness of every fare quote in the
+# system to rest on, so it is asserted directly by a test
+# (`test_exact_class_ordering_is_what_puts_it_first`) rather than left
+# to the reader. Tidying this into `order_by("trip_class")` would
+# silently invert precedence and make every classed trip quote the
+# wildcard price — a change no other test would catch.
+_class_precedence_order = "-trip_class"
+
+
 def create_fare_rule(
     *,
     business: Business,
@@ -69,7 +90,11 @@ def create_fare_rule(
     amount: Decimal,
     created_by: User,
     effective_from: datetime | None = None,
+    trip_class: str = ANY_TRIP_CLASS,
 ) -> FareRule:
+    """`trip_class` defaults to the wildcard, which is what every rule
+    created before spec 15 effectively was — so an unclassed caller
+    keeps producing exactly the rule it always produced."""
     starts = effective_from if effective_from is not None else timezone.now()
     try:
         with transaction.atomic():
@@ -77,19 +102,21 @@ def create_fare_rule(
                 client=business.client,
                 business=business,
                 route=route,
+                trip_class=trip_class,
                 amount=amount,
                 effective_from=starts,
                 effective_to=None,
             )
     except IntegrityError as exc:
         raise FareOverlap(
-            "A fare rule for this route already covers that effective period."
+            "A fare rule for this route and class already covers that effective period."
         ) from exc
     record_audit_event(
         actor=created_by,
         action="fare_rule.created",
         target=fare_rule,
         amount=str(amount),
+        trip_class=trip_class,
         effective_from=starts.isoformat(),
     )
     return fare_rule
@@ -104,7 +131,14 @@ def supersede_fare_rule(
 ) -> FareRule:
     """Close `fare_rule` and insert a successor starting at
     `effective_from` (default: now). The closed row keeps its amount so
-    historical bookings pointing at it still explain the purchase."""
+    historical bookings pointing at it still explain the purchase.
+
+    The successor inherits `trip_class` from the row it supersedes and
+    there is deliberately no way to override it: a supersede is a price
+    change, and letting it also move a rule between classes would mean
+    one call could silently unprice one class and reprice another.
+    Selling a different class is a create, not an edit.
+    """
     if fare_rule.effective_to is not None:
         raise FareRuleClosed("Only an open-ended fare rule can be superseded.")
 
@@ -125,13 +159,14 @@ def supersede_fare_rule(
                 client=locked.client,
                 business=locked.business,
                 route=locked.route,
+                trip_class=locked.trip_class,
                 amount=amount,
                 effective_from=starts,
                 effective_to=None,
             )
     except IntegrityError as exc:
         raise FareOverlap(
-            "A fare rule for this route already covers that effective period."
+            "A fare rule for this route and class already covers that effective period."
         ) from exc
 
     record_audit_event(
@@ -161,6 +196,7 @@ def create_fare_segment_rule(
     amount: Decimal,
     created_by: User,
     effective_from: datetime | None = None,
+    trip_class: str = ANY_TRIP_CLASS,
 ) -> FareSegmentRule:
     starts = effective_from if effective_from is not None else timezone.now()
     try:
@@ -171,17 +207,21 @@ def create_fare_segment_rule(
                 route=route,
                 from_stop=from_stop,
                 to_stop=to_stop,
+                trip_class=trip_class,
                 amount=amount,
                 effective_from=starts,
                 effective_to=None,
             )
     except IntegrityError as exc:
-        raise FareOverlap("A fare for this segment already covers that effective period.") from exc
+        raise FareOverlap(
+            "A fare for this segment and class already covers that effective period."
+        ) from exc
     record_audit_event(
         actor=created_by,
         action="fare_segment_rule.created",
         target=fare_segment_rule,
         amount=str(amount),
+        trip_class=trip_class,
         effective_from=starts.isoformat(),
     )
     return fare_segment_rule
@@ -214,12 +254,17 @@ def supersede_fare_segment_rule(
                 route=locked.route,
                 from_stop=locked.from_stop,
                 to_stop=locked.to_stop,
+                # Inherited, never overridable — see
+                # supersede_fare_rule's docstring for why.
+                trip_class=locked.trip_class,
                 amount=amount,
                 effective_from=starts,
                 effective_to=None,
             )
     except IntegrityError as exc:
-        raise FareOverlap("A fare for this segment already covers that effective period.") from exc
+        raise FareOverlap(
+            "A fare for this segment and class already covers that effective period."
+        ) from exc
 
     record_audit_event(
         actor=updated_by,
@@ -239,6 +284,78 @@ def supersede_fare_segment_rule(
     return successor
 
 
+def close_fare_segment_rule(
+    *,
+    fare_segment_rule: FareSegmentRule,
+    updated_by: User,
+    effective_to: datetime | None = None,
+) -> FareSegmentRule:
+    """Closes a segment's open-ended rule with **no successor** — the
+    segment stops being priced from that instant on.
+
+    The sibling of `supersede_fare_segment_rule`, and the write behind a
+    matrix cell being blanked (docs/specs/12-fare-matrix.md). Distinct
+    from deleting the row: history must stay intact so an existing
+    `SeatReservation` still points at the rule that priced it.
+
+    The consequence is deliberate and severe — `get_fare()` will raise
+    `FareNotConfigured` for this segment afterwards, so booking it
+    starts failing. That is what "stop selling this segment" means, and
+    why the UI requires a confirm before calling it.
+    """
+    if fare_segment_rule.effective_to is not None:
+        raise FareRuleClosed("Only an open-ended fare segment rule can be closed.")
+
+    ends = effective_to if effective_to is not None else timezone.now()
+    if ends < fare_segment_rule.effective_from:
+        raise FareOverlap("A fare cannot stop applying before it took effect.")
+
+    with transaction.atomic():
+        locked = FareSegmentRule.all_objects.select_for_update().get(pk=fare_segment_rule.pk)
+        if locked.effective_to is not None:
+            raise FareRuleClosed("Only an open-ended fare segment rule can be closed.")
+        locked.effective_to = ends
+        locked.save(update_fields=["effective_to"])
+
+    record_audit_event(
+        actor=updated_by,
+        action="fare_segment_rule.closed",
+        target=locked,
+        effective_to=ends.isoformat(),
+    )
+    return locked
+
+
+def route_fare_summary(*, route: Route, as_of: datetime | None = None) -> dict[str, Any]:
+    """Whether `route` currently has a price an operator can quote, and
+    how many currently-effective rules back it — the check
+    docs/specs/19-route-lifecycle.md's `-> active` transition guard
+    needs, phrased without a Trip/from_stop/to_stop the way `get_fare`
+    requires: any currently-effective rule counts, regardless of
+    trip_class or segment, since the guard only cares whether the route
+    is priced *at all*, not what a specific journey costs. Also backs
+    the route detail screen's fare summary, so both read the same
+    definition of "configured".
+
+    Dispatches on `route.business.fare_pricing_mode`, mirroring
+    `get_fare`'s own dispatch.
+    """
+    moment = as_of if as_of is not None else timezone.now()
+    if route.business.fare_pricing_mode == Business.FarePricingMode.FLAT:
+        rule_count = FareRule.objects.filter(
+            _effective_at_filter(as_of=moment), route=route
+        ).count()
+    else:
+        rule_count = FareSegmentRule.objects.filter(
+            _effective_at_filter(as_of=moment), route=route
+        ).count()
+    return {
+        "pricing_mode": route.business.fare_pricing_mode,
+        "configured": rule_count > 0,
+        "rule_count": rule_count,
+    }
+
+
 def get_fare(
     *, trip: Trip, from_stop: Stop, to_stop: Stop, as_of: datetime | None = None
 ) -> FareQuote:
@@ -251,11 +368,24 @@ def get_fare(
     §1 non-goals."""
     moment = as_of if as_of is not None else timezone.now()
     business = trip.business
+    candidates = _class_candidates(trip.trip_class)
     if business.fare_pricing_mode == Business.FarePricingMode.FLAT:
-        try:
-            rule = FareRule.objects.get(_effective_at_filter(as_of=moment), route=trip.route)
-        except FareRule.DoesNotExist:
-            raise FareNotConfigured(f"No flat fare configured for route {trip.route_id}.") from None
+        # `.first()` over an ordered queryset, not `.get()`: since spec
+        # 15 a trip can legitimately match *two* rules — an explicit one
+        # for its class and a `""` wildcard — and `.get()` would raise
+        # MultipleObjectsReturned on exactly the configuration the
+        # wildcard exists to support.
+        rule = (
+            FareRule.objects.filter(_effective_at_filter(as_of=moment), route=trip.route)
+            .filter(trip_class__in=candidates)
+            .order_by(_class_precedence_order)
+            .first()
+        )
+        if rule is None:
+            raise FareNotConfigured(
+                f"No flat fare configured for route {trip.route_id} "
+                f"(class {trip.trip_class})."
+            )
         return FareQuote(
             amount=rule.amount,
             currency=business.currency,
@@ -263,18 +393,22 @@ def get_fare(
             fare_segment_rule=None,
         )
 
-    try:
-        segment_rule = FareSegmentRule.objects.get(
+    segment_rule = (
+        FareSegmentRule.objects.filter(
             _effective_at_filter(as_of=moment),
             route=trip.route,
             from_stop=from_stop,
             to_stop=to_stop,
         )
-    except FareSegmentRule.DoesNotExist:
+        .filter(trip_class__in=candidates)
+        .order_by(_class_precedence_order)
+        .first()
+    )
+    if segment_rule is None:
         raise FareNotConfigured(
             f"No fare configured for segment {from_stop.name} -> {to_stop.name} "
-            f"on route {trip.route_id}."
-        ) from None
+            f"on route {trip.route_id} (class {trip.trip_class})."
+        )
     return FareQuote(
         amount=segment_rule.amount,
         currency=business.currency,

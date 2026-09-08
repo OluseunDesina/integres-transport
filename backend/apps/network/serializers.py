@@ -5,9 +5,34 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.businesses.models import Business
+from apps.fares.services import route_fare_summary
+from apps.scheduling.models import Schedule
 
 from .models import Route, RouteStop, Stop
 from .services import create_route, create_stop, update_route, update_stop
+
+
+def _validate_trip_classes(value: list[str]) -> list[str]:
+    """`Route.available_trip_classes` is a JSONField, so nothing below
+    this validates its contents — a typo would save cleanly and only
+    surface much later as a Schedule that can never be created on the
+    route. Same reasoning as `validate_iana_timezone`'s own docstring in
+    apps.businesses.
+
+    An empty list is valid and means **no restriction**.
+    """
+    valid = set(Business.TripClass.values)
+    unknown = [entry for entry in value if entry not in valid]
+    if unknown:
+        raise serializers.ValidationError(
+            f"Unknown trip class(es): {', '.join(sorted(unknown))}.",
+            code="unknown_trip_class",
+        )
+    if len(set(value)) != len(value):
+        raise serializers.ValidationError(
+            "Duplicate trip classes are not allowed.", code="duplicate_trip_class"
+        )
+    return value
 
 
 def _validate_location(attrs: dict[str, Any], instance: Stop | None) -> None:
@@ -125,6 +150,16 @@ class RouteSerializer(serializers.ModelSerializer[Route]):
     active_stops_only = False
 
     stops = serializers.SerializerMethodField()
+    # Declared explicitly rather than left to ModelSerializer, for the
+    # same reason FareRuleSerializer.trip_class is: an inferred
+    # JSONField has no item type, so drf-spectacular emits `unknown` and
+    # every frontend consumer has to cast it back to a list of strings
+    # before it can be read. `RouteCreateSerializer` already declares
+    # its own, so without this the read and write shapes of one field
+    # disagree in the generated types.
+    available_trip_classes = serializers.ListField(
+        child=serializers.CharField(), required=False
+    )
 
     class Meta:
         model = Route
@@ -134,11 +169,41 @@ class RouteSerializer(serializers.ModelSerializer[Route]):
             "name",
             "code",
             "description",
-            "is_active",
+            "available_trip_classes",
+            "status",
+            "distance_km",
+            "estimated_duration_minutes",
             "stops",
             "created_at",
         ]
-        read_only_fields = ["id", "business", "created_at"]
+        # `status` is read-only here on purpose, not merely unmentioned:
+        # docs/specs/19-route-lifecycle.md makes
+        # apps.network.services.set_route_status the sole writer, so a
+        # PATCH naming `status` must be rejected with a message pointing
+        # at the status endpoint (see validate() below), not silently
+        # ignored the way an undeclared field would be.
+        read_only_fields = ["id", "business", "status", "created_at"]
+
+    def validate_available_trip_classes(self, value: list[str]) -> list[str]:
+        return _validate_trip_classes(value)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if "status" in self.initial_data:
+            raise serializers.ValidationError(
+                {"status": "Use POST /routes/{id}/status/ to change a route's status."},
+                code="status_via_status_endpoint",
+            )
+        # docs/specs/19-route-lifecycle.md edge case: "Editing an
+        # archived route: 400; restore first." `archived` is the one
+        # status this serializer's own Meta calls locked against edits —
+        # checked against self.instance, since this is the PATCH path
+        # only (RouteCreateSerializer has no instance to check).
+        if self.instance is not None and self.instance.status == Route.Status.ARCHIVED:
+            raise serializers.ValidationError(
+                "This route is archived. Restore it before editing.",
+                code="route_archived",
+            )
+        return attrs
 
     @extend_schema_field(RouteStopEntrySerializer(many=True))
     def get_stops(self, obj: Route) -> list[dict[str, Any]]:
@@ -201,11 +266,82 @@ class RouteBrowseSerializer(RouteSerializer):
         return {"id": obj.business_id, "name": obj.business.name}
 
 
+class RouteFareSummarySerializer(serializers.Serializer):
+    """Schema-only shape for `RouteDetailSerializer.get_current_fare_summary`
+    — mirrors `RouteBusinessSerializer`'s own {id, name} precedent for why
+    this needs a real Serializer: without one drf-spectacular infers
+    `Any`. Deliberately does not reduce to a single amount: a route can
+    have several currently-effective rules at once (one per trip class,
+    or one per segment), and picking one to call "the" fare would either
+    be arbitrary or silently wrong the moment a Business prices more than
+    one class. `configured` is what the `-> active` guard actually
+    checks; `rule_count` is context, not a promise about what any one
+    journey costs."""
+
+    pricing_mode = serializers.ChoiceField(choices=Business.FarePricingMode.choices)
+    configured = serializers.BooleanField()
+    rule_count = serializers.IntegerField()
+
+
+class RouteDetailSerializer(RouteSerializer):
+    """GET /routes/{id}/ — docs/specs/19-route-lifecycle.md. Adds the
+    counts and fare summary an operator needs to judge a single route,
+    which the list/PATCH shape doesn't carry on every row."""
+
+    stop_count = serializers.SerializerMethodField()
+    schedule_count = serializers.SerializerMethodField()
+    current_fare_summary = serializers.SerializerMethodField()
+
+    class Meta(RouteSerializer.Meta):
+        fields = [
+            *RouteSerializer.Meta.fields,
+            "stop_count",
+            "schedule_count",
+            "current_fare_summary",
+        ]
+
+    def get_stop_count(self, obj: Route) -> int:
+        return RouteStop.objects.filter(route=obj).count()
+
+    def get_schedule_count(self, obj: Route) -> int:
+        return Schedule.objects.filter(route=obj).count()
+
+    @extend_schema_field(RouteFareSummarySerializer)
+    def get_current_fare_summary(self, obj: Route) -> dict[str, Any]:
+        return route_fare_summary(route=obj)
+
+
+class RouteStatusSerializer(serializers.Serializer):
+    """POST /routes/{id}/status/ body — mirrors
+    apps.scheduling.serializers.TripStatusSerializer's `{status, reason}`
+    shape so operators and code meet the same pattern twice rather than
+    two different ones. Unlike that serializer, transition legality is
+    **not** checked here: docs/specs/19-route-lifecycle.md makes
+    apps.network.services.set_route_status the sole owner of that,
+    because its guards need database queries a serializer shouldn't run.
+    `reason` is accepted for audit-trail symmetry with the Trip endpoint
+    (useful on an archive, say) but no Route transition currently
+    requires one."""
+
+    status = serializers.ChoiceField(choices=Route.Status.choices)
+    # No `default=""` alongside `required=False` — that combination is
+    # exactly what makes drf-spectacular emit the field as **required**
+    # in schema.ts (CLAUDE.md's own recorded trap). The view reads a
+    # missing key with `.get("reason", "")` instead.
+    reason = serializers.CharField(required=False, allow_blank=True)
+
+
 class RouteCreateSerializer(serializers.Serializer):
     business = serializers.UUIDField()
     name = serializers.CharField(max_length=255)
     code = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")
     description = serializers.CharField(required=False, allow_blank=True, default="")
+    available_trip_classes = serializers.ListField(
+        child=serializers.CharField(), required=False, default=list
+    )
+
+    def validate_available_trip_classes(self, value: list[str]) -> list[str]:
+        return _validate_trip_classes(value)
 
     def validate_business(self, value: Any) -> Business:
         try:
@@ -227,16 +363,35 @@ class RouteCreateSerializer(serializers.Serializer):
 
 
 class NetworkListQuerySerializer(serializers.Serializer):
-    """Validates `?business=<uuid>` on GET /routes/ and GET /stops/ —
-    both views share this shape, so it lives here once. `validate_business`
-    follows the exact same tenant-scoped-manager-lookup-or-400 convention
-    as RouteCreateSerializer/StopCreateSerializer's own `validate_business`,
+    """Validates `?business=<uuid>&search=&is_active=&status=` on
+    GET /routes/ and GET /stops/ — both views share this shape, so it
+    lives here once. `is_active` is Stop's own field and `status` is
+    Route's (docs/specs/19-route-lifecycle.md); each view reads only the
+    one that applies to its model, so the other sits unused rather than
+    being split into two near-identical serializers.
+    `validate_business` follows the exact same
+    tenant-scoped-manager-lookup-or-400 convention as
+    RouteCreateSerializer/StopCreateSerializer's own `validate_business`,
     deliberately: an unknown OR another Client's Business id must fail the
     same way here as it already does on write, not silently return an
     empty/unfiltered list — see the views' own get_queryset() docstring
-    for the full reasoning."""
+    for the full reasoning.
+
+    `search` is validated here but applied by each view, which owns its
+    own field list (a Route is searched by name/code, a Stop by
+    name/address). It never widens the queryset it is applied to, so
+    tenancy — enforced by `Model.objects` and by RLS underneath it — is
+    unaffected by any term a caller can type
+    (docs/specs/14-design-system-and-ui-rebuild.md, slice 3a).
+    """
 
     business = serializers.UUIDField(required=False)
+    # `allow_blank`: the frontend filter bar emits '' when its search box
+    # is cleared, and rejecting that would 400 on the way *back* to the
+    # unfiltered list.
+    search = serializers.CharField(required=False, allow_blank=True)
+    is_active = serializers.BooleanField(required=False)
+    status = serializers.ChoiceField(choices=Route.Status.choices, required=False)
 
     def validate_business(self, value: Any) -> Business:
         try:

@@ -208,6 +208,17 @@ class JournalLine(BaseModel):
 
     class Meta:
         ordering = ["-created_at"]
+        # docs/specs/16-operational-analytics.md slice 1. Keyed on
+        # `account`, never on a joined `account__account_type`: spec 5's
+        # own Slice 1 note records a real bug where a select_related
+        # against the RLS-protected LedgerAccount silently dropped
+        # journal lines referencing the platform commission account when
+        # read by an ordinary Business's staff. Every aggregate in spec
+        # 16 resolves account ids separately and filters on this column,
+        # so this is the shape the index has to match.
+        indexes = [
+            models.Index(fields=["account", "created_at"], name="journalline_account_created"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.amount} {self.currency} on {self.account_id}"

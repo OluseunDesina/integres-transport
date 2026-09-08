@@ -74,13 +74,13 @@ test.describe('validator-app record-tap', () => {
     await expect(page.getByLabel('Stop').locator('option')).toHaveCount(4);
 
     await page.getByLabel('Tap credential (scan or type)').fill(TOKEN);
-    // `exact: true` — "Board"/"Alight" would otherwise also substring-
-    // match the submit button's own dynamic label ("Record board tap" /
-    // "Record alight tap").
-    await expect(page.getByRole('button', { name: 'Board', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    );
+    // Radios now, not toggle buttons: the control was a
+    // `role="radiogroup"` div wrapping two `ui-button`s with
+    // `aria-pressed`, which announced as a radio group and behaved as
+    // two independent toggles (spec 14 slice 6b). `exact: true` because
+    // "Board" would otherwise substring-match the submit button's own
+    // dynamic label, "Record board tap".
+    await expect(page.getByRole('radio', { name: 'Board', exact: true })).toBeChecked();
     await page.getByLabel('Stop').selectOption({ label: BOARD_STOP });
 
     const [boardResponse] = await Promise.all([
@@ -88,14 +88,22 @@ test.describe('validator-app record-tap', () => {
       page.getByRole('button', { name: 'Record board tap' }).click(),
     ]);
     expect(boardResponse.ok()).toBeTruthy();
-    await expect(page.getByRole('alert')).toContainText('Recorded. Journey open');
+    // `status`, not `alert`: a success is announced politely now.
+    // `role="alert"` is assertive and interrupts a screen reader
+    // mid-sentence, which is right for a failure and wrong for a
+    // confirmation (docs/specs/14 slice 4).
+    // "in progress", not the raw `open` enum.
+    await expect(page.getByRole('status')).toContainText('Recorded. Journey in progress');
     await expect(page.getByLabel('Tap credential (scan or type)')).toHaveValue('');
 
-    await page.getByRole('button', { name: 'Alight', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Alight', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    );
+    // Clicked by its label, which is what a user does: the segmented
+    // variant's input is `sr-only` and sits underneath the label that
+    // covers it, so a click aimed at the input itself is intercepted.
+    // The input is still focusable and arrow-selectable — `sr-only`
+    // hides it visually without removing it from the tab order, which
+    // is the whole reason the variant is built this way.
+    await page.getByText('Alight', { exact: true }).click();
+    await expect(page.getByRole('radio', { name: 'Alight', exact: true })).toBeChecked();
     await page.getByLabel('Tap credential (scan or type)').fill(TOKEN);
     await page.getByLabel('Stop').selectOption({ label: ALIGHT_STOP });
 
@@ -104,8 +112,11 @@ test.describe('validator-app record-tap', () => {
       page.getByRole('button', { name: 'Record alight tap' }).click(),
     ]);
     expect(alightResponse.ok()).toBeTruthy();
-    await expect(page.getByRole('alert')).toContainText('Recorded. Journey closed');
-    await expect(page.getByRole('alert')).toContainText('300.00');
+    await expect(page.getByRole('status')).toContainText('Recorded. Journey complete');
+    // "NGN 300.00", not "300.00 NGN" — this app rendered money in the
+    // opposite order from every other screen until `formatMoney` moved
+    // into @shared-ui.
+    await expect(page.getByRole('status')).toContainText('NGN 300.00');
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
@@ -134,7 +145,7 @@ test.describe('validator-app record-tap', () => {
 
     await expect(page.getByText('Prepaid')).toBeVisible();
     await expect(page.getByLabel('Stop')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Board', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('radio', { name: 'Board', exact: true })).toHaveCount(0);
 
     const tapPosts: string[] = [];
     page.on('request', (request) => {
@@ -154,8 +165,9 @@ test.describe('validator-app record-tap', () => {
     expect(response.url()).toContain('/tickets/validate/');
     // The whole point: no fare journey is opened on a prepaid trip.
     expect(tapPosts).toEqual([]);
-    // Whatever the backend decided, the operator is told.
-    await expect(page.getByRole('alert')).not.toBeEmpty();
+    // Whatever the backend decided, the operator is told — success
+    // politely (`status`), failure assertively (`alert`).
+    await expect(page.getByRole('status').or(page.getByRole('alert')).first()).not.toBeEmpty();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);

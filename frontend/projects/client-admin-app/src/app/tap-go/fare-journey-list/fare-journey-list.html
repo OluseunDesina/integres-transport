@@ -1,54 +1,171 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Pay-as-you-go journeys</h1>
-  </div>
-
-  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-    <ui-select
-      label="Status"
-      [options]="statusFilterOptions"
-      [ngModel]="store.query().status ?? ''"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onStatusFilterChange($event)"
-    />
-  </div>
+  <ui-page-header
+    title="Pay-as-you-go journeys"
+    description="Board and alight taps recorded on this business's pay-as-you-go trips, and what each journey was charged."
+  />
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state
-      title="No pay-as-you-go journeys found"
-      description="Board and alight taps recorded on pay-as-you-go trips will appear here."
-    />
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Route</th>
-          <th class="px-4 py-2">Board → Alight</th>
-          <th class="px-4 py-2">Amount</th>
-          <th class="px-4 py-2">Status</th>
-          <th class="px-4 py-2">Boarded</th>
-          <th class="px-4 py-2">Alighted</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (journey of store.items(); track journey.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ journey.trip.route.name }}</td>
-            <td class="px-4 py-2">{{ journey.board_stop }} → {{ journey.alight_stop ?? '—' }}</td>
-            <td class="px-4 py-2">{{ amountLabel(journey) }}</td>
-            <td class="px-4 py-2">
-              <ui-status-pill [tone]="statusTone[journey.status]" [label]="statusLabel[journey.status]" />
-            </td>
-            <td class="px-4 py-2">{{ journey.boarded_at | date: 'short' }}</td>
-            <td class="px-4 py-2">
-              {{ journey.alighted_at ? (journey.alighted_at | date: 'short') : '—' }}
-            </td>
-          </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <!-- `showSearch` off: this endpoint has no free-text filter, and a
+           box that silently ignored what was typed into it would be
+           worse than none. -->
+      <ui-filter-bar
+        class="flex-1"
+        [showSearch]="false"
+        ariaLabel="Journey filters"
+        [chips]="filters.chips()"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      >
+        <div filters class="w-48">
+          <ui-select
+            label="Status"
+            [options]="statusFilterOptions"
+            [ngModel]="filters.extra('status')"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onStatusFilterChange($event)"
+          />
+        </div>
+      </ui-filter-bar>
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No pay-as-you-go journeys yet"
+        description="Board and alight taps recorded on pay-as-you-go trips will appear here."
+      />
+    } @else {
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Pay-as-you-go journeys"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No journeys match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Route</th>
+              <th class="hidden py-2 md:table-cell">Board → Alight</th>
+              <th class="hidden py-2 md:table-cell">Amount</th>
+              <th class="py-2">Status</th>
+              <th class="hidden py-2 lg:table-cell">Boarded</th>
+              <th class="hidden py-2 lg:table-cell">Alighted</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="10rem" /></td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="10rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="5rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="5rem" /></td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="8rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="8rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
+              }
+            } @else {
+              @for (journey of store.items(); track journey.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    {{ journey.trip.route.name }}
+                    <!-- The columns hidden below `md`, re-flowed. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ summaryLine(journey) }}
+                    </span>
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ journey.board_stop }} → {{ journey.alight_stop ?? '—' }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ amountLabel(journey) }}
+                  </td>
+                  <td [class]="cellClass()">
+                    <ui-status-pill
+                      [tone]="statusTone[journey.status]"
+                      [label]="statusLabel[journey.status]"
+                    />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ journey.boarded_at | date: 'short' }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ journey.alighted_at ? (journey.alighted_at | date: 'short') : '—' }}
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    <ui-action-menu
+                      [items]="menuItems"
+                      [label]="'Actions for the ' + journey.trip.route.name + ' journey'"
+                      (selected)="onMenuSelected(journey)"
+                    />
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
+
+<ng-template #detailBody>
+  @if (selected(); as journey) {
+    <dl class="flex flex-col gap-4 text-sm">
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Status</dt>
+        <dd>
+          <ui-status-pill
+            [tone]="statusTone[journey.status]"
+            [label]="statusLabel[journey.status]"
+          />
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Boarded</dt>
+        <dd class="text-default">
+          {{ journey.board_stop }} · {{ journey.boarded_at | date: 'medium' }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Alighted</dt>
+        <dd class="text-default">
+          @if (journey.alighted_at) {
+            {{ journey.alight_stop }} ·
+            {{ journey.alighted_at | date: 'medium' }}
+          } @else {
+            Still open — no alight tap recorded yet.
+          }
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Fare</dt>
+        <dd class="text-default">
+          @if (journey.amount) {
+            {{ amountLabel(journey) }}
+          } @else {
+            Not yet priced. A fare is resolved when the journey closes.
+          }
+        </dd>
+      </div>
+    </dl>
+  }
+</ng-template>

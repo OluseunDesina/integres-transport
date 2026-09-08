@@ -274,3 +274,55 @@ def test_staff_list_requires_staff_manage_permission() -> None:
 
     response = _auth_client(staff).get(reverse("staff-list"))
     assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+# --- ?search= on GET /staff/ ------------------------------------------
+# docs/specs/14-design-system-and-ui-rebuild.md slice 3b. This endpoint's
+# first query param — the screen had no filtering of any kind.
+
+
+def test_staff_list_search_matches_email_case_insensitively() -> None:
+    owner, roles = _owner_with_client()
+    match = ClientStaffUserFactory(
+        client=owner.client, role=roles["Staff"], email="Ada.Okafor@example.com"
+    )
+    ClientStaffUserFactory(client=owner.client, role=roles["Staff"], email="bola@example.com")
+
+    response = _auth_client(owner).get(reverse("staff-list"), {"search": "ada.okafor"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+def test_staff_list_search_with_no_match_returns_empty_not_everything() -> None:
+    # A filter silently falling back to unfiltered looks exactly like a
+    # search that matched everyone.
+    owner, _roles = _owner_with_client()
+
+    response = _auth_client(owner).get(reverse("staff-list"), {"search": "nobody-here"})
+
+    assert response.data["count"] == 0
+
+
+def test_staff_list_blank_search_is_accepted_and_ignored() -> None:
+    # The filter bar emits '' when its box is cleared; a 400 there would
+    # break the way back to the unfiltered list.
+    owner, _roles = _owner_with_client()
+
+    response = _auth_client(owner).get(reverse("staff-list"), {"search": ""})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 1
+
+
+def test_staff_list_search_never_reaches_another_clients_staff() -> None:
+    owner_a, _roles_a = _owner_with_client()
+    owner_b, roles_b = _owner_with_client()
+    ClientStaffUserFactory(
+        client=owner_b.client, role=roles_b["Staff"], email="ada@other.example.com"
+    )
+
+    response = _auth_client(owner_a).get(reverse("staff-list"), {"search": "ada@"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 0

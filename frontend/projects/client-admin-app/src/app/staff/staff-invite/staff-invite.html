@@ -1,45 +1,54 @@
-<div class="mx-auto max-w-lg">
+<div class="mx-auto flex max-w-lg flex-col gap-6">
+  <ui-page-header
+    title="Invite staff"
+    description="Sends a colleague a link to set their own password and join this client."
+  />
+
   @if (invitedEmail(); as email) {
-    <h1 class="mb-6 text-lg font-semibold text-slate-900">Invite staff</h1>
-    <ui-alert variant="success" class="mb-4">Invitation sent to {{ email }}.</ui-alert>
-    <div class="flex gap-3">
+    <ui-alert variant="success">Invitation sent to {{ email }}.</ui-alert>
+    <div class="flex items-center gap-3">
       <ui-button (pressed)="inviteAnother()">Invite another</ui-button>
       <a
         routerLink="/staff"
-        class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >Back to staff</a
       >
     </div>
   } @else {
-    <h1 class="mb-6 text-lg font-semibold text-slate-900">Invite staff</h1>
-
     @if (generalError(); as message) {
-      <ui-alert class="mb-4">{{ message }}</ui-alert>
+      <ui-alert>{{ message }}</ui-alert>
     }
 
-    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-text-field
-        label="Email"
-        type="email"
-        autocomplete="email"
-        formControlName="email"
-        [invalid]="!!emailFieldError()"
-        [errorMessage]="emailFieldError()"
-      />
-      <ui-select
-        label="Role"
-        [options]="roleOptions()"
-        formControlName="role"
-        [invalid]="!!roleFieldError()"
-        [errorMessage]="roleFieldError()"
-      />
-      <div class="mt-2 flex gap-3">
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      <ui-form-section
+        title="Who to invite"
+        description="They set their own password when they accept, so nothing else is needed here."
+      >
+        <ui-text-field
+          label="Email"
+          type="email"
+          autocomplete="email"
+          formControlName="email"
+          [invalid]="!!fieldError('email')"
+          [errorMessage]="fieldError('email')"
+        />
+        <ui-select
+          label="Role"
+          hint="What they can do once they join. Changeable later from the staff list."
+          [options]="roleOptions()"
+          formControlName="role"
+          [invalid]="!!fieldError('role')"
+          [errorMessage]="fieldError('role')"
+        />
+      </ui-form-section>
+
+      <div class="flex items-center gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
           Send invitation
         </ui-button>
         <a
           routerLink="/staff"
-          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >Cancel</a
         >
       </div>

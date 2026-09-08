@@ -3,18 +3,29 @@ import {
   Component,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, Select, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  FormSection,
+  PageHeader,
+  Select,
+  TextField,
+} from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 import { ScheduleStore } from '../../shared/data/store/schedule.store';
+import { applyServerErrors, clearServerErrors, fieldErrorMessage } from '../../shared/form-errors';
+import { allowedTripClassOptions, type TripClass } from '../../shared/trip-class';
 
 const DAY_LABELS: { value: number; label: string }[] = [
   { value: 1, label: 'Mon' },
@@ -26,20 +37,6 @@ const DAY_LABELS: { value: number; label: string }[] = [
   { value: 7, label: 'Sun' },
 ];
 
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
-
 /**
  * One component for create (`schedules/new`) and edit
  * (`schedules/:id/edit`) — mirrors VehicleForm's dual-mode shape and its
@@ -50,7 +47,9 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-schedule-form',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, RouterLink, Alert, Button, Select, TextField],
+  imports: [ReactiveFormsModule, RouterLink, Alert,
+    FormSection,
+    PageHeader, Button, Select, TextField],
   templateUrl: './schedule-form.html',
 })
 export class ScheduleForm implements OnInit {
@@ -58,7 +57,6 @@ export class ScheduleForm implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   protected readonly store = inject(ScheduleStore);
 
@@ -70,6 +68,17 @@ export class ScheduleForm implements OnInit {
 
   protected readonly routeOptionsList = signal<SelectOption[]>([]);
   protected readonly selectedDays = signal<number[]>([]);
+
+  /**
+   * Each route's own `available_trip_classes`, kept from the fetch that
+   * already populates the Route picker — no extra request.
+   *
+   * Offering a class the chosen route refuses would produce a
+   * guaranteed 400 the operator can only discover by submitting. This
+   * turns it into an option that was never there.
+   */
+  private readonly classesByRoute = signal<ReadonlyMap<string, string[]>>(new Map());
+
   protected readonly submitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
 
@@ -85,6 +94,51 @@ export class ScheduleForm implements OnInit {
     departure_time: ['', Validators.required],
     effective_from: ['', Validators.required],
     effective_until: [''],
+    // docs/specs/15-trip-classes.md. Snapshotted onto every Trip this
+    // schedule generates, so this is the field with the widest
+    // downstream reach on the screen.
+    trip_class: ['standard' as TripClass, Validators.required],
+  });
+
+  /**
+   * Declared **after** `form`, and read through `toSignal` rather than
+   * `form.controls.route.value`.
+   *
+   * Order matters: a field initialiser touching `this.form` before it
+   * exists throws. And a `computed()` over a plain control value
+   * depends on no signal at all, so it caches its first result forever
+   * — the class list would freeze on whatever was selected at first
+   * render, which is nothing. Both validator screens carried exactly
+   * that bug for months (docs/specs/10-booking-modes.md).
+   */
+  private readonly selectedRouteId = toSignal(this.form.controls.route.valueChanges, {
+    initialValue: '',
+  });
+
+  protected readonly tripClassOptions = computed<SelectOption[]>(() =>
+    allowedTripClassOptions(this.classesByRoute().get(this.selectedRouteId()) ?? [])
+  );
+
+  /**
+   * Keeps the selected class inside the options actually offered.
+   *
+   * Narrowing the list is only half the job: a control still holding
+   * `standard` while the route offers Premium alone renders a `<select>`
+   * with no matching `<option>` — which *looks* empty, keeps its old
+   * value, and 400s on submit with "this route does not offer standard
+   * services". That is the exact failure the narrowing exists to
+   * prevent, arrived at from the other direction. Caught by
+   * `e2e/client-admin-app/trip-classes.spec.ts`, not by any unit test.
+   */
+  private readonly keepClassWithinAllowed = effect(() => {
+    const allowed = this.tripClassOptions();
+    if (allowed.length === 0) {
+      return;
+    }
+    const current = untracked(() => this.form.controls.trip_class.value);
+    if (!allowed.some((option) => option.value === current)) {
+      this.form.controls.trip_class.setValue(allowed[0].value as TripClass);
+    }
   });
 
   async ngOnInit(): Promise<void> {
@@ -123,6 +177,9 @@ export class ScheduleForm implements OnInit {
       departure_time: schedule.departure_time,
       effective_from: schedule.effective_from,
       effective_until: schedule.effective_until ?? '',
+      // See VehicleTypeForm's note: `patchValue` applies an explicit
+      // `undefined`, and this control is required.
+      trip_class: schedule.trip_class ?? 'standard',
     });
     this.form.controls.business.disable();
     this.form.controls.route.disable();
@@ -140,13 +197,17 @@ export class ScheduleForm implements OnInit {
     }
     const { data } = await this.api.GET('/api/v1/routes/', {
       params: { query: { limit: 100, offset: 0, business: businessId } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
+    const routes = data?.results ?? [];
     this.routeOptionsList.set(
-      (data?.results ?? []).map((route) => ({
+      routes.map((route) => ({
         value: route.id,
         label: route.name,
-      })),
+      }))
+    );
+    // The allow-list rides along on a fetch that already happens.
+    this.classesByRoute.set(
+      new Map(routes.map((route) => [route.id, route.available_trip_classes ?? []]))
     );
   }
 
@@ -156,7 +217,7 @@ export class ScheduleForm implements OnInit {
 
   protected toggleDay(day: number): void {
     this.selectedDays.update((days) =>
-      days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort((a, b) => a - b),
+      days.includes(day) ? days.filter((d) => d !== day) : [...days, day].sort((a, b) => a - b)
     );
   }
 
@@ -172,10 +233,8 @@ export class ScheduleForm implements OnInit {
 
     this.submitting.set(true);
     this.errorMessage.set(null);
+    clearServerErrors(this.form);
     const values = this.form.getRawValue();
-    const authHeader = {
-      Authorization: `Bearer ${this.authStore.accessToken()}`,
-    };
     const id = this.scheduleId();
 
     const { data, error } = id
@@ -186,8 +245,8 @@ export class ScheduleForm implements OnInit {
             departure_time: values.departure_time,
             effective_from: values.effective_from,
             effective_until: values.effective_until || null,
+            trip_class: values.trip_class,
           },
-          headers: authHeader,
         })
       : await this.api.POST('/api/v1/schedules/', {
           body: {
@@ -196,18 +255,19 @@ export class ScheduleForm implements OnInit {
             departure_time: values.departure_time,
             effective_from: values.effective_from,
             effective_until: values.effective_until || null,
+            trip_class: values.trip_class,
           },
-          headers: authHeader,
         });
 
     this.submitting.set(false);
 
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(
+        applyServerErrors(
+          this.form,
           error,
-          'Could not save this schedule. Check your details and try again.',
-        ),
+          'Could not save this schedule. Check your details and try again.'
+        )
       );
       return;
     }
@@ -215,14 +275,19 @@ export class ScheduleForm implements OnInit {
     await this.router.navigate(['/schedules']);
   }
 
+  /** Every field, not just those with a validator: any of them can
+   * come back rejected by the server, and `fieldErrorMessage`
+   * surfaces that the same way it surfaces a client-side failure. */
   protected fieldError(
-    field: 'business' | 'route' | 'departure_time' | 'effective_from',
+    field:
+      | 'business'
+      | 'route'
+      | 'departure_time'
+      | 'effective_from'
+      | 'effective_until'
+      | 'trip_class'
   ): string | null {
-    const control = this.form.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+    return fieldErrorMessage(this.form.controls[field]);
   }
 
   // A Business with no Routes yet renders the Route <select> with zero

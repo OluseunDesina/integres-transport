@@ -109,7 +109,7 @@ def test_search_returns_only_scheduled_trips(excluded_status: str) -> None:
     assert [row["id"] for row in response.data["results"]] == [str(scheduled.id)]
 
 
-def test_search_excludes_tap_and_go_trips() -> None:
+def test_search_excludes_pay_as_you_go_trips() -> None:
     client = ClientFactory()
     passenger = PassengerUserFactory(client=client)
     route, reservation_trip = _route_with_trip(client, service_date=SERVICE_DATE)
@@ -119,7 +119,7 @@ def test_search_excludes_tap_and_go_trips() -> None:
             route=route,
             business=route.business,
             service_date=SERVICE_DATE,
-            booking_mode=Business.BookingMode.TAP_AND_GO,
+            fare_collection_mode=Business.FareCollectionMode.PAY_AS_YOU_GO,
         )
 
     response = _auth_client(passenger).get(
@@ -129,7 +129,7 @@ def test_search_excludes_tap_and_go_trips() -> None:
     assert [row["id"] for row in response.data["results"]] == [str(reservation_trip.id)]
 
 
-def test_search_ignores_a_caller_supplied_status_or_booking_mode() -> None:
+def test_search_ignores_a_caller_supplied_status_or_fare_collection_mode() -> None:
     """Both filters are forced server-side — a passenger must not be
     able to widen the search by guessing query params."""
     client = ClientFactory()
@@ -148,7 +148,7 @@ def test_search_ignores_a_caller_supplied_status_or_booking_mode() -> None:
             route=route,
             business=route.business,
             service_date=SERVICE_DATE,
-            booking_mode=Business.BookingMode.TAP_AND_GO,
+            fare_collection_mode=Business.FareCollectionMode.PAY_AS_YOU_GO,
         )
 
     response = _auth_client(passenger).get(
@@ -157,7 +157,7 @@ def test_search_ignores_a_caller_supplied_status_or_booking_mode() -> None:
             "route": str(route.id),
             "service_date": "2026-08-10",
             "status": Trip.Status.CANCELLED,
-            "booking_mode": Business.BookingMode.TAP_AND_GO,
+            "fare_collection_mode": Business.FareCollectionMode.PAY_AS_YOU_GO,
         },
     )
 

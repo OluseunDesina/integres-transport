@@ -1,18 +1,35 @@
 <app-auth-layout>
-  <h1 class="mb-1 text-lg font-semibold text-slate-900">Sign in</h1>
-  <p class="mb-6 text-sm text-slate-500">{{ subtitle }}</p>
+  <!-- The operator's mark, not ours, wherever the host resolves to a
+       configured tenant. This is a passenger's first sight of the app,
+       and the one screen where whose service it is matters most. -->
+  <div class="mb-6 flex justify-center">
+    <app-brand-mark [height]="36" />
+  </div>
+
+  <h1 class="mb-1 text-xl font-semibold text-strong">Sign in</h1>
+  <p class="mb-6 text-muted">{{ subtitle }}</p>
 
   @if (errorMessage(); as message) {
-  <ui-alert class="mb-4">{{ message }}</ui-alert>
+    <ui-alert class="mb-4">{{ message }}</ui-alert>
   }
 
   <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-    <ui-text-field label="Email" type="email" autocomplete="email" formControlName="email"
-      [invalid]="!!fieldError('email')" [errorMessage]="fieldError('email')" />
-    <ui-text-field label="Password" type="password" autocomplete="current-password" formControlName="password"
-      [invalid]="!!fieldError('password')" [errorMessage]="fieldError('password')" />
-    <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
-      Sign in
-    </ui-button>
+    <ui-text-field
+      label="Email"
+      type="email"
+      autocomplete="email"
+      formControlName="email"
+      [invalid]="!!fieldError('email')"
+      [errorMessage]="fieldError('email')"
+    />
+    <ui-text-field
+      label="Password"
+      type="password"
+      autocomplete="current-password"
+      formControlName="password"
+      [invalid]="!!fieldError('password')"
+      [errorMessage]="fieldError('password')"
+    />
+    <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">Sign in</ui-button>
   </form>
 </app-auth-layout>

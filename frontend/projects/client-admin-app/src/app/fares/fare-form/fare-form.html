@@ -1,38 +1,67 @@
-<div class="mx-auto max-w-lg">
-  <h1 class="mb-6 text-lg font-semibold text-slate-900">New fare</h1>
+<div class="mx-auto max-w-2xl">
+  <ui-page-header
+    class="mb-6"
+    title="New fare"
+    description="A price, effective from now. Editing a fare never overwrites the old one — a new version supersedes it, so past bookings keep the price they were sold at."
+  />
 
   @if (errorMessage(); as message) {
     <ui-alert class="mb-4">{{ message }}</ui-alert>
   }
 
-  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-    <ui-select
-      label="Route"
-      [options]="routeOptionsList()"
-      formControlName="route"
-      [invalid]="!!fieldError('route')"
-      [errorMessage]="fieldError('route')"
-    />
+  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+    <ui-form-section title="What this prices" description="The journey this fare applies to.">
+      <ui-select
+        label="Route"
+        [options]="routeOptionsList()"
+        formControlName="route"
+        [invalid]="!!fieldError('route')"
+        [errorMessage]="fieldError('route')"
+      />
 
-    @if (isPerSegment()) {
-      <ui-select label="From stop" [options]="stopOptionsList()" formControlName="from_stop" />
-      <ui-select label="To stop" [options]="stopOptionsList()" formControlName="to_stop" />
-    }
+      @if (isPerSegment()) {
+        <ui-select
+          label="From stop"
+          [options]="stopOptionsList()"
+          formControlName="from_stop"
+          [invalid]="!!fieldError('from_stop')"
+          [errorMessage]="fieldError('from_stop')"
+        />
+        <ui-select
+          label="To stop"
+          [options]="stopOptionsList()"
+          formControlName="to_stop"
+          [invalid]="!!fieldError('to_stop')"
+          [errorMessage]="fieldError('to_stop')"
+        />
+      }
 
-    <ui-text-field
-      label="Amount"
-      formControlName="amount"
-      [invalid]="!!fieldError('amount')"
-      [errorMessage]="fieldError('amount')"
-    />
+      <ui-select
+        label="Service class"
+        hint="'Any class' prices every class that has no fare of its own. A fare set for a specific class overrides it."
+        [options]="tripClassOptions"
+        formControlName="trip_class"
+        [invalid]="!!fieldError('trip_class')"
+        [errorMessage]="fieldError('trip_class')"
+      />
+    </ui-form-section>
 
-    <div class="mt-2 flex gap-3">
+    <ui-form-section title="Price" description="In the business's own currency.">
+      <ui-text-field
+        label="Amount"
+        formControlName="amount"
+        [invalid]="!!fieldError('amount')"
+        [errorMessage]="fieldError('amount')"
+      />
+    </ui-form-section>
+
+    <div class="flex gap-3">
       <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
         Create fare
       </ui-button>
       <a
         routerLink="/fares"
-        class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
         >Cancel</a
       >
     </div>

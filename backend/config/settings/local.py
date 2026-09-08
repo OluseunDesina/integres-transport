@@ -1,5 +1,7 @@
 """Local development settings. DJANGO_SETTINGS_MODULE=config.settings.local"""
 
+from typing import cast
+
 from .base import *  # noqa: F403
 from .base import config
 
@@ -33,13 +35,31 @@ TICKET_SIGNING_ACTIVE_KID = "local-dev-1"
 # fix: `config.settings.ci` (real CI) and production/staging are
 # unaffected, so the actual rate-limiting guarantee anywhere it matters
 # is unchanged.
+#
+# **Merged into base's rates, not substituted for them.** This block used
+# to replace `DEFAULT_THROTTLE_RATES` wholesale, which meant any scope
+# added to `base.py` did not exist under `config.settings.local` at all —
+# and DRF answers an unknown scope with `ImproperlyConfigured`, i.e. a
+# 500. Spec 16 slice 4's `export` scope hit exactly that: every one of
+# its endpoints 500'd the first time they were called in a browser, while
+# the whole backend suite stayed green, because `config.settings.ci`
+# inherits these rates rather than overriding them. Spreading base's dict
+# first means the next scope is inherited automatically and only the
+# values named below are widened.
 REST_FRAMEWORK = {
     **REST_FRAMEWORK,  # noqa: F405
     "DEFAULT_THROTTLE_RATES": {
+        **cast(dict[str, str], REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]),  # noqa: F405
         "auth_login_customer": "100/min",
         "auth_login_client_admin": "100/min",
         "auth_login_super_admin": "100/min",
         "auth_register": "100/min",
         "auth_invite_accept": "100/min",
+        # Playwright downloads several exports in one run.
+        "export": "100/min",
+        # And files several passenger reports in one run.
+        "incident_report": "100/min",
+        # And resolves the same passenger on every counter-booking spec.
+        "passenger_lookup": "100/min",
     },
 }

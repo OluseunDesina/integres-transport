@@ -24,12 +24,17 @@ from apps.seating.tests.factories import SeatFactory
 
 
 def booking_with_a_held_seat(
-    client: Any, business: Any, *, amount: str = "500.00"
+    client: Any, business: Any, *, amount: str = "500.00", passenger: Any = None
 ) -> tuple[Any, Any]:
     """Returns `(booking, reservation)`, both real rows: a Trip with a
     Route/Stops/Vehicle, an open-ended flat FareRule, and one HELD
     SeatReservation created the real way (via
-    apps.seating.services.create_reservation), not faked."""
+    apps.seating.services.create_reservation), not faked.
+
+    `passenger` defaults to a fresh `PassengerUserFactory` row, as
+    before — pass an existing one when a test needs two bookings
+    belonging to the same passenger (e.g. a blended-payment test
+    draining a shared wallet across two bookings)."""
     with tenant_context(str(client.id)):
         route = RouteFactory(client=client, business=business)
         stop_a = StopFactory(client=client, business=business)
@@ -54,7 +59,8 @@ def booking_with_a_held_seat(
             scheduled_departure_at=departure,
         )
         fare_rule = FareRuleFactory(client=client, route=route, business=business, amount=amount)
-        passenger = PassengerUserFactory(client=client)
+        if passenger is None:
+            passenger = PassengerUserFactory(client=client)
         seat = SeatFactory(client=client, vehicle_type=vehicle_type)
         booking = BookingFactory(
             client=client,

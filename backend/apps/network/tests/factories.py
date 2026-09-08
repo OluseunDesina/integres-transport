@@ -20,6 +20,15 @@ class RouteFactory(factory.django.DjangoModelFactory):
     name = factory.Faker("street_name")
     code = ""
     description = ""
+    # The model itself defaults to `draft` (docs/specs/19-route-lifecycle.md
+    # — a genuinely new route should start there). This factory defaults
+    # to `active` instead, matching what `is_active=True` meant before
+    # the lifecycle existed: dozens of tests across other apps build a
+    # Route via `RouteFactory()` expecting an ordinarily-usable one with
+    # no override, and this is what keeps that true. Route-lifecycle
+    # tests that specifically want a draft/inactive/archived fixture
+    # pass `status=` explicitly.
+    status = Route.Status.ACTIVE
 
 
 class StopFactory(factory.django.DjangoModelFactory):

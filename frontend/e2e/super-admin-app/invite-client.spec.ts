@@ -22,7 +22,11 @@ async function signIn(page: Page): Promise<void> {
 test.describe('super-admin-app invite a client', () => {
   test('renders an axe-clean invite-client screen behind the nav shell', async ({ page }) => {
     await signIn(page);
-    await page.getByRole('link', { name: 'Invite Client' }).click();
+    // Scoped to the nav and in sentence case: spec 14 slice 6a matched
+    // the labels to their headings, and gave `home` cards linking to the
+    // same four destinations — so an unscoped link lookup now matches
+    // two elements.
+    await page.getByRole('navigation').getByRole('link', { name: 'Invite a client' }).click();
 
     await expect(page).toHaveURL(/\/invite-client$/);
     await expect(page.getByRole('heading', { name: 'Invite a client' })).toBeVisible();

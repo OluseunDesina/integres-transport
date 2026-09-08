@@ -1,0 +1,302 @@
+<div class="flex flex-col gap-6">
+  <ui-page-header
+    title="Dashboard"
+    description="How this business is trading — revenue, bookings and operations over the selected period."
+  />
+
+  @if (!canViewAnalytics()) {
+    <!--
+      Staff lands here after signing in and does not carry
+      `analytics.view` — see the component docstring. No request is made,
+      and the reason is stated rather than left as an empty screen.
+    -->
+    <ui-empty-state
+      title="Analytics are not part of your role"
+      description="Revenue and performance reporting is available to Owners and Managers. Everything else in the console is still yours to use."
+    />
+    <p class="text-sm text-muted">
+      Signed in as {{ authStore.user()?.email }}. Start from
+      <a
+        routerLink="/trips"
+        class="font-medium text-primary underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >Trips</a
+      >
+      or
+      <a
+        routerLink="/bookings"
+        class="font-medium text-primary underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >Bookings</a
+      >.
+    </p>
+  } @else {
+    <ui-filter-bar
+      [showSearch]="false"
+      ariaLabel="Dashboard period"
+      [chips]="filters.chips()"
+      (chipRemoved)="onChipRemoved($event)"
+      (cleared)="onClearFilters()"
+    >
+      <!--
+        `items-start`, not the bar's own `items-end`. "Group by" carries
+        a hint below its control, so bottom-alignment pushed that select
+        a line higher than the two date fields and the three labels came
+        out on two different baselines — visible in iteration-1's 1200px
+        capture, where the row read as broken rather than as a set.
+      -->
+      <div filters class="flex flex-wrap items-start gap-3">
+        <div class="w-44">
+          <ui-text-field
+            label="From"
+            type="date"
+            [ngModel]="filters.dateFrom()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onDateFromChange($event)"
+          />
+        </div>
+        <div class="w-44">
+          <ui-text-field
+            label="To"
+            type="date"
+            [ngModel]="filters.dateTo()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onDateToChange($event)"
+          />
+        </div>
+        <div class="w-44">
+          <ui-select
+            label="Group by"
+            hint="Longer ranges need a coarser grouping."
+            [options]="granularityOptions"
+            [ngModel]="filters.granularity()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onGranularityChange($event)"
+          />
+        </div>
+      </div>
+    </ui-filter-bar>
+
+    @if (store.error(); as message) {
+      <!-- Inline, not only a toast: the two 400s reachable from here
+           (reversed range, over-cap range) name what to change, and a
+           message that disappears cannot be acted on. -->
+      <ui-alert>{{ message }}</ui-alert>
+    } @else if (store.loading()) {
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-busy="true">
+        @for (card of skeletonCards; track card) {
+          <div class="rounded-md border border-border bg-surface p-4">
+            <ui-skeleton [lines]="2" />
+          </div>
+        }
+      </div>
+      <ui-skeleton variant="block" height="12rem" />
+    } @else if (store.data(); as data) {
+      @if (period(); as p) {
+        <p class="text-sm text-muted">
+          {{ p.from }} to {{ p.to }} · times in {{ p.timezone }}
+        </p>
+      }
+
+      @if (isEmptyPeriod()) {
+        <!-- Distinguishable from an error on purpose: the endpoint
+             answered, and this is what it said. -->
+        <ui-empty-state
+          title="Nothing to report for this period"
+          description="No payments, bookings or trips fall inside the selected dates for this business. Widen the range, or pick a different business."
+        />
+      } @else {
+        @for (entry of data.money; track entry.currency) {
+          <section class="flex flex-col gap-4">
+            <h2 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">
+              Revenue · {{ entry.currency }}
+            </h2>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <ui-stat label="Net revenue" hint="After Integra's commission.">
+                {{ moneyLabel(entry, entry.revenue) }}
+              </ui-stat>
+              <ui-stat label="Gross" hint="What passengers paid.">
+                {{ moneyLabel(entry, entry.gross) }}
+              </ui-stat>
+              <ui-stat label="Commission">
+                {{ moneyLabel(entry, entry.commission) }}
+              </ui-stat>
+              <ui-stat
+                label="Transactions"
+                [hint]="'Average ' + moneyLabel(entry, entry.average_ticket_value)"
+              >
+                {{ entry.transaction_volume }}
+              </ui-stat>
+            </div>
+            <div class="rounded-md border border-border bg-surface p-4">
+              <h3 class="mb-3 text-sm font-medium text-default">
+                Net revenue over time ({{ entry.currency }})
+              </h3>
+              <ui-chart
+                type="line"
+                [series]="revenueSeries(entry)"
+                [title]="'Net revenue over time in ' + entry.currency"
+                labelHeading="Date"
+                [valueFormatter]="revenueFormatter(entry)"
+                emptyMessage="No revenue recorded in this period."
+              />
+            </div>
+          </section>
+        }
+
+        @if (data.money.length === 0) {
+          <ui-alert variant="warning"
+            >No payments settled in this period, so there is no revenue to break down. The
+            operational figures below still apply.</ui-alert
+          >
+        }
+
+        <section class="flex flex-col gap-4">
+          <h2 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">
+            Operations
+          </h2>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <ui-stat label="Active routes" [hint]="data.routes.inactive + ' inactive'">
+              {{ data.routes.active }}
+            </ui-stat>
+            <ui-stat
+              label="Trips completed today"
+              [hint]="data.trips.in_progress + ' running now'"
+            >
+              {{ data.trips.completed_today }}
+            </ui-stat>
+            <ui-stat label="Paid bookings" [hint]="data.bookings.total + ' in total'">
+              {{ data.bookings.paid }}
+            </ui-stat>
+            <!-- Zero until spec 17 builds the model. Present now because
+                 the envelope carries the key now. -->
+            <ui-stat label="Open incidents" hint="Open, acknowledged or investigating.">
+              {{ data.incidents.open }}
+            </ui-stat>
+          </div>
+          <div class="rounded-md border border-border bg-surface p-4">
+            <h3 class="mb-3 text-sm font-medium text-default">Bookings over time</h3>
+            <ui-chart
+              type="bar"
+              [series]="bookingSeries()"
+              title="Bookings over time"
+              labelHeading="Date"
+              [valueFormatter]="countFormatter"
+              emptyMessage="No bookings were made in this period."
+            />
+          </div>
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">
+              Recent incidents
+            </h2>
+            <a
+              routerLink="/incidents"
+              class="text-sm font-medium text-primary underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              >All incidents</a
+            >
+          </div>
+          <ui-table
+            label="Recent incidents"
+            [empty]="recentIncidents().length === 0"
+            emptyMessage="No incidents reported in this period."
+          >
+            <thead>
+              <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+                <th class="py-2">Reference</th>
+                <th class="py-2">Title</th>
+                <th class="hidden py-2 md:table-cell">Severity</th>
+                <th class="py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (incident of recentIncidents(); track incident.id) {
+                <tr class="border-b border-border last:border-0">
+                  <td class="py-3">
+                    <a
+                      class="text-brand-700 underline underline-offset-2"
+                      [routerLink]="['/incidents', incident.id]"
+                    >
+                      <span class="[overflow-wrap:anywhere]">{{ incident.reference }}</span>
+                    </a>
+                  </td>
+                  <td class="py-3">
+                    <span class="[overflow-wrap:anywhere]">{{ incident.title }}</span>
+                    <!-- The severity column is hidden below md; its value
+                         re-flows here, per ui-table's convention. -->
+                    <span class="block text-xs text-muted md:hidden">{{
+                      severityLabel(incident.severity)
+                    }}</span>
+                  </td>
+                  <td class="hidden py-3 md:table-cell">
+                    <ui-status-pill
+                      [tone]="severityTone(incident.severity)"
+                      [label]="severityLabel(incident.severity)"
+                    />
+                  </td>
+                  <td class="py-3">
+                    <ui-status-pill
+                      [tone]="statusTone(incident.status)"
+                      [label]="statusLabel(incident.status)"
+                    />
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </ui-table>
+        </section>
+
+        <section class="flex flex-col gap-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">
+              Recent transactions
+            </h2>
+            <a
+              routerLink="/payments"
+              class="text-sm font-medium text-primary underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              >All payments</a
+            >
+          </div>
+          <ui-table
+            label="Recent transactions"
+            [empty]="recentTransactions().length === 0"
+            emptyMessage="No payments in this period."
+          >
+            <thead>
+              <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+                <th class="py-2">Created</th>
+                <th class="py-2">Amount</th>
+                <th class="hidden py-2 md:table-cell">Channel</th>
+                <th class="py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (transaction of recentTransactions(); track transaction.id) {
+                <tr class="border-b border-border last:border-0">
+                  <td class="py-3">{{ transaction.created_at | date: 'short' }}</td>
+                  <td class="py-3">
+                    {{ transaction.currency }} {{ transaction.amount }}
+                    <!-- The channel column is hidden below md; its value
+                         re-flows here, per ui-table's convention. -->
+                    <span class="block text-xs text-muted md:hidden">{{
+                      channelLabel(transaction.channel)
+                    }}</span>
+                  </td>
+                  <td class="hidden py-3 md:table-cell">
+                    {{ channelLabel(transaction.channel) }}
+                  </td>
+                  <td class="py-3">
+                    <ui-status-pill
+                      [label]="transaction.status"
+                      [tone]="transactionTone(transaction.status)"
+                    />
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </ui-table>
+        </section>
+      }
+    }
+  }
+</div>

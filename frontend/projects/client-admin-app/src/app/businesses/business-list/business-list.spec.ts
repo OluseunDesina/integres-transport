@@ -1,3 +1,4 @@
+import { expectColumnVisibilityParity } from '@shared-ui';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -116,7 +117,9 @@ describe('BusinessList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'client.view', 'business.manage'] })
+      makeUser({
+        permissions: ['client-admin:access', 'client.view', 'business.manage'],
+      })
     );
     fixture.detectChanges();
 
@@ -130,7 +133,9 @@ describe('BusinessList', () => {
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'client.view', 'business.manage'] })
+      makeUser({
+        permissions: ['client-admin:access', 'client.view', 'business.manage'],
+      })
     );
     fixture.detectChanges();
     const router = TestBed.inject(Router);
@@ -151,9 +156,26 @@ describe('BusinessList', () => {
     fixture.detectChanges();
 
     const buttons = fixture.debugElement.queryAll(By.css('button'));
-    const nextButton = buttons.find((b) => (b.nativeElement.textContent as string).includes('Next'));
+    const nextButton = buttons.find((b) =>
+      (b.nativeElement.textContent as string).includes('Next')
+    );
     nextButton?.nativeElement.click();
 
     expect(store.changePage).toHaveBeenCalledWith(25);
+  });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makeBusiness()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'business-list rows');
+  });
+
+  it('keeps the skeleton row aligned with the header too', () => {
+    store.loading.set(true);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'business-list skeleton');
   });
 });

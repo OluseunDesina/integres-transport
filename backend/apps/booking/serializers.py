@@ -3,15 +3,19 @@ docs/specs/4-fares-seating-booking.md §3."""
 
 from typing import Any
 
-from drf_spectacular.utils import extend_schema_field
+from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema_field
 from rest_framework import serializers
 
 from apps.businesses.models import Business
+from apps.identity.models import User
 from apps.network.models import RouteStop, Stop
 from apps.scheduling.models import Trip
 from apps.seating.models import Seat, SeatReservation
 
+from .manifest import MANIFEST_KIND_CHOICES
 from .models import Booking
+from .services import is_quick_book
+from .staff import STAFF_BOOKING_PAYMENT_STATUS_CHOICES
 
 
 def _resolve_stop(value: Any) -> Stop:
@@ -64,10 +68,25 @@ class BookingCreateSerializer(serializers.Serializer):
     """
 
     trip = serializers.UUIDField()
-    seats = BookingSeatRequestSerializer(many=True)
+    # Both optional at the field level, because which one is *required*
+    # depends on the trip's booking mode — a fact not known until
+    # validate() has resolved the trip. Enforced there instead
+    # (docs/specs/10-booking-modes.md).
+    seats = BookingSeatRequestSerializer(many=True, required=False)
+    passenger_count = serializers.IntegerField(required=False, min_value=1)
+    # Open seating has no per-seat rows, so the journey is stated once
+    # for the whole booking rather than per seat.
+    from_stop = serializers.UUIDField(required=False)
+    to_stop = serializers.UUIDField(required=False)
 
     def validate_trip(self, value: Any) -> Trip:
         return _resolve_trip(value)
+
+    def validate_from_stop(self, value: Any) -> Stop:
+        return _resolve_stop(value)
+
+    def validate_to_stop(self, value: Any) -> Stop:
+        return _resolve_stop(value)
 
     def validate_seats(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not value:
@@ -80,16 +99,97 @@ class BookingCreateSerializer(serializers.Serializer):
             )
         return value
 
+    def _validate_seatless(
+        self, attrs: dict[str, Any], trip: Trip, *, seats_message: str
+    ) -> dict[str, Any]:
+        """The body shape shared by the two ways of buying a place
+        without naming a seat: open seating, and reservation mode with
+        seat choice turned off ("quick book",
+        docs/specs/10-booking-modes.md). Both send `passenger_count`
+        plus one journey for the whole booking rather than per seat.
+
+        Rejects the reservation-shaped body outright rather than
+        ignoring the parts that do not apply. A passenger who sent
+        `seats` believed they were choosing one; silently dropping it
+        would give them a booking they did not ask for.
+        """
+        if attrs.get("seats"):
+            raise serializers.ValidationError(
+                {"seats": seats_message}, code="seats_not_supported"
+            )
+        missing = [
+            field for field in ("passenger_count", "from_stop", "to_stop") if field not in attrs
+        ]
+        if missing:
+            raise serializers.ValidationError(
+                dict.fromkeys(missing, "This field is required for this trip."),
+                code="open_seating_fields_required",
+            )
+
+        from_stop: Stop = attrs["from_stop"]
+        to_stop: Stop = attrs["to_stop"]
+        sequences = {
+            route_stop.stop_id: route_stop.sequence
+            for route_stop in RouteStop.objects.filter(
+                route=trip.route, stop_id__in=[from_stop.id, to_stop.id]
+            )
+        }
+        if from_stop.id not in sequences or to_stop.id not in sequences:
+            raise serializers.ValidationError(
+                {"from_stop": "Both stops must be on the trip's route."},
+                code="stop_not_on_route",
+            )
+        if sequences[from_stop.id] >= sequences[to_stop.id]:
+            raise serializers.ValidationError(
+                {"from_stop": "from_stop must come before to_stop on the route."},
+                code="invalid_segment_order",
+            )
+        return attrs
+
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         trip: Trip = attrs["trip"]
-        if trip.booking_mode != Business.BookingMode.RESERVATION:
+        # Two distinct refusals, deliberately not merged. A pay-as-you-go
+        # trip cannot be booked at all — there is nothing to buy in
+        # advance. An open-seating trip *can* be booked, just not with
+        # named seats (docs/specs/10-booking-modes.md).
+        if trip.fare_collection_mode != Business.FareCollectionMode.PREPAID:
             raise serializers.ValidationError(
-                {"trip": "This trip does not use seat reservations."},
-                code="not_reservation_mode",
+                {"trip": "This trip charges fares on board, so it cannot be booked in advance."},
+                code="not_prepaid",
             )
         if trip.status != Trip.Status.SCHEDULED:
             raise serializers.ValidationError(
                 {"trip": "This trip is not open for booking."}, code="trip_not_scheduled"
+            )
+
+        if trip.booking_mode == Business.BookingMode.OPEN_SEATING:
+            return self._validate_seatless(
+                attrs,
+                trip,
+                seats_message=(
+                    "This trip does not use assigned seats. Send passenger_count instead."
+                ),
+            )
+        if is_quick_book(trip):
+            return self._validate_seatless(
+                attrs,
+                trip,
+                seats_message=(
+                    "This operator assigns seats. Send passenger_count instead."
+                ),
+            )
+
+        if not attrs.get("seats"):
+            raise serializers.ValidationError(
+                {"seats": "This field is required for this trip."}, code="empty_seats"
+            )
+        if "passenger_count" in attrs:
+            # Not silently ignored: on a reservation trip the number of
+            # passengers *is* the number of seats, so accepting both
+            # invites a body where they disagree.
+            raise serializers.ValidationError(
+                {"passenger_count": "This trip uses assigned seats. Send seats instead."},
+                code="passenger_count_not_supported",
             )
         if trip.vehicle is None:
             raise serializers.ValidationError(
@@ -129,6 +229,52 @@ class BookingCreateSerializer(serializers.Serializer):
         return attrs
 
 
+class StaffBookingCreateSerializer(BookingCreateSerializer):
+    """POST /bookings/staff/ body — docs/specs/18-manifest-and-staff-booking.md
+    slice 2.
+
+    Everything about *what may be booked* is inherited unchanged, which
+    is the point: a pay-as-you-go trip is refused, an open-seating trip
+    wants `passenger_count` rather than `seats`, stops must be on the
+    route and in order. A counter agent gets exactly the rules a
+    passenger gets, because they are booking the same thing.
+
+    Two fields are added — **for whom**, and **who pays now**.
+    """
+
+    passenger = serializers.UUIDField(
+        help_text="The passenger's id, from `GET /passengers/lookup/`."
+    )
+    pay_from_wallet = serializers.BooleanField(
+        required=False,
+        default=False,
+        help_text="Settle immediately from the passenger's wallet. A shortfall "
+        "leaves the booking `pending_payment` with the seats still held, and is "
+        "reported in the response's `payment` rather than raised.",
+    )
+
+    def validate_passenger(self, value: Any) -> User:
+        """`client=` is mandatory and explicit.
+
+        `identity.User` is the one model here that is not tenant-scoped
+        (ADR-0003), so an unfiltered `User.objects.get(pk=...)` would
+        happily resolve another Client's passenger and book them onto
+        this Client's trip. `is_client_staff=False` keeps a colleague's
+        id from being booked as a passenger by mistake.
+
+        The message is the same for "no such user", "another Client's
+        user" and "a staff member" — the distinction is precisely what
+        an id-guessing caller would be probing for.
+        """
+        request = self.context["request"]
+        passenger = User.objects.filter(
+            pk=value, client=request.user.client, is_client_staff=False, is_active=True
+        ).first()
+        if passenger is None:
+            raise serializers.ValidationError("Unknown passenger.", code="unknown_passenger")
+        return passenger
+
+
 class BookingSeatReservationSerializer(serializers.Serializer):
     """Nested read-only shape for `BookingSerializer.seats` — queried
     separately (`SeatReservation.objects.filter(booking=...)`), never a
@@ -160,6 +306,11 @@ class BookingTripSerializer(serializers.Serializer):
     route = BookingTripRouteSerializer()
     scheduled_departure_at = serializers.DateTimeField()
     service_date = serializers.DateField()
+    # docs/specs/15-trip-classes.md slice 3. The Trip's own snapshot,
+    # not the Schedule's current value — a Booking is a record of what
+    # was sold, and the class it was sold as cannot change underneath
+    # it (Trip.trip_class's own docstring).
+    trip_class = serializers.CharField()
 
 
 class BookingSerializer(serializers.ModelSerializer[Booking]):
@@ -170,6 +321,13 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
         model = Booking
         fields = [
             "id",
+            # docs/specs/18-manifest-and-staff-booking.md slice 1. Added
+            # to the shared serializer rather than only to the manifest,
+            # because the point of a reference is that the passenger and
+            # the operator can say the same string to each other — one
+            # that only the manifest knew would be no use on a phone
+            # call.
+            "reference",
             "business",
             "trip",
             "passenger",
@@ -193,6 +351,7 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
             "route": {"id": obj.trip.route_id, "name": obj.trip.route.name},
             "scheduled_departure_at": obj.trip.scheduled_departure_at,
             "service_date": obj.trip.service_date,
+            "trip_class": obj.trip.trip_class,
         }
 
     @extend_schema_field(BookingSeatReservationSerializer(many=True))
@@ -237,8 +396,165 @@ class BookingCancelSerializer(serializers.Serializer):
 
 
 class BookingListQuerySerializer(serializers.Serializer):
+    """Query shape for the staff-facing GET /bookings/.
+
+    `business` was missing until spec 14 slice 3b, which meant
+    client-admin's booking list spanned every Business under the Client
+    while its header switcher claimed one was active — the identical gap
+    `TripListQuerySerializer` already records having had. Tenancy was
+    never breached (`.objects` and RLS both hold at the Client
+    boundary); the screen simply lied about its scope.
+
+    `search` matches the route's name or the passenger's email, which is
+    what a support call actually gives you. Applied in the view, and it
+    only ever narrows.
+    """
+
+    business = serializers.UUIDField(required=False)
     trip = serializers.UUIDField(required=False)
     status = serializers.ChoiceField(choices=Booking.Status.choices, required=False)
+    # `allow_blank`: the filter bar emits '' when its search box is
+    # cleared, and rejecting that would 400 on the way back to the
+    # unfiltered list.
+    search = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_business(self, value: Any) -> Business:
+        # Same tenant-scoped-lookup-or-400 convention as every sibling
+        # list: an unknown OR another Client's Business id must fail
+        # here, not silently return an unfiltered list.
+        try:
+            return Business.objects.get(pk=value)
+        except Business.DoesNotExist:
+            raise serializers.ValidationError(
+                "Unknown business.", code="unknown_business"
+            ) from None
 
     def validate_trip(self, value: Any) -> Trip:
         return _resolve_trip(value)
+
+
+# --- manifest --------------------------------------------------------------
+# docs/specs/18-manifest-and-staff-booking.md slice 1. Schema-only
+# shapes: the view builds plain dicts through `apps.booking.manifest`
+# and these exist so drf-spectacular emits real types rather than
+# inferring `Any` — the same reason
+# `apps.scheduling.serializers.TripRouteSerializer` exists.
+
+
+class ManifestTripSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    route = serializers.CharField()
+    trip_class = serializers.CharField()
+    service_date = serializers.DateField()
+    scheduled_departure_at = serializers.DateTimeField()
+    status = serializers.CharField()
+    booking_mode = serializers.CharField()
+    fare_collection_mode = serializers.CharField()
+    vehicle = serializers.CharField(allow_null=True)
+    driver = serializers.CharField(allow_null=True)
+
+
+class ManifestTotalsSerializer(serializers.Serializer):
+    passengers = serializers.IntegerField()
+    boarded = serializers.IntegerField()
+    #: Null when no vehicle is assigned — unknowable, not zero.
+    capacity = serializers.IntegerField(allow_null=True)
+
+
+class ManifestPrepaidRowSerializer(serializers.Serializer):
+    #: Both null on a booking that holds a seat but has **no ticket
+    #: yet** — a ticket is issued at payment, and with no cash account in
+    #: the ledger (ADR-0006) an unpaid counter booking is the ordinary
+    #: outcome of selling at a desk, not an edge case. The screen renders
+    #: the null as "Not issued"; `booking_status` beside it says why.
+    ticket_id = serializers.UUIDField(allow_null=True)
+    booking_id = serializers.UUIDField()
+    booking_reference = serializers.CharField()
+    passenger_name = serializers.CharField()
+    #: Null throughout on an open-seating trip, which sells places
+    #: rather than seats.
+    seat_number = serializers.CharField(allow_null=True)
+    ticket_status = serializers.CharField(allow_null=True)
+    booking_status = serializers.CharField()
+    fare = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    currency = serializers.CharField()
+    boarded_at = serializers.DateTimeField(allow_null=True)
+    is_cancelled = serializers.BooleanField()
+
+
+class ManifestJourneyRowSerializer(serializers.Serializer):
+    journey_id = serializers.UUIDField()
+    passenger_name = serializers.CharField()
+    board_stop = serializers.CharField()
+    #: Both null while the journey is open — the passenger is aboard.
+    alight_stop = serializers.CharField(allow_null=True)
+    journey_status = serializers.CharField()
+    fare = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True)
+    currency = serializers.CharField()
+    boarded_at = serializers.DateTimeField()
+    alighted_at = serializers.DateTimeField(allow_null=True)
+
+
+class TripManifestSerializer(serializers.Serializer):
+    """The envelope.
+
+    `kind` is what makes this readable: a pay-as-you-go trip sells no
+    bookings and issues no tickets, so an empty `results` on one would
+    say "nobody is aboard" when the bus is full. `results` is typed as
+    the prepaid row here because a schema needs one shape; the PAYG
+    branch is documented on the endpoint and carries
+    `ManifestJourneyRowSerializer` rows.
+    """
+
+    trip = ManifestTripSerializer()
+    kind = serializers.ChoiceField(choices=MANIFEST_KIND_CHOICES)
+    totals = ManifestTotalsSerializer()
+    count = serializers.IntegerField()
+    next = serializers.CharField(allow_null=True)
+    previous = serializers.CharField(allow_null=True)
+    # A **union of the two row shapes**, not `DictField`. A plain
+    # `ListField(child=DictField())` generates `{[key: string]:
+    # unknown}[]` in `schema.ts`, which hands the frontend an untyped
+    # bag and defeats the point of a generated client. `kind` is the
+    # discriminator the consumer branches on.
+    results = serializers.SerializerMethodField()
+
+    @extend_schema_field(
+        PolymorphicProxySerializer(
+            component_name="ManifestRow",
+            serializers=[ManifestPrepaidRowSerializer, ManifestJourneyRowSerializer],
+            resource_type_field_name=None,
+            many=True,
+        )
+    )
+    def get_results(self, obj: Any) -> Any:
+        # Never called: this serializer is schema-only, and the view
+        # renders each row through its own serializer so the wire format
+        # and the schema come from the same declaration.
+        raise NotImplementedError
+
+
+class StaffBookingPaymentSerializer(serializers.Serializer):
+    """What happened to the money — always present, never left for the
+    caller to infer from the booking's status."""
+
+    status = serializers.ChoiceField(choices=STAFF_BOOKING_PAYMENT_STATUS_CHOICES)
+    reason = serializers.CharField(
+        allow_blank=True, help_text="Empty unless something needs explaining."
+    )
+    payment_intent = serializers.UUIDField(allow_null=True)
+
+
+class StaffBookingSerializer(serializers.Serializer):
+    """`POST /bookings/staff/`'s response: the booking, and separately
+    what happened to the money.
+
+    Two top-level keys rather than a `payment_status` field on the
+    booking. The booking is a `Booking` and belongs to every other
+    endpoint that returns one; the payment outcome is about *this
+    request*. Flattening them would put a field on the shared shape that
+    only one endpoint ever fills in.
+    """
+
+    booking = BookingSerializer()
+    payment = StaffBookingPaymentSerializer()

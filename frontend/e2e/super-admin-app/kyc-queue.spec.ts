@@ -21,10 +21,14 @@ test.describe.configure({ mode: 'serial' });
 test.describe('super-admin-app KYC queue', () => {
   test('renders an axe-clean KYC queue behind the nav shell', async ({ page }) => {
     await signIn(page);
-    await page.getByRole('link', { name: 'KYC Queue' }).click();
+    // Scoped to the nav and in sentence case: spec 14 slice 6a matched
+    // the labels to their headings, and gave `home` cards linking to the
+    // same four destinations — so an unscoped link lookup now matches
+    // two elements.
+    await page.getByRole('navigation').getByRole('link', { name: 'KYC queue' }).click();
 
     await expect(page).toHaveURL(/\/kyc-queue$/);
-    await expect(page.getByRole('heading', { name: 'KYC Queue' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'KYC queue' })).toBeVisible();
     await expect(page.getByText(SEEDED_CLIENT)).toBeVisible();
 
     const results = await new AxeBuilder({ page }).analyze();

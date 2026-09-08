@@ -285,9 +285,14 @@ describe('BusinessForm', () => {
       await fixture.componentInstance['onSubmit']();
       fixture.detectChanges();
 
-      expect(fixture.componentInstance['errorMessage']()).toBe(
-        'A business with this name already exists.',
+      // Rendered under the Business name field. This form has nine
+      // controls; a page-level alert saying only "already exists" left
+      // the operator guessing which one.
+      const error = (fixture.nativeElement as HTMLElement).querySelector(
+        'ui-text-field [role="alert"]',
       );
+      expect(error?.textContent?.trim()).toBe('A business with this name already exists.');
+      expect(fixture.componentInstance['errorMessage']()).toBeNull();
     });
   });
 

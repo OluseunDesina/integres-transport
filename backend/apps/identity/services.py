@@ -45,6 +45,12 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | None] = {
         "seating.view",
         "seating.manage",
         "booking.view",
+        # docs/specs/18-manifest-and-staff-booking.md slice 2 — Owner
+        # (None above) and Manager only. Booking on a passenger's behalf
+        # creates a financial obligation for someone else, which is a
+        # different authority from reading a manifest; Staff hold
+        # `booking.view` and stop there.
+        "booking.manage",
         "tapngo.record",
         "tapngo.view",
         "ledger.view",
@@ -52,6 +58,17 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | None] = {
         "wallet.view",
         "ticketing.validate",
         "notifications.view",
+        # docs/specs/16-operational-analytics.md. Owner (None above =
+        # every codename) and Manager only — Staff is deliberately
+        # excluded, since revenue totals are a different sensitivity
+        # from the operational lists Staff needs.
+        "analytics.view",
+        # docs/specs/17-incidents.md — granted to all three presets,
+        # Staff included and unlike `analytics.view`. Frontline staff
+        # are exactly who notices a broken reader; gating reporting
+        # behind a manager role would guarantee nothing gets reported.
+        "incidents.view",
+        "incidents.manage",
     ],
     "Staff": [
         "client.view",
@@ -68,6 +85,8 @@ DEFAULT_ROLE_PERMISSIONS: dict[str, list[str] | None] = {
         "wallet.view",
         "ticketing.validate",
         "notifications.view",
+        "incidents.view",
+        "incidents.manage",
     ],
 }
 
@@ -169,3 +188,57 @@ def update_staff_member(*, user: User, updated_by: User, **fields: Any) -> User:
     user.save(update_fields=list(fields))
     record_audit_event(actor=updated_by, action="staff.updated", target=user, **metadata)
     return user
+
+
+class PassengerNotFound(Exception):
+    """Raised for both "no such passenger" and "a passenger of another
+    Client" — deliberately one exception, so the view cannot accidentally
+    render two distinguishable responses (docs/adr/0002's account-
+    existence rule, and this spec's own edge-case table)."""
+
+
+def mask_email(email: str) -> str:
+    """`ada.obi@example.com` → `a••••••@example.com`.
+
+    Enough to confirm "yes, that is the address you typed" and not
+    enough to be a directory. The counter agent typed the address to get
+    here, so nothing is being withheld from them that they did not
+    already have — what masking protects is the *screen*, which a queue
+    of other passengers can see.
+    """
+    local, _, domain = email.partition("@")
+    if not domain:
+        return "•" * len(email)
+    return f"{local[:1]}{'•' * max(len(local) - 1, 1)}@{domain}"
+
+
+def lookup_passenger(*, email: str, client: Client) -> User:
+    """Resolve one passenger of `client` by exact (case-insensitive)
+    email — docs/specs/18-manifest-and-staff-booking.md slice 2.
+
+    **Deliberately not a search.** A fuzzy passenger search over a
+    Client's whole user base, in the hands of counter staff, is a
+    data-protection problem; this answers "is the person standing here,
+    who told me their address, already registered?" and nothing else.
+
+    `client=` is not optional and not inferred: `identity.User` is the
+    one model in this system that is **not** tenant-scoped (ADR-0003),
+    so `objects` applies no RLS policy here and an unfiltered
+    `User.objects.get(email=...)` would resolve another Client's
+    passenger. The same email genuinely can exist under two Clients —
+    that is a requirement of the brief, not an edge case
+    (`apps.identity.serializers`' module docstring).
+
+    `is_client_staff=False` keeps the endpoint from doubling as a staff
+    directory, and `is_active=True` keeps a deactivated account from
+    being booked for.
+    """
+    passenger = User.objects.filter(
+        client=client,
+        is_client_staff=False,
+        is_active=True,
+        email__iexact=email.strip(),
+    ).first()
+    if passenger is None:
+        raise PassengerNotFound("No passenger account matches that email address.")
+    return passenger

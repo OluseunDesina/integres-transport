@@ -143,9 +143,40 @@ describe('DriverForm', () => {
       await fixture.componentInstance['onSubmit']();
       fixture.detectChanges();
 
-      expect(fixture.componentInstance['errorMessage']()).toBe(
-        'A driver with this license number already exists.',
-      );
+      // Rendered, not merely stored: a message the component holds but
+      // no control displays is the failure this slice exists to fix.
+      // It belongs under the field the server named, not in a
+      // page-level alert that says nothing about which field is wrong.
+      const errors = Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('ui-text-field [role="alert"]')
+      ).map((el) => el.textContent?.trim());
+      expect(errors).toContain('A driver with this license number already exists.');
+      expect(fixture.componentInstance['errorMessage']()).toBeNull();
+    });
+
+    it('shows every field error the server returns, not just the first', async () => {
+      apiClient.POST.and.resolveTo({
+        error: {
+          name: ['This name is already taken.'],
+          license_number: ['A driver with this license number already exists.'],
+        },
+      });
+      fixture.componentInstance['form'].setValue({
+        business: 'biz-1',
+        name: 'Someone',
+        phone: '',
+        license_number: 'DL-1',
+        license_expires_at: '',
+      });
+
+      await fixture.componentInstance['onSubmit']();
+      fixture.detectChanges();
+
+      const errors = Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('ui-text-field [role="alert"]')
+      ).map((el) => el.textContent?.trim());
+      expect(errors).toContain('This name is already taken.');
+      expect(errors).toContain('A driver with this license number already exists.');
     });
   });
 

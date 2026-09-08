@@ -1,0 +1,114 @@
+<div class="flex flex-col gap-4">
+  <ui-page-header
+    title="Live operations"
+    description="Every trip in progress, its position, and how far behind schedule it is."
+  />
+
+  @if (store.hasSimulatedData()) {
+    <ui-alert variant="warning">
+      Some vehicles shown here are simulated positions, not real devices — do not use this data
+      for a real operational decision.
+    </ui-alert>
+  }
+
+  @if (store.pollError(); as message) {
+    <ui-alert>{{ message }} Showing the last known positions.</ui-alert>
+  }
+
+  @if (store.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (store.loading()) {
+    <div class="flex flex-col gap-4" aria-busy="true">
+      <ui-skeleton [lines]="3" />
+      <ui-skeleton variant="block" height="20rem" />
+    </div>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No trips in progress"
+      description="Vehicles appear here as soon as a trip's status moves to in progress and it starts reporting a position."
+    />
+  } @else {
+    <div class="grid grid-cols-1 gap-4 lg:grid-cols-[22rem_1fr]">
+      <div class="flex flex-col divide-y divide-border rounded-md border border-border" role="list">
+        @for (envelope of store.trips(); track envelope.trip.id) {
+          <button
+            type="button"
+            role="listitem"
+            class="flex flex-col gap-1 px-3 py-2 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            [class.bg-surface-sunken]="selectedTripId() === envelope.trip.id"
+            (click)="selectTrip(envelope.trip.id)"
+          >
+            <span class="text-sm font-medium text-strong">{{ envelope.trip.route }}</span>
+            <span class="text-xs text-muted"
+              >{{ envelope.trip.vehicle ?? notRecorded }} · {{ stalenessLabel(envelope) }} ·
+              {{ delayLabel(envelope) }}</span
+            >
+          </button>
+        }
+      </div>
+
+      <div class="flex flex-col gap-4">
+        <ui-map
+          title="Live vehicle positions"
+          [markers]="mapMarkers()"
+          [selectedId]="selectedTripId()"
+          height="20rem"
+          emptyMessage="No vehicles are currently reporting a position."
+          (markerSelected)="selectTrip($event)"
+        />
+
+        @if (selectedEnvelope(); as envelope) {
+          <div class="flex flex-col gap-3 rounded-md border border-border p-4">
+            <h2 class="text-sm font-semibold text-strong">{{ envelope.trip.route }}</h2>
+            <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
+              <div>
+                <dt class="text-xs text-muted">Vehicle</dt>
+                <dd class="text-default">{{ envelope.trip.vehicle ?? notRecorded }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-muted">Driver</dt>
+                <dd class="text-default">{{ envelope.trip.driver ?? notRecorded }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-muted">Last update</dt>
+                <dd class="text-default">{{ stalenessLabel(envelope) }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-muted">Progress</dt>
+                <dd class="text-default">
+                  @if (envelope.progress; as progress) {
+                    {{ progress.stops_completed }} / {{ progress.stops_total }} stops —
+                    {{ progress.last_stop }} → {{ progress.next_stop ?? 'Terminus' }}
+                  } @else {
+                    Unavailable
+                  }
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs text-muted">ETA to next stop</dt>
+                <dd class="text-default">{{ etaLabel(envelope) }} <span class="text-xs text-muted">(estimated)</span></dd>
+              </div>
+              <div>
+                <dt class="text-xs text-muted">Punctuality</dt>
+                <dd class="text-default">{{ delayLabel(envelope) }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-muted">Occupancy</dt>
+                <dd class="text-default">{{ occupancyLabel(envelope) }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-muted">Open incidents</dt>
+                <dd class="text-default">{{ envelope.incidents_open }}</dd>
+              </div>
+            </dl>
+          </div>
+        } @else {
+          <ui-empty-state
+            title="Select a trip"
+            description="Choose a trip from the list to see its live detail."
+          />
+        }
+      </div>
+    </div>
+  }
+</div>

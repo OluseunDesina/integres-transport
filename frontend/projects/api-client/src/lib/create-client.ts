@@ -18,5 +18,5 @@ export function createApiClient(baseUrl: string, middleware: Middleware[] = []):
   return client;
 }
 
-export type { Middleware } from 'openapi-fetch';
+export type { Middleware, MiddlewareCallbackParams } from 'openapi-fetch';
 export type { components, paths } from './schema';

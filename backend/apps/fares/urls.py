@@ -16,4 +16,9 @@ urlpatterns = [
         name="fare-segment-rule-update",
     ),
     path("trips/<uuid:pk>/fare/", views.TripFareView.as_view(), name="trip-fare"),
+    path(
+        "routes/<uuid:pk>/fare-matrix/",
+        views.RouteFareMatrixView.as_view(),
+        name="route-fare-matrix",
+    ),
 ]

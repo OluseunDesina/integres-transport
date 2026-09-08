@@ -33,6 +33,7 @@ function makeUser(overrides: Partial<AuthUser>): AuthUser {
     [navItems]="navItems"
     [businesses]="businesses"
     [activeBusinessId]="activeBusinessId"
+    [quickActions]="quickActions"
     (businessSelected)="onBusinessSelected($event)"
   />`,
 })
@@ -43,6 +44,7 @@ class HostComponent {
   ];
   businesses: { id: string; name: string }[] = [];
   activeBusinessId: string | null = null;
+  quickActions: { label: string; path: string; permissions: readonly string[] }[] = [];
   selectedBusinessId: string | null = null;
 
   onBusinessSelected(id: string): void {
@@ -348,6 +350,92 @@ describe('NavShell', () => {
       openProfileMenu(fixture);
 
       expect(findButtonByText(fixture, 'Sign out')).toBeTruthy();
+    });
+  });
+
+  // --- Quick-create top bar (docs/specs/14 slice 3a) ---
+
+  describe('quick actions', () => {
+    beforeEach(async () => {
+      localStorage.clear();
+      ({ fixture, authApi } = await setup(false));
+      authStore = TestBed.inject(AuthStore);
+      authStore.setSession(
+        'a',
+        'r',
+        makeUser({ permissions: ['client-admin:access', 'network.manage'] }),
+      );
+    });
+
+    function quickActionTrigger() {
+      return fixture.debugElement
+        .queryAll(By.css('button'))
+        .find(
+          (el) =>
+            (el.nativeElement as HTMLElement).getAttribute('aria-label') ===
+            'Create a new record',
+        );
+    }
+
+    function openQuickActions(): HTMLButtonElement[] {
+      (quickActionTrigger()!.nativeElement as HTMLButtonElement).click();
+      fixture.detectChanges();
+      return Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+    }
+
+    it('renders no top bar at all when an app supplies no actions', () => {
+      // super-admin-app and validator-app pass none, so their layout is
+      // unchanged by this addition.
+      fixture.detectChanges();
+      expect(quickActionTrigger()).toBeUndefined();
+    });
+
+    it('renders the trigger once an app supplies actions', () => {
+      fixture.componentInstance.quickActions = [
+        { label: 'New route', path: '/routes/new', permissions: ['network.manage'] },
+      ];
+      fixture.detectChanges();
+      expect(quickActionTrigger()).toBeDefined();
+    });
+
+    it('offers only the actions the user may perform', () => {
+      // Gated the same way nav items are — offering a create a user
+      // cannot perform is worse than omitting it.
+      fixture.componentInstance.quickActions = [
+        { label: 'New route', path: '/routes/new', permissions: ['network.manage'] },
+        { label: 'New vehicle', path: '/vehicles/new', permissions: ['fleet.manage'] },
+        { label: 'New anything', path: '/anything/new', permissions: [] },
+      ];
+      fixture.detectChanges();
+
+      expect(openQuickActions().map((el) => el.textContent?.trim())).toEqual([
+        'New route',
+        'New anything',
+      ]);
+    });
+
+    it('hides the whole bar when the user may perform none of them', () => {
+      fixture.componentInstance.quickActions = [
+        { label: 'New vehicle', path: '/vehicles/new', permissions: ['fleet.manage'] },
+      ];
+      fixture.detectChanges();
+      expect(quickActionTrigger()).toBeUndefined();
+    });
+
+    it('navigates to the chosen path', async () => {
+      const router = TestBed.inject(Router);
+      const navigate = spyOn(router, 'navigate').and.resolveTo(true);
+      fixture.componentInstance.quickActions = [
+        { label: 'New route', path: '/routes/new', permissions: ['network.manage'] },
+      ];
+      fixture.detectChanges();
+
+      openQuickActions()[0].click();
+      // ui-action-menu defers its emission by a macrotask so the menu has
+      // closed and returned focus first.
+      await new Promise((resolve) => setTimeout(resolve));
+
+      expect(navigate).toHaveBeenCalledWith(['/routes/new']);
     });
   });
 });

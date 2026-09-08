@@ -50,7 +50,14 @@ describe('FareJourneyStore', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/fare-journeys/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, status: undefined } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            business: undefined,
+            status: undefined,
+          },
+        },
       })
     );
     expect(store.items().length).toBe(1);
@@ -74,7 +81,14 @@ describe('FareJourneyStore', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/fare-journeys/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, status: 'needs_review' } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            business: undefined,
+            status: 'needs_review',
+          },
+        },
       })
     );
   });

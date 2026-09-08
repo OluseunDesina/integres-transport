@@ -28,17 +28,17 @@ test.describe('client-admin-app login', () => {
     ).toBeVisible();
   });
 
-  test('signs in and lands on an axe-clean home screen showing the account email', async ({
-    page,
-  }) => {
+  test('signs in and lands on an axe-clean dashboard', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel('Email').fill(EMAIL);
     await page.getByLabel('Password').fill(PASSWORD);
     await page.getByRole('button', { name: 'Sign in' }).click();
 
     await expect(page).toHaveURL(/\/home$/);
-    await expect(page.getByRole('heading')).toContainText(EMAIL);
-    await expect(page.getByText('You have client-admin-app access.')).toBeVisible();
+    // Spec 16 slice 3 replaced `home`'s static link list — which echoed
+    // the signed-in email — with the dashboard. The account identity now
+    // lives in the profile menu, which `profile-menu.spec.ts` covers.
+    await expect(page.getByRole('heading', { name: 'Dashboard', level: 1 })).toBeVisible();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);

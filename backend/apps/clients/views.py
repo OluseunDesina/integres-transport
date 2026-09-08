@@ -95,7 +95,12 @@ class ClientMeView(APIView):
 class KycQueueListView(generics.ListAPIView[Client]):
     permission_classes = [IsPlatformStaff]
     serializer_class = ClientKycQueueSerializer
-    queryset = Client.objects.filter(kyc_status=Client.KycStatus.SUBMITTED)
+    # Oldest submission first, same reasoning as `KybQueueListView`'s own
+    # ordering comment — these two queues are the same screen for two
+    # different models and must not answer "what comes first" differently.
+    queryset = Client.objects.filter(kyc_status=Client.KycStatus.SUBMITTED).order_by(
+        "kyc_submitted_at"
+    )
 
 
 @extend_schema(request=KycDecisionSerializer, responses=ClientKycQueueSerializer)

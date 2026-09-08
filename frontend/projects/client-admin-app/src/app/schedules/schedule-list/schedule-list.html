@@ -1,78 +1,201 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Schedules</h1>
-    <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewSchedule()">New schedule</ui-button>
-  </div>
+  <ui-page-header
+    title="Schedules"
+    description="Recurring departures. The nightly job generates trips from every active schedule."
+  >
+    <ui-button actions *appHasPermission="'scheduling.manage'" (pressed)="goToNewSchedule()"
+      >New schedule</ui-button
+    >
+  </ui-page-header>
 
   <!-- A failed activate/deactivate is transient and must not replace the
-       table — the row it came from still needs to be visible, and its
-       switch has already rolled back. A load error still does replace it. -->
+       table — the row it came from still needs to be visible. -->
   @if (activeError(); as message) {
     <ui-alert>{{ message }}</ui-alert>
   }
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state
-      title="No schedules yet"
-      description="Create a schedule to start generating Trips for a Route."
-    >
-      <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewSchedule()">New schedule</ui-button>
-    </ui-empty-state>
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Route</th>
-          <th class="px-4 py-2">Days</th>
-          <th class="px-4 py-2">Departure</th>
-          <th class="px-4 py-2">Effective</th>
-          <th class="px-4 py-2">Active</th>
-          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (schedule of store.items(); track schedule.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">
-              {{ routeNames().get(schedule.route) ?? schedule.route }}
-            </td>
-            <td class="px-4 py-2">{{ formatDays(schedule.days_of_week) }}</td>
-            <td class="px-4 py-2">{{ schedule.departure_time }}</td>
-            <td class="px-4 py-2">
-              {{ schedule.effective_from }}{{ schedule.effective_until ? ' – ' + schedule.effective_until : '+' }}
-            </td>
-            <td class="px-4 py-2">
-              <!-- The switch is a write, so it's gated like the Edit
-                   link — but a viewer without manage permission still
-                   needs to see the state, hence the read-only pill.
-                   `?? true` mirrors the model default. -->
-              @if (canManage()) {
-                <ui-toggle
-                  [checked]="schedule.is_active ?? true"
-                  [pending]="pendingId() === schedule.id"
-                  [label]="((schedule.is_active ?? true) ? 'Deactivate ' : 'Activate ') + (routeNames().get(schedule.route) ?? 'this schedule')"
-                  (toggled)="onToggleActive(schedule, $event)"
-                />
-              } @else if (schedule.is_active ?? true) {
-                <ui-status-pill tone="positive" label="Active" />
-              } @else {
-                <ui-status-pill tone="neutral" label="Inactive" />
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search schedules"
+        placeholder="Search by route name…"
+        ariaLabel="Schedule filters"
+        [chips]="filters.chips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      >
+        <div filters class="w-44">
+          <ui-select
+            label="Status"
+            [options]="activeFilterOptions"
+            [ngModel]="filters.activeFilter()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onActiveFilterChange($event)"
+          />
+        </div>
+      </ui-filter-bar>
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No schedules yet"
+        description="Create a schedule to start generating Trips for a Route."
+      >
+        <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewSchedule()"
+          >New schedule</ui-button
+        >
+      </ui-empty-state>
+    } @else {
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Schedules"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No schedules match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Route</th>
+              <th class="hidden py-2 md:table-cell">Days</th>
+              <th class="hidden py-2 md:table-cell">Departure</th>
+              <th class="hidden py-2 md:table-cell">Class</th>
+              <th class="hidden py-2 lg:table-cell">Effective</th>
+              <th class="py-2">Status</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="10rem" /></td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="4rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="5rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="8rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="4rem" /></td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
               }
-            </td>
-            <td class="px-4 py-2 text-right">
-              <a
-                *appHasPermission="'scheduling.manage'"
-                [routerLink]="['/schedules', schedule.id, 'edit']"
-                class="text-sm font-medium text-slate-700 hover:text-slate-900"
-                >Edit</a
-              >
-            </td>
-          </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+            } @else {
+              @for (schedule of store.items(); track schedule.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    {{ schedule.route_name }}
+                    <!-- The columns hidden below `md`, re-flowed. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ summaryLine(schedule) }}
+                    </span>
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ formatDays(schedule.days_of_week) }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ schedule.departure_time }}
+                  </td>
+                  <!-- Neutral pill — see vehicle-type-list's note on why
+                       colour carries nothing here. -->
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-status-pill tone="neutral" [label]="tripClassLabel(schedule.trip_class)" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ schedule.effective_from
+                    }}{{ schedule.effective_until ? ' – ' + schedule.effective_until : '+' }}
+                  </td>
+                  <td [class]="cellClass()">
+                    @if (isActive(schedule)) {
+                      <ui-status-pill tone="positive" label="Active" />
+                    } @else {
+                      <ui-status-pill tone="neutral" label="Inactive" />
+                    }
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    <ui-action-menu
+                      [items]="menuItems(schedule)"
+                      [label]="
+                        'Actions for the ' +
+                        schedule.departure_time +
+                        ' ' +
+                        schedule.route_name +
+                        ' schedule'
+                      "
+                      (selected)="onMenuSelected(schedule, $event)"
+                    />
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
+
+<ng-template #detailBody>
+  @if (selected(); as schedule) {
+    <dl class="flex flex-col gap-4 text-sm">
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Status</dt>
+        <dd>
+          @if (isActive(schedule)) {
+            <ui-status-pill tone="positive" label="Active" />
+          } @else {
+            <ui-status-pill tone="neutral" label="Inactive" />
+          }
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Runs on</dt>
+        <dd class="text-default">{{ formatDays(schedule.days_of_week) }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Departure</dt>
+        <dd class="text-default">{{ schedule.departure_time }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Effective</dt>
+        <dd class="text-default">
+          {{ schedule.effective_from }}
+          @if (schedule.effective_until) {
+            – {{ schedule.effective_until }}
+          } @else {
+            onwards, with no end date
+          }
+        </dd>
+      </div>
+    </dl>
+  }
+</ng-template>
+
+<ng-template #confirmBody>
+  @if (selected(); as schedule) {
+    <p class="text-sm text-default">
+      @if (isActive(schedule)) {
+        No new trips will be generated from this schedule. Trips already generated from it are not
+        changed.
+      } @else {
+        The nightly job will generate trips from this schedule again.
+      }
+    </p>
+  }
+</ng-template>

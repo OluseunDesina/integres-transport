@@ -35,7 +35,7 @@ describe('StatusPill', () => {
     fixture.detectChanges();
 
     const span = fixture.debugElement.query(By.css('span')).nativeElement as HTMLElement;
-    expect(span.classList).toContain('bg-slate-100');
+    expect(span.classList).toContain('bg-surface-sunken');
   });
 
   it('applies negative tone styling', () => {
@@ -43,7 +43,15 @@ describe('StatusPill', () => {
     fixture.detectChanges();
 
     const span = fixture.debugElement.query(By.css('span')).nativeElement as HTMLElement;
-    expect(span.classList).toContain('bg-red-100');
-    expect(span.classList).toContain('text-red-700');
+    expect(span.classList).toContain('bg-danger-surface');
+    expect(span.classList).toContain('text-danger');
+  });
+
+  it('keeps its label on one line', () => {
+    // A `rounded-full` pill that wraps reads as a broken shape rather
+    // than a status — visible on "Pending payment" in a narrow bookings
+    // column during slice 3b's visual pass.
+    const span = fixture.debugElement.query(By.css('span')).nativeElement as HTMLElement;
+    expect(span.classList).toContain('whitespace-nowrap');
   });
 });

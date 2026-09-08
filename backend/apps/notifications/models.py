@@ -27,6 +27,13 @@ class Notification(BaseModel):
         TICKET_UNUSED_REMINDER = "ticket_unused_reminder", "Unused ticket reminder"
         KYC_DOCUMENT_SUBMITTED = "kyc_document_submitted", "New KYC document submitted"
         KYB_DOCUMENT_SUBMITTED = "kyb_document_submitted", "New KYB document submitted"
+        # docs/specs/17-incidents.md. Two types rather than one, because
+        # "a serious problem was just reported" and "a problem you have
+        # already seen just got worse" are different enough that a
+        # recipient should be able to tell them apart from the title
+        # alone.
+        INCIDENT_REPORTED = "incident_reported", "Incident reported"
+        INCIDENT_ESCALATED = "incident_escalated", "Incident escalated"
 
     recipient = models.ForeignKey("identity.User", on_delete=models.PROTECT, related_name="+")
     notification_type = models.CharField(max_length=32, choices=NotificationType.choices)

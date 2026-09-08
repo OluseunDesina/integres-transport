@@ -12,7 +12,6 @@ import {
 import { Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
 import { Icon } from '@shared-ui';
 
 type Notification = components['schemas']['Notification'];
@@ -70,12 +69,12 @@ function noRoute(): null {
         aria-haspopup="menu"
         [attr.aria-expanded]="menuOpen()"
         aria-label="Notifications"
-        class="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+        class="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted hover:bg-surface-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       >
         <ui-icon name="bell" [size]="20" />
         @if (unreadCount() > 0) {
           <span
-            class="absolute top-1.5 right-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-medium text-white"
+            class="absolute top-1.5 right-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-medium text-on-solid"
           >
             {{ unreadCount() > 99 ? '99+' : unreadCount() }}
           </span>
@@ -87,19 +86,19 @@ function noRoute(): null {
           role="menu"
           aria-label="Notifications"
           tabindex="-1"
-          class="absolute top-full z-10 mt-1 flex max-h-[70vh] w-80 flex-col rounded-md border border-slate-200 bg-white shadow-lg"
+          class="absolute top-full z-10 mt-1 flex max-h-[70vh] w-80 flex-col rounded-md border border-border bg-surface shadow-md"
           [class.right-0]="align() === 'right'"
           [class.left-0]="align() === 'left'"
         >
           <div
-            class="flex shrink-0 items-center justify-between border-b border-slate-100 px-3 py-2"
+            class="flex shrink-0 items-center justify-between border-b border-border px-3 py-2"
           >
-            <p class="text-sm font-medium text-slate-900">Notifications</p>
+            <p class="text-sm font-medium text-strong">Notifications</p>
             @if (unreadCount() > 0) {
               <button
                 type="button"
                 (click)="markAllRead()"
-                class="text-xs font-medium text-slate-600 hover:text-slate-900"
+                class="text-xs font-medium text-default hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
               >
                 Mark all read
               </button>
@@ -108,22 +107,34 @@ function noRoute(): null {
 
           <div class="min-h-0 flex-1 overflow-y-auto">
             @if (loading()) {
-              <p class="p-3 text-sm text-slate-500">Loading…</p>
+              <p class="p-3 text-sm text-muted">Loading…</p>
             } @else if (error()) {
-              <p class="p-3 text-sm text-red-600">{{ error() }}</p>
+              <p class="p-3 text-sm text-danger">{{ error() }}</p>
             } @else if (notifications().length === 0) {
-              <p class="p-3 text-sm text-slate-500">No notifications yet.</p>
+              <p class="p-3 text-sm text-muted">No notifications yet.</p>
             } @else {
               @for (notification of notifications(); track notification.id) {
                 <button
                   type="button"
                   role="menuitem"
                   (click)="select(notification)"
-                  class="flex w-full flex-col gap-0.5 border-b border-slate-50 px-3 py-2 text-left last:border-0 hover:bg-slate-50"
-                  [class.bg-slate-50]="!notification.read_at"
+                  class="flex w-full flex-col gap-0.5 border-b border-border px-3 py-2 text-left last:border-0 hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  [class.bg-primary-subtle]="!notification.read_at"
                 >
-                  <span class="text-sm font-medium text-slate-900">{{ notification.title }}</span>
-                  <span class="text-xs text-slate-500">{{ notification.body }}</span>
+                  <span class="flex items-center gap-2">
+                    <!-- Unread was a bg-slate-50 tint and nothing else:
+                         colour as the only status indicator, against
+                         this repo's own bar, and a tint so faint it was
+                         barely a colour. A dot carries it visually and
+                         the sr-only word carries it to a screen reader,
+                         which previously got no signal at all. -->
+                    @if (!notification.read_at) {
+                      <span class="h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true"></span>
+                      <span class="sr-only">Unread.</span>
+                    }
+                    <span class="text-sm font-medium text-strong">{{ notification.title }}</span>
+                  </span>
+                  <span class="text-xs text-muted">{{ notification.body }}</span>
                 </button>
               }
             }
@@ -145,7 +156,6 @@ export class NotificationBell implements OnInit {
   readonly align = input<'left' | 'right'>('right');
 
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly router = inject(Router);
 
   protected readonly notifications = signal<Notification[]>([]);
@@ -196,9 +206,6 @@ export class NotificationBell implements OnInit {
     }
   }
 
-  private authHeader(): { Authorization: string } {
-    return { Authorization: `Bearer ${this.authStore.accessToken()}` };
-  }
 
   private async load(): Promise<void> {
     this.loading.set(true);
@@ -206,13 +213,11 @@ export class NotificationBell implements OnInit {
     const [recent, unread] = await Promise.all([
       this.api.GET('/api/v1/notifications/mine/', {
         params: { query: { limit: RECENT_LIMIT, offset: 0 } },
-        headers: this.authHeader(),
       }),
       // A second, cheap call just for the total unread count — avoids
       // fetching a whole unread page just to read its `count`.
       this.api.GET('/api/v1/notifications/mine/', {
         params: { query: { unread_only: true, limit: 1, offset: 0 } },
-        headers: this.authHeader(),
       }),
     ]);
     this.loading.set(false);
@@ -243,7 +248,6 @@ export class NotificationBell implements OnInit {
   private async markRead(id: string): Promise<void> {
     const { data } = await this.api.POST('/api/v1/notifications/{id}/read/', {
       params: { path: { id } },
-      headers: this.authHeader(),
     });
     if (!data) {
       return;
@@ -254,7 +258,6 @@ export class NotificationBell implements OnInit {
 
   protected async markAllRead(): Promise<void> {
     const { data } = await this.api.POST('/api/v1/notifications/read-all/', {
-      headers: this.authHeader(),
     });
     if (!data) {
       return;

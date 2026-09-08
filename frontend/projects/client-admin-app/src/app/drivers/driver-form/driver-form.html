@@ -1,46 +1,68 @@
-<div class="mx-auto max-w-lg">
+<div class="mx-auto max-w-2xl">
   @if (notFound()) {
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       That driver couldn't be found.
-      <a routerLink="/drivers" class="font-medium text-slate-900 underline">Back to drivers</a>
+      <a routerLink="/drivers" class="font-medium text-strong underline">Back to drivers</a>
     </p>
   } @else {
-    <h1 class="mb-6 text-lg font-semibold text-slate-900">
-      {{ editing() ? 'Edit driver' : 'New driver' }}
-    </h1>
+    <ui-page-header
+      class="mb-6"
+      [title]="editing() ? 'Edit driver' : 'New driver'"
+      description="Someone who can be assigned to a trip. An expired licence raises a compliance warning on the drivers list."
+    />
 
     @if (errorMessage(); as message) {
       <ui-alert class="mb-4">{{ message }}</ui-alert>
     }
 
-    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-text-field
-        label="Name"
-        formControlName="name"
-        [invalid]="!!fieldError('name')"
-        [errorMessage]="fieldError('name')"
-      />
-      <ui-text-field label="Phone" formControlName="phone" />
-      <ui-text-field
-        label="License number"
-        formControlName="license_number"
-        [invalid]="!!fieldError('license_number')"
-        [errorMessage]="fieldError('license_number')"
-      />
-      <ui-text-field label="License expires" type="date" formControlName="license_expires_at" />
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      <ui-form-section title="Identity" description="How to recognise and reach this driver.">
+        <ui-text-field
+          label="Name"
+          formControlName="name"
+          [invalid]="!!fieldError('name')"
+          [errorMessage]="fieldError('name')"
+        />
+        <ui-text-field
+          label="Phone"
+          formControlName="phone"
+          [invalid]="!!fieldError('phone')"
+          [errorMessage]="fieldError('phone')"
+        />
+      </ui-form-section>
 
-      <!-- No Active checkbox: activating/deactivating is a one-click
-           switch on the list table now. `is_active` is not sent from
-           this form at all, so a details-only save can't clobber a
-           toggle made elsewhere in the meantime. -->
+      <ui-form-section
+        title="Driving credentials"
+        description="Leave the expiry blank if it is not recorded. An expired date raises a warning on the drivers list."
+      >
+        <ui-text-field
+          label="License number"
+          formControlName="license_number"
+          [invalid]="!!fieldError('license_number')"
+          [errorMessage]="fieldError('license_number')"
+        />
+        <ui-text-field
+          label="License expires"
+          type="date"
+          formControlName="license_expires_at"
+          [invalid]="!!fieldError('license_expires_at')"
+          [errorMessage]="fieldError('license_expires_at')"
+        />
+      </ui-form-section>
 
-      <div class="mt-2 flex gap-3">
+      <!-- No Active control: activating or deactivating a driver is an
+           explicit, confirmed action in the Drivers list's row menu
+           (docs/specs/14's one behavioural change). `is_active` is not
+           sent from this form at all, so a details-only save cannot
+           clobber a status change made elsewhere in the meantime. -->
+
+      <div class="flex gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
           {{ editing() ? 'Save changes' : 'Create driver' }}
         </ui-button>
         <a
           routerLink="/drivers"
-          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
           >Cancel</a
         >
       </div>

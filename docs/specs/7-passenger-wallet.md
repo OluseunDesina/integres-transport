@@ -391,3 +391,116 @@ line matching the booking's exact total.
 
 **This closes Phase 7 (Passenger Wallet) entirely** — both slices
 built, tested, and verified.
+
+## Implementation note (Blended wallet + Paystack payment, done — 2026-08-23)
+
+This spec's own "Split/partial payment" non-goal above was revisited
+and built, on direct request. The non-goal's stated blocker —
+"a blend needs its own partial-refund/reconciliation design if either
+leg fails mid-flight" — is resolved by a specific ordering, not by
+building the refund machinery the original note assumed would be
+required: **Paystack is always charged first, for the remainder only;
+the wallet is debited only inside the same atomic step that confirms
+the Paystack webhook and marks the booking paid.** That removes the
+failure mode the non-goal named entirely — there is never a window
+where the wallet has been debited but nothing was purchased, since the
+wallet is never touched until the moment full payment is already
+guaranteed. The one narrower edge case this can't remove — Paystack
+succeeds, but the wallet balance has since dropped below what's needed
+by the time the webhook lands (a concurrent spend in between) — is
+handled by reusing this codebase's own existing escape hatch,
+`PaymentIntent.requires_manual_refund` (already used for an analogous
+card/wallet race in `_apply_booking_payment`), rather than building new
+refund machinery. This was an explicit, deliberate choice over
+building real automatic-refund-to-wallet support, made with the user
+before implementation started.
+
+**Data model**: `PaymentIntent` gained `wallet_component_amount`
+(defaults to `0`) — explicit, mirroring `intent_type`'s own role,
+rather than inferring a blend from `amount != booking.total_amount`.
+For a blended intent, `amount` is what Paystack actually charges (the
+remainder only); `wallet_component_amount` is what gets debited from
+the wallet at settlement.
+
+**Backend**: `initiate_payment_with_wallet()` computes
+`wallet_portion = min(balance, total)` and `paystack_portion = total -
+wallet_portion`. If the wallet covers everything, it delegates straight
+to the existing `pay_booking_from_wallet()` (which gained optional
+`idempotency_key`/`request_hash` parameters for this caller — proved
+safe with no new `IntegrityError` disambiguation, since two concurrent
+calls under the same key necessarily serialize on the booking's own row
+lock first, the same lock that already makes a double-click safe).
+Otherwise it charges Paystack for the remainder only and creates a
+`PENDING` intent carrying both amounts. `_apply_booking_payment()`
+(the webhook settlement path) now posts a 4-line entry for a blended
+intent — `psp_suspense`/`wallet` debits, `business_clearing`/
+`integra_commission` credits, commission split on the **full** booking
+total — after re-locking and re-checking the wallet balance; on a
+shortfall, no entry is posted at all (a partial/unbalanced entry would
+violate the ledger's own balance invariant) and the intent is flagged
+`requires_manual_refund` instead. The old standalone
+`POST /bookings/{id}/pay-from-wallet/` endpoint (and its
+`PayBookingFromWalletView`) is removed — `POST /payments/` with
+`{booking_id, use_wallet_balance: true}` is its full replacement,
+folding both actions into one, per the explicit decision to unify the
+frontend's two buttons into one.
+
+New tests: `test_blended_payment.py` (fully-covered/blended/shortfall/
+idempotency-conflict/HTTP-surface cases) and
+`test_blended_payment_concurrency.py` (the mandatory spike — a blended
+settlement racing a concurrent wallet spend for the same passenger;
+run 5× clean). One real bug was found while writing these tests, in
+the test fixture itself, not the application: `_fund_wallet()`'s own
+top-up debits the *same* `psp_suspense` account a real settlement later
+debits too, so the correct combined post-settlement balance is the sum
+of both, not just the settlement's own line — fixed the assertion, not
+the code. 574/574 backend tests passing (up from 565). `ruff`/`mypy` clean; OpenAPI
+regenerated and drift-checked.
+
+**Frontend** (`customer-app`, `my-bookings`): the separate "Pay from
+wallet" button is gone. "Pay now" gained a checkbox ("Use wallet
+balance"), shown only when the row's Business has a positive wallet
+balance (reusing the already-loaded per-Business balance map, no new
+fetch), with a live client-side-computed breakdown ("₦50.00 from
+wallet, ₦700.00 via Paystack", or "Fully covered by wallet — no card
+charge needed") — purely a display preview, same "display-only, not a
+source of truth" posture the old wallet-balance gate already had; the
+backend independently computes and enforces the real split. `payNow()`
+now handles both possible response shapes: a `succeeded` status with no
+`authorization_url` (wallet covered it all, refetch in place) or an
+`authorization_url` for whatever remainder Paystack still needs.
+Regenerating `schema.ts` for `use_wallet_balance` surfaced a real,
+minor fallout: the field carries a `default: false` in the OpenAPI
+schema, which `openapi-typescript` treats as always-present rather than
+optional — every existing `PaymentInitiate` body across
+`customer-app`'s wallet top-up call needed an explicit
+`use_wallet_balance: false` added to keep compiling, a one-line fix,
+no behavior change (the server already treated it as optional either
+way). Full workspace build (`npm run build:all`, all 4 apps) and Karma
+(`customer-app` 120/120, `client-admin-app` 278/278, `super-admin-app`
+67/67, `validator-app` 31/31) all green; `ng lint` clean.
+
+**Verified live against the real backend and real bookings**, all
+three shapes: (a) plain Paystack, no checkbox — unchanged, a real
+`checkout.paystack.com` redirect; (b) checkbox checked, wallet balance
+(₦1000.00) fully covering a ₦750.00 booking — succeeded synchronously
+with no redirect, the row correctly showed "Paid," and the wallet
+balance moved exactly ₦1000.00 → ₦250.00; (c) checkbox checked, wallet
+balance (₦50.00) only partly covering a ₦750.00 booking — the preview
+correctly showed "₦50.00 from wallet, ₦700.00 via Paystack" and
+redirected to a real Paystack checkout for the remainder. One real,
+pre-existing bug was found along the way, unrelated to this feature and
+not fixed as part of it: paying for a booking on a trip whose seeded
+"today" departure time has already passed (i.e. running this
+verification later in the day) trips
+`ticket_expires_after_issued` — `Ticket.expires_at` is anchored to the
+trip's departure, so an already-departed trip produces a `Ticket` whose
+`expires_at` is before its own `issued_at`. This isn't specific to the
+blended path (`pay_booking_from_wallet`'s original synchronous flow
+hits the same constraint the same way) — routed around for this
+verification by booking a trip departing tomorrow instead, the same
+"use a near-future departure" convention this codebase's own backend
+test fixtures (`booking_helpers.py`) already document for the identical
+reason. Named here rather than silently worked around.
+
+**This closes the blended-payment revisit of Phase 7's own non-goal.**

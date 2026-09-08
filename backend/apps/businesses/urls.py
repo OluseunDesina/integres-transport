@@ -11,6 +11,16 @@ urlpatterns = [
         name="business-kyb-document-upload",
     ),
     path(
+        "businesses/<uuid:business_id>/directors/",
+        views.DirectorListCreateView.as_view(),
+        name="business-director-list-create",
+    ),
+    path(
+        "directors/<uuid:pk>/",
+        views.DirectorUpdateView.as_view(),
+        name="director-update",
+    ),
+    path(
         "super-admin/businesses/",
         views.BusinessSuperAdminListView.as_view(),
         name="business-super-admin-list",

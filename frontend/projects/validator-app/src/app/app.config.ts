@@ -9,7 +9,8 @@ import {
 import { provideRouter } from '@angular/router';
 import { provideServiceWorker } from '@angular/service-worker';
 import { provideApiClient } from '@api-client';
-import { AUTH_AUDIENCE, WhiteLabelResolverService } from '@auth';
+import { AUTH_AUDIENCE, WhiteLabelResolverService, authMiddleware } from '@auth';
+import { BrandThemeService } from '@shared-ui';
 
 import { routes } from './app.routes';
 import { environment } from '../environments/environment';
@@ -19,14 +20,23 @@ export const appConfig: ApplicationConfig = {
     provideBrowserGlobalErrorListeners(),
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes),
-    provideApiClient(environment.apiBaseUrl),
+    provideApiClient(environment.apiBaseUrl, () => [authMiddleware()]),
     // Staff operating the validator sign in through the same
     // client-admin-scoped JWT/RBAC as client-admin-app — `tapngo.record`
     // is a Role/Permission codename like any other client-admin one, not
     // a new audience. See docs/specs/4b-tap-and-go.md's "Operator
     // harness" section.
     { provide: AUTH_AUDIENCE, useValue: 'client-admin' },
-    provideAppInitializer(() => inject(WhiteLabelResolverService).resolve()),
+    // Resolve the tenant's white-label config, then apply its brand
+    // colour. Composed here rather than inside either library: `@auth`
+    // carries the data, `@shared-ui` owns colour, and neither needs to
+    // import the other (docs/specs/14-design-system-and-ui-rebuild.md).
+    provideAppInitializer(async () => {
+      const whiteLabel = inject(WhiteLabelResolverService);
+      const theme = inject(BrandThemeService);
+      await whiteLabel.resolve();
+      theme.apply(whiteLabel.branding());
+    }),
     // Installable PWA — see docs/specs/4b-tap-and-go.md's "Operator
     // harness" section: this app stands in for the not-yet-built
     // Flutter validator app, and being installable on a conductor's own

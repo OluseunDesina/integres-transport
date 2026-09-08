@@ -77,7 +77,12 @@ describe('ClientInvite', () => {
     await fixture.componentInstance['onSubmit']();
     fixture.detectChanges();
 
-    expect(fixture.componentInstance['emailFieldError']()).toBe(
+    expect(fixture.componentInstance['fieldError']('email')).toBe(
+      'A client with this email already exists.'
+    );
+    // Rendered, not merely computed: ui-text-field shows nothing unless
+    // the parent binds both `invalid` and `errorMessage`.
+    expect(fixture.nativeElement.textContent).toContain(
       'A client with this email already exists.'
     );
     expect(fixture.componentInstance['invitedEmail']()).toBeNull();

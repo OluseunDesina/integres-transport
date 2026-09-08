@@ -1,0 +1,84 @@
+<div class="flex flex-col gap-6">
+  <ui-page-header
+    title="Report a problem"
+    description="Tell the office about a fault on the trip you are working."
+  />
+
+  @if (tripsError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
+  @if (filedReference(); as reference) {
+    <ui-alert variant="success">Reported. Reference {{ reference }}.</ui-alert>
+    <div>
+      <ui-button (pressed)="reportAnother()">Report something else</ui-button>
+    </div>
+  } @else {
+    @if (submitError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+
+    <form [formGroup]="form" (ngSubmit)="submit()" class="flex flex-col gap-6">
+      <!--
+        "Where this happened", not "Which trip". `ui-form-section`
+        renders a labelled region, so a section called "Which trip"
+        wrapping a control called "Trip" gives a screen reader two
+        near-identical names one inside the other — and Playwright's own
+        `getByLabel('Trip')` matched both, which is how this was found.
+        The control keeps the name `/record` and `/validate-ticket`
+        already use for the same picker; the section is what moves.
+      -->
+      <ui-form-section title="Where this happened">
+        <ui-select
+          label="Trip"
+          formControlName="tripId"
+          [options]="tripOptions()"
+          [invalid]="!!fieldError('tripId')"
+          [errorMessage]="fieldError('tripId')"
+        />
+        @if (attachmentSummary(); as summary) {
+          <!-- Said out loud. The service attaches the trip's route and
+               vehicle without asking, and a form that quietly records a
+               registration number is a form whose author knows
+               something the person filling it in does not. -->
+          <p class="text-muted" style="font-size: var(--ui-text-body)">{{ summary }}</p>
+        }
+      </ui-form-section>
+
+      <ui-form-section title="What is wrong">
+        <ui-select
+          label="Kind of problem"
+          formControlName="category"
+          [options]="categoryOptions"
+          [invalid]="!!fieldError('category')"
+          [errorMessage]="fieldError('category')"
+        />
+        <ui-text-field
+          label="Heading"
+          hint="A few words the office will see in the queue."
+          formControlName="title"
+          [invalid]="!!fieldError('title')"
+          [errorMessage]="fieldError('title')"
+        />
+        <ui-select
+          label="How urgent"
+          hint="High and critical notify the office straight away. Everything else waits for the queue."
+          formControlName="severity"
+          [options]="severityOptions"
+        />
+        <ui-textarea label="Details" [rows]="4" formControlName="description" />
+        <ui-text-field
+          label="Device or reader reference"
+          hint="Optional. The code on the unit, if it has one."
+          formControlName="deviceReference"
+        />
+      </ui-form-section>
+
+      <div>
+        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+          Send report
+        </ui-button>
+      </div>
+    </form>
+  }
+</div>

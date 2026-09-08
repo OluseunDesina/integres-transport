@@ -1,5 +1,10 @@
 <!doctype html>
-<html lang="en">
+<!-- consumer, not console: spec 14 says this app's "targets are
+     sized for the consumer profile even though its palette is the
+     console one - a conductor is not reading a data table". It said
+     console until slice 6b, a contradiction that changed nothing until
+     slice 5 made the profile actually reach the controls. -->
+<html lang="en" data-surface="consumer">
 <head>
   <meta charset="utf-8">
   <title>Integra Validator</title>

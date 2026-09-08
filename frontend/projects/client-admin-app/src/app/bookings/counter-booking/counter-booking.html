@@ -1,0 +1,249 @@
+<div class="mx-auto flex max-w-3xl flex-col gap-6">
+  <ui-page-header
+    title="Book for a passenger"
+    description="For someone at the counter or on the phone. They need an account already — this books against theirs, not yours."
+  >
+    <nav breadcrumb aria-label="Breadcrumb">
+      <a
+        routerLink="/bookings"
+        class="text-sm font-medium text-primary underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >Bookings</a
+      >
+    </nav>
+  </ui-page-header>
+
+  @if (!selectedBusiness.selectedBusinessId()) {
+    <ui-alert>Select a business before booking.</ui-alert>
+  }
+
+  <!-- Step 1 — who ------------------------------------------------------ -->
+  <!-- Section titles deliberately do not repeat any control's own label.
+       `ui-form-section` renders a labelled region, so "Passenger" around
+       a "Passenger email" field is announced twice and matches twice —
+       the recorded rule, and the defect that failed this screen's first
+       e2e run when a section named "Departure" wrapped a select of the
+       same name. -->
+  <ui-form-section
+    title="Who is travelling"
+    description="Find them by the email address on their account."
+  >
+    @if (store.passenger(); as found) {
+      <div class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-subtle p-4">
+        <div class="flex flex-col gap-1">
+          <!-- Never an empty line. An account with no name on it
+               rendered as blank whitespace above the address, which
+               reads as "nobody" on the one card whose job is to confirm
+               a person — the same reason the manifest's own name helper
+               has a fallback rather than a blank cell. -->
+          <span class="font-medium text-strong">{{ passengerName(found) }}</span>
+          <!-- Masked, and deliberately so: the agent typed this address
+               to get here, so nothing is withheld from them — what
+               masking protects is the screen a queue can see. -->
+          <span class="text-sm text-muted">{{ found.email }}</span>
+        </div>
+        <ui-button variant="secondary" type="button" (clicked)="onChangePassenger()">
+          Change passenger
+        </ui-button>
+      </div>
+    } @else {
+      <form [formGroup]="lookupForm" (ngSubmit)="onLookup()" class="flex flex-wrap items-end gap-4" novalidate>
+        <div class="w-full max-w-sm">
+          <ui-text-field
+            label="Passenger email"
+            type="email"
+            formControlName="email"
+            [invalid]="!!lookupFieldError()"
+            [errorMessage]="lookupFieldError()"
+          />
+        </div>
+        <ui-button type="submit" [loading]="store.lookingUp()">Find passenger</ui-button>
+      </form>
+
+      @if (store.lookupError(); as message) {
+        <!-- Not the red error box. "Nobody uses that address" is an
+             ordinary answer to an ordinary question, and dressing it as
+             a failure would tell an agent to give up rather than to ask
+             the person to register. -->
+        <p class="mt-3 text-sm text-muted">{{ message }}</p>
+      }
+    }
+  </ui-form-section>
+
+  @if (store.passenger()) {
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      @if (errorMessage(); as message) {
+        <ui-alert>{{ message }}</ui-alert>
+      }
+
+      <!-- Step 2 — which departure ------------------------------------- -->
+      <ui-form-section
+        title="Trip and stops"
+        description="One service date at a time — a bounded page of trips could not reach today’s."
+      >
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <ui-text-field
+            label="Service date"
+            type="date"
+            formControlName="service_date"
+            [invalid]="!!fieldError('service_date')"
+            [errorMessage]="fieldError('service_date')"
+          />
+          <ui-select
+            label="Departure"
+            [options]="tripOptions()"
+            formControlName="trip"
+            [invalid]="!!fieldError('trip')"
+            [errorMessage]="fieldError('trip')"
+          />
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <ui-select
+            label="Boarding at"
+            [options]="stopOptions()"
+            formControlName="from_stop"
+            [invalid]="!!fieldError('from_stop')"
+            [errorMessage]="fieldError('from_stop')"
+          />
+          <ui-select
+            label="Alighting at"
+            [options]="stopOptions()"
+            formControlName="to_stop"
+            [invalid]="!!fieldError('to_stop')"
+            [errorMessage]="fieldError('to_stop')"
+          />
+        </div>
+      </ui-form-section>
+
+      <!-- Step 3 — seats or places ------------------------------------- -->
+      <ui-form-section
+        title="Places"
+        description="What this trip sells depends on how the operator runs it."
+      >
+        @if (store.loadingSeats()) {
+          <ui-skeleton [lines]="3" />
+        } @else if (store.bookabilityError(); as message) {
+          <ui-alert>{{ message }}</ui-alert>
+        } @else if (store.bookability(); as bookability) {
+          <div class="flex flex-wrap items-center gap-3">
+            <ui-status-pill [label]="'Seats left: ' + capacityLabel()" />
+            @if (bookability.status !== 'scheduled') {
+              <ui-status-pill tone="warning" label="This departure is not open for booking" />
+            }
+          </div>
+
+          @if (picksSeats()) {
+            @if (store.availableSeats().length === 0) {
+              <p class="text-sm text-muted">
+                Every seat on this segment is taken. Try another departure.
+              </p>
+            } @else {
+              <fieldset class="flex flex-col gap-2">
+                <legend class="text-sm font-medium text-strong">Choose seats</legend>
+                <p class="text-sm text-muted">
+                  {{ plural(store.availableSeats().length, 'seat') }} free on this segment.
+                </p>
+                <div class="flex flex-wrap gap-2 pt-1">
+                  @for (entry of store.availableSeats(); track entry.seat.id) {
+                    <button
+                      type="button"
+                      (click)="toggleSeat(entry.seat.id)"
+                      [attr.aria-pressed]="isSelected(entry.seat.id)"
+                      class="min-h-11 min-w-11 rounded-md border px-3 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                      [class]="
+                        isSelected(entry.seat.id)
+                          ? 'border-primary bg-primary text-on-primary'
+                          : 'border-subtle text-strong'
+                      "
+                    >
+                      {{ seatLabel(entry) }}
+                    </button>
+                  }
+                </div>
+                @if (seatsError(); as message) {
+                  <p class="text-sm text-danger">{{ message }}</p>
+                }
+              </fieldset>
+            }
+          } @else {
+            <!-- Open seating, or an operator who assigns the seats
+                 themselves: a number of places, not a choice of seat. -->
+            <ui-select
+              label="How many passengers"
+              hint="This operator sells places rather than numbered seats."
+              [options]="placeOptions()"
+              formControlName="passenger_count"
+              [invalid]="!!fieldError('passenger_count')"
+              [errorMessage]="fieldError('passenger_count')"
+            />
+          }
+        } @else {
+          <p class="text-sm text-muted">Pick a departure and both stops to see what is available.</p>
+        }
+      </ui-form-section>
+
+      <!-- Step 4 — money ----------------------------------------------- -->
+      <ui-form-section
+        title="Payment"
+        description="There is no cash drawer in this system. You can settle from the passenger’s own wallet, or leave the booking unpaid for them to pay from their app."
+      >
+        <ui-checkbox
+          label="Pay now from the passenger’s wallet"
+          hint="If their balance is short, the seats stay held and nothing is charged."
+          formControlName="pay_from_wallet"
+        />
+      </ui-form-section>
+
+      <div class="flex flex-wrap gap-3">
+        <ui-button type="submit" [loading]="store.submitting()">Create booking</ui-button>
+      </div>
+    </form>
+  }
+
+  <!-- The outcome ------------------------------------------------------- -->
+  @if (store.result(); as result) {
+    <div class="flex flex-col gap-4 rounded-md border border-subtle p-4">
+      <div class="flex flex-wrap items-center gap-3">
+        <h2 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">
+          Booking {{ result.booking.reference }}
+        </h2>
+        <ui-status-pill
+          [label]="result.booking.status === 'paid' ? 'Paid' : 'Awaiting payment'"
+          [tone]="result.booking.status === 'paid' ? 'positive' : 'warning'"
+        />
+      </div>
+
+      <p class="text-sm text-muted">
+        {{ formatMoney(result.booking.total_amount, result.booking.currency) }} ·
+        {{ result.booking.trip.route.name }}
+      </p>
+
+      <!-- Inline as well as in a toast: a payment that failed while the
+           booking succeeded is the one outcome an agent must not miss,
+           and a toast is gone in four seconds. -->
+      @if (result.payment.status === 'failed') {
+        <ui-alert>
+          {{ result.payment.reason }}
+        </ui-alert>
+      } @else if (result.payment.status === 'succeeded') {
+        <p class="text-sm text-muted">Paid from the passenger’s wallet.</p>
+      } @else {
+        <p class="text-sm text-muted">
+          Nothing has been charged. The passenger pays from their own app; the seats are held until
+          then.
+        </p>
+      }
+
+      <div class="flex flex-wrap gap-3">
+        <ui-button variant="secondary" type="button" (clicked)="onBookAnother()">
+          Book another
+        </ui-button>
+        <a
+          routerLink="/bookings"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-primary underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          >Back to bookings</a
+        >
+      </div>
+    </div>
+  }
+</div>

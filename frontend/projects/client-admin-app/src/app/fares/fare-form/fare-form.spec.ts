@@ -84,6 +84,7 @@ describe('FareForm', () => {
         from_stop: '',
         to_stop: '',
         amount: '500.00',
+        trip_class: '',
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -91,7 +92,10 @@ describe('FareForm', () => {
       expect(apiClient.POST).toHaveBeenCalledWith(
         '/api/v1/fare-rules/',
         jasmine.objectContaining({
-          body: { business: 'biz-1', route: 'route-1', amount: '500.00' },
+          // `trip_class: ''` — the wildcard, which is what a fare
+          // entered without thinking about classes must still be, or
+          // every existing pricing setup would change meaning.
+          body: { business: 'biz-1', route: 'route-1', trip_class: '', amount: '500.00' },
         })
       );
       expect(navigateSpy).toHaveBeenCalledWith(['/fares']);
@@ -161,6 +165,7 @@ describe('FareForm', () => {
         from_stop: '',
         to_stop: '',
         amount: '300.00',
+        trip_class: '',
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -180,6 +185,7 @@ describe('FareForm', () => {
         from_stop: 'stop-1',
         to_stop: 'stop-2',
         amount: '300.00',
+        trip_class: '',
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -192,6 +198,7 @@ describe('FareForm', () => {
             route: 'route-1',
             from_stop: 'stop-1',
             to_stop: 'stop-2',
+            trip_class: '',
             amount: '300.00',
           },
         })

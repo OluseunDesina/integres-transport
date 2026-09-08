@@ -284,6 +284,87 @@ def notify_kyb_submitted(
     )
 
 
+def _notify_client_staff(
+    *,
+    client_id: uuid.UUID,
+    notification_type: str,
+    related_object_type: str,
+    related_object_id: uuid.UUID,
+    title: str,
+    body: str,
+) -> int:
+    """One event, fanned out to every staff user at its Client.
+
+    The client-side twin of `_notify_platform_staff`, and unlike it this
+    opens no `platform_staff_bypass()`: every caller is a live HTTP
+    request whose `TenancyMiddleware` has already set
+    `app.current_client_id` to exactly the Client being written, so the
+    RLS policy passes on its own. Adding a bypass here would widen the
+    blast radius of a future caller for no benefit.
+
+    Keyed on the existing
+    `unique_notification_per_recipient_type_target_per_day` constraint,
+    so a same-day repeat for one target is a safe no-op rather than a
+    second row — which is what makes a double-submitted report unable to
+    double-notify regardless of the caller's own idempotency.
+    """
+    today = date.today()
+    created = 0
+    for recipient in _eligible_client_staff(client_id):
+        _, was_created = Notification.all_objects.get_or_create(
+            recipient=recipient,
+            notification_type=notification_type,
+            related_object_type=related_object_type,
+            related_object_id=related_object_id,
+            notified_for_date=today,
+            defaults={"client_id": client_id, "title": title, "body": body},
+        )
+        if was_created:
+            created += 1
+    return created
+
+
+def notify_incident_raised(
+    *,
+    client_id: uuid.UUID,
+    business_name: str,
+    incident_id: uuid.UUID,
+    reference: str,
+    title: str,
+    severity: str,
+) -> int:
+    """Called from `apps.incidents.services` when a `high` or `critical`
+    incident is created — never on every create, see that module's own
+    `_NOTIFYING_SEVERITIES` for why.
+
+    Takes primitives only, deliberately: `apps.notifications` must not
+    import `apps.incidents`, so the dependency runs one way only, the
+    same direction `apps.clients` and `apps.businesses` already point.
+    """
+    return _notify_client_staff(
+        client_id=client_id,
+        notification_type=Notification.NotificationType.INCIDENT_REPORTED,
+        related_object_type="Incident",
+        related_object_id=incident_id,
+        title=f"{severity.capitalize()} incident reported",
+        body=f"{reference} at {business_name}: {title}",
+    )
+
+
+def notify_incident_escalated(
+    *, client_id: uuid.UUID, incident_id: uuid.UUID, reference: str, title: str
+) -> int:
+    """An existing incident was raised to `critical`."""
+    return _notify_client_staff(
+        client_id=client_id,
+        notification_type=Notification.NotificationType.INCIDENT_ESCALATED,
+        related_object_type="Incident",
+        related_object_id=incident_id,
+        title="Incident escalated to critical",
+        body=f"{reference}: {title}",
+    )
+
+
 def mark_notification_read(*, notification: Notification) -> Notification:
     if notification.read_at is None:
         notification.read_at = timezone.now()

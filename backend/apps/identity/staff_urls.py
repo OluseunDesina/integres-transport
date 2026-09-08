@@ -21,4 +21,7 @@ urlpatterns = [
     ),
     path("staff/", views.StaffListView.as_view(), name="staff-list"),
     path("staff/<uuid:user_id>/", views.StaffUpdateView.as_view(), name="staff-update"),
+    # Not under staff/ — it resolves a *passenger*, and the two must not
+    # read as the same directory. See PassengerLookupView.
+    path("passengers/lookup/", views.PassengerLookupView.as_view(), name="passenger-lookup"),
 ]

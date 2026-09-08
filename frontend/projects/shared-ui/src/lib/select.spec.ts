@@ -102,3 +102,53 @@ describe('Select', () => {
     expect(describedBy).toContain(error.id);
   });
 });
+
+describe('Select initial value', () => {
+  @Component({
+    imports: [ReactiveFormsModule, Select],
+    template: `
+      <ui-select label="Severity" [options]="options" [formControl]="control" />
+    `,
+  })
+  class Host {
+    readonly options: SelectOption[] = [
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'high', label: 'High' },
+    ];
+    readonly control = new FormControl('medium', { nonNullable: true });
+  }
+
+  it('renders the value the control holds, not the first option', async () => {
+    // A property binding on <select> lands before @for has created any
+    // <option>, so the browser falls back to index 0 and the signal —
+    // unchanged — is never written again. The control kept "medium"
+    // while the screen showed "Low", so a form submitted something the
+    // operator never chose. Only reproducible when the initial value is
+    // not the first option.
+    await TestBed.configureTestingModule({ imports: [Host] }).compileComponents();
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+
+    const select = (fixture.nativeElement as HTMLElement).querySelector(
+      'select'
+    ) as HTMLSelectElement;
+
+    expect(select.value).toBe('medium');
+    expect(fixture.componentInstance.control.value).toBe('medium');
+  });
+
+  it('still reflects a value patched in after the options exist', async () => {
+    await TestBed.configureTestingModule({ imports: [Host] }).compileComponents();
+    const fixture = TestBed.createComponent(Host);
+    fixture.detectChanges();
+
+    fixture.componentInstance.control.setValue('high');
+    fixture.detectChanges();
+
+    const select = (fixture.nativeElement as HTMLElement).querySelector(
+      'select'
+    ) as HTMLSelectElement;
+    expect(select.value).toBe('high');
+  });
+});

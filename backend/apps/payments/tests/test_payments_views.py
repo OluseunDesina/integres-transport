@@ -17,7 +17,7 @@ from apps.identity.serializers import ClientAdminTokenObtainSerializer
 from apps.identity.services import create_default_roles
 from apps.identity.tests.factories import ClientStaffUserFactory, PassengerUserFactory
 
-from .factories import PaystackAccountFactory
+from .factories import PaymentIntentFactory, PaystackAccountFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -178,3 +178,85 @@ def test_payment_detail_view_rejects_another_passengers_intent() -> None:
 
     response = _auth_client(other).get(reverse("payment-detail", kwargs={"pk": created.data["id"]}))
     assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+# --- ?search= on GET /payments/ ----------------------------------------
+# docs/specs/14-design-system-and-ui-rebuild.md slice 3b. The PSP
+# reference is what a passenger or Paystack quotes back in a dispute, so
+# it is the one thing worth typing on this screen.
+
+
+def test_payment_list_search_matches_psp_reference_case_insensitively() -> None:
+    client = ClientFactory()
+    roles = create_default_roles(client)
+    staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+        match = PaymentIntentFactory(
+            client=client,
+            booking__client=client,
+            booking__business=business,
+            psp_reference="PSREF-ABC-123",
+        )
+        PaymentIntentFactory(
+            client=client,
+            booking__client=client,
+            booking__business=business,
+            psp_reference="PSREF-XYZ-999",
+        )
+
+    response = _auth_client(staff).get(reverse("payment-list-create"), {"search": "abc-123"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+def test_payment_list_search_with_no_match_returns_empty_not_everything() -> None:
+    client = ClientFactory()
+    roles = create_default_roles(client)
+    staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+        PaymentIntentFactory(
+            client=client, booking__client=client, booking__business=business
+        )
+
+    response = _auth_client(staff).get(reverse("payment-list-create"), {"search": "no-such-ref"})
+
+    assert response.data["count"] == 0
+
+
+def test_payment_list_blank_search_is_accepted_and_ignored() -> None:
+    client = ClientFactory()
+    roles = create_default_roles(client)
+    staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+        PaymentIntentFactory(
+            client=client, booking__client=client, booking__business=business
+        )
+
+    response = _auth_client(staff).get(reverse("payment-list-create"), {"search": ""})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 1
+
+
+def test_payment_list_search_never_reaches_another_clients_rows() -> None:
+    client_a = ClientFactory()
+    client_b = ClientFactory()
+    roles = create_default_roles(client_a)
+    staff_a = ClientStaffUserFactory(client=client_a, role=roles["Owner"])
+    with tenant_context(str(client_b.id)):
+        business_b = BusinessFactory(client=client_b)
+        PaymentIntentFactory(
+            client=client_b,
+            booking__client=client_b,
+            booking__business=business_b,
+            psp_reference="PSREF-ABC-123",
+        )
+
+    response = _auth_client(staff_a).get(reverse("payment-list-create"), {"search": "abc-123"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 0

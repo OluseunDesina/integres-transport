@@ -17,10 +17,15 @@ function makeTrip(overrides: Partial<Trip> = {}): Trip {
     scheduled_departure_at: '2026-09-01T08:00:00Z',
     status: 'scheduled',
     status_changed_at: null,
+    // docs/specs/16-operational-analytics.md slice 1 — null
+    // on every Trip that has not departed, which is most of them.
+    actual_departure_at: null,
+    actual_arrival_at: null,
     vehicle: null,
     driver: null,
     booking_mode: 'open_seating',
     fare_collection_mode: 'pay_as_you_go',
+    trip_class: 'standard',
     cancellation_reason: '',
     compliance_warnings: [],
     created_at: '2026-08-06T00:00:00Z',
@@ -127,12 +132,40 @@ describe('RecordTap', () => {
     const text: string = fixture.nativeElement.textContent;
     expect(text).toContain('Gaborone Loop');
     expect(text).toContain('Pay as you go');
+    // Words, not enum values — this line rendered "scheduled" and a raw
+    // ISO service date until slice 6b.
+    expect(text).not.toContain('scheduled');
+    expect(text).toContain('Scheduled');
   });
 
   it('defaults to a board tap and toggles to alight', () => {
     expect(fixture.componentInstance['tapType']()).toBe('board');
     fixture.componentInstance['setTapType']('alight');
     expect(fixture.componentInstance['tapType']()).toBe('alight');
+  });
+
+  /**
+   * The board/alight control was a `role="radiogroup"` div wrapping two
+   * `ui-button`s with `aria-pressed`: it announced as a radio group and
+   * behaved as two independent toggle buttons, with no arrow-key
+   * selection and two tab stops.
+   */
+  it('offers board and alight as one real radio group', async () => {
+    fixture.componentInstance['form'].controls.tripId.setValue('trip-1');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const radios = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLInputElement>(
+        'input[type="radio"]'
+      )
+    );
+    expect(radios.map((r) => r.value)).toEqual(['board', 'alight']);
+    expect(new Set(radios.map((r) => r.name)).size).toBe(1);
+    // No leftover toggle buttons pretending to be radios.
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('[role="radiogroup"] ui-button')
+    ).toBeNull();
   });
 
   it('does not submit an invalid (missing fields) form', async () => {

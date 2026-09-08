@@ -1,0 +1,211 @@
+@if (loading()) {
+  <div class="flex flex-col gap-4" aria-busy="true">
+    <ui-skeleton [lines]="2" />
+    <ui-skeleton variant="block" height="10rem" />
+  </div>
+} @else if (notFound()) {
+  <div class="flex flex-col gap-4">
+    <ui-page-header title="Incident not found" />
+    <ui-alert>
+      This incident does not exist, or belongs to another client.
+      <a class="underline underline-offset-2" routerLink="/incidents">Back to incidents</a>
+    </ui-alert>
+  </div>
+} @else if (incident(); as incident) {
+  <div class="flex flex-col gap-6">
+    <ui-page-header [title]="incident.title" [description]="'Reference ' + incident.reference">
+      <a actions class="text-sm text-muted underline underline-offset-2" routerLink="/incidents"
+        >Back to incidents</a
+      >
+    </ui-page-header>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <ui-status-pill
+        [tone]="severityTone(incident.severity)"
+        [label]="severityLabel(incident.severity) + ' severity'"
+      />
+      <ui-status-pill
+        [tone]="statusTone(incident.status)"
+        [label]="statusLabel(incident.status)"
+      />
+      <span class="text-sm text-muted">
+        {{ categoryLabel(incident.category) }} · reported by
+        {{ sourceLabel(incident.source) }}
+        @if (incident.reported_by_email) {
+          ({{ incident.reported_by_email }})
+        }
+        · {{ incident.created_at | date: 'd MMM y, HH:mm' }}
+      </span>
+    </div>
+
+    @if (actionError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+
+    @if (incident.description) {
+      <section class="rounded-md border border-border bg-surface p-4">
+        <h2 class="mb-2 text-sm font-medium text-strong">Description</h2>
+        <p class="text-sm whitespace-pre-line text-default">{{ incident.description }}</p>
+      </section>
+    }
+
+    <section class="rounded-md border border-border bg-surface p-4">
+      <h2 class="mb-3 text-sm font-medium text-strong">Where and what</h2>
+      <!-- Every one of these is nullable. A blank cell would read as an
+           empty value rather than an unknown one, and zero would be a
+           lie: a passenger reporting a broken reader on a platform may
+           know none of them. -->
+      <dl class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Route</dt>
+          <dd class="text-default">{{ incident.route_name || notRecorded }}</dd>
+        </div>
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Stop</dt>
+          <dd class="text-default">{{ incident.stop_name || notRecorded }}</dd>
+        </div>
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Vehicle</dt>
+          <dd class="text-default">{{ incident.vehicle_registration || notRecorded }}</dd>
+        </div>
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Driver</dt>
+          <dd class="text-default">{{ incident.driver_name || notRecorded }}</dd>
+        </div>
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Device</dt>
+          <dd class="text-default">{{ incident.device_reference || notRecorded }}</dd>
+        </div>
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Location</dt>
+          <dd class="text-default">
+            @if (incident.latitude && incident.longitude) {
+              {{ incident.latitude }}, {{ incident.longitude }}
+            } @else {
+              {{ notRecorded }}
+            }
+          </dd>
+        </div>
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Assigned to</dt>
+          <dd class="text-default">{{ incident.assigned_to_email || 'Nobody yet' }}</dd>
+        </div>
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Resolved</dt>
+          <dd class="text-default">
+            {{ incident.resolved_at ? (incident.resolved_at | date: 'd MMM y, HH:mm') : 'Not yet' }}
+          </dd>
+        </div>
+      </dl>
+      @if (incident.resolution_notes) {
+        <div class="mt-4 flex flex-col gap-1 text-sm">
+          <h3 class="font-medium text-strong">Resolution notes</h3>
+          <p class="whitespace-pre-line text-default">{{ incident.resolution_notes }}</p>
+        </div>
+      }
+    </section>
+
+    <div *appHasPermission="'incidents.manage'" class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <section class="flex flex-col gap-3 rounded-md border border-border bg-surface p-4">
+        <h2 class="text-sm font-medium text-strong">Status and assignment</h2>
+        @if (transitionOptions().length > 1) {
+          <ui-select
+            label="Action"
+            [options]="transitionOptions()"
+            [ngModel]="transitionTo()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="transitionTo.set($event)"
+          />
+          <!--
+            Distinct labels. Both panels used to say "Note", which left
+            two identically-labelled fields on one screen — ambiguous to
+            anyone navigating by form field, and the e2e spec had to
+            disambiguate them positionally, which is the same smell
+            wearing a different hat.
+          -->
+          <ui-textarea
+            label="Note on this change"
+            hint="Optional. Recorded against this change in the history below."
+            [rows]="2"
+            [ngModel]="transitionNote()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="transitionNote.set($event)"
+          />
+          <div>
+            <ui-button
+              [disabled]="!transitionTo() || working()"
+              [loading]="working()"
+              (pressed)="onTransition()"
+              >Apply</ui-button
+            >
+          </div>
+        } @else {
+          <p class="text-sm text-muted">
+            A closed incident can only be reopened, and this one has no further steps.
+          </p>
+        }
+
+        <div class="mt-2">
+          <!--
+            "Assign to", not "Assigned to". The context panel above
+            already carries a read-only "Assigned to" row, and two
+            identically-labelled fields a screen apart — one a statement,
+            one a control — is the kind of thing an operator has to test
+            by clicking. The read-only row stays because a
+            incidents.view-only reader never sees this panel at all.
+          -->
+          <ui-select
+            label="Assign to"
+            [options]="assigneeOptions()"
+            [ngModel]="currentAssignee()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onAssign($event)"
+          />
+        </div>
+      </section>
+
+      <section class="flex flex-col gap-3 rounded-md border border-border bg-surface p-4">
+        <h2 class="text-sm font-medium text-strong">Add an internal note</h2>
+        <p class="text-sm text-muted">
+          Staff only. A passenger who reported this sees its status, never these notes.
+        </p>
+        <ui-textarea
+          label="Internal note"
+          [rows]="3"
+          [ngModel]="note()"
+          [ngModelOptions]="{ standalone: true }"
+          (ngModelChange)="note.set($event)"
+        />
+        <div>
+          <ui-button [disabled]="!note().trim() || working()" (pressed)="onAddNote()"
+            >Add note</ui-button
+          >
+        </div>
+      </section>
+    </div>
+
+    <section class="flex flex-col gap-3">
+      <h2 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">History</h2>
+      @if (activities().length === 0) {
+        <p class="text-sm text-muted">Nothing has happened to this incident yet.</p>
+      } @else {
+        <ol class="flex flex-col gap-3">
+          @for (activity of activities(); track activity.id) {
+            <li class="rounded-md border border-border bg-surface p-3 text-sm">
+              <div class="flex flex-wrap items-baseline justify-between gap-2">
+                <span class="font-medium text-strong">{{ activityLabel(activity) }}</span>
+                <span class="text-xs text-muted">
+                  {{ activity.actor_email || 'System' }} ·
+                  {{ activity.created_at | date: 'd MMM y, HH:mm' }}
+                </span>
+              </div>
+              @if (activity.note) {
+                <p class="mt-1 whitespace-pre-line text-default">{{ activity.note }}</p>
+              }
+            </li>
+          }
+        </ol>
+      }
+    </section>
+  </div>
+}

@@ -1,0 +1,117 @@
+<div class="flex flex-col gap-6">
+  <ui-page-header
+    title="Report an issue"
+    description="Tell the operator what went wrong. They will see it straight away."
+  />
+
+  @if (submitError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+  @if (routesError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+  @if (bookingError(); as message) {
+    <ui-alert variant="warning">{{ message }}</ui-alert>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="submit()" class="flex flex-col gap-6">
+    <!--
+      "The problem", not "What happened": the textarea inside it is
+      called "Tell us what happened", and a labelled region whose name is
+      a prefix of a control it contains is the same shadowing that made
+      the validator form's own section ambiguous.
+    -->
+    <ui-form-section title="The problem">
+      @if (bookingContext(); as context) {
+        <!-- Read-only, because the passenger arrived from this booking
+             and did not choose it here. Named rather than implied: "the
+             trip you came from" is not something anyone can check. -->
+        <div class="rounded-md border border-border bg-surface-muted p-3">
+          <p class="text-sm text-muted">Reporting a problem with</p>
+          <p class="font-medium text-strong">{{ context.label }}</p>
+        </div>
+      } @else {
+        <ui-select
+          label="Operator"
+          formControlName="business"
+          [options]="businessOptions()"
+          [invalid]="!!fieldError('business')"
+          [errorMessage]="fieldError('business')"
+        />
+      }
+
+      <ui-select
+        label="What went wrong"
+        formControlName="category"
+        [options]="categoryOptions"
+        [invalid]="!!fieldError('category')"
+        [errorMessage]="fieldError('category')"
+      />
+
+      <ui-textarea
+        label="Tell us what happened"
+        hint="What you saw, and where. The more specific, the faster it gets fixed."
+        [rows]="5"
+        formControlName="description"
+        [invalid]="!!fieldError('description')"
+        [errorMessage]="fieldError('description')"
+      />
+    </ui-form-section>
+
+    @if (!bookingContext()) {
+      <ui-form-section
+        title="Where"
+        description="All optional. Skip anything you are not sure about."
+      >
+        <ui-select label="Route" formControlName="route" [options]="routeOptions()" />
+        <ui-select label="Stop" formControlName="stop" [options]="stopOptions()" />
+      </ui-form-section>
+    }
+
+    <ui-form-section title="Anything that identifies the equipment">
+      <ui-text-field
+        label="Device or reader reference"
+        hint="Optional. A number or code printed on the card reader, if there is one."
+        formControlName="device_reference"
+      />
+
+      <div
+        class="flex flex-col gap-2"
+        role="group"
+        aria-labelledby="location-label"
+        aria-describedby="location-status"
+      >
+        <p id="location-label" class="font-medium text-default" style="font-size: var(--ui-text-body)">
+          My location
+        </p>
+        <!-- Opt-in, and never asked for on load. A refusal is stated as
+             an ordinary outcome rather than an error: a report with no
+             location is normal, not degraded, and this form submits
+             either way. -->
+        <p id="location-status" class="text-muted" style="font-size: var(--ui-text-body)">
+          {{ locationStatus() }}
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <ui-button
+            variant="secondary"
+            [loading]="locating()"
+            [disabled]="locating()"
+            (pressed)="attachLocation()"
+          >
+            {{ location()?.ok ? 'Update my location' : 'Attach my location' }}
+          </ui-button>
+          @if (location()?.ok) {
+            <ui-button variant="secondary" (pressed)="clearLocation()">Remove</ui-button>
+          }
+        </div>
+      </div>
+    </ui-form-section>
+
+    <div class="flex flex-wrap gap-3">
+      <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+        Send report
+      </ui-button>
+      <ui-button variant="secondary" (pressed)="cancel()">Cancel</ui-button>
+    </div>
+  </form>
+</div>

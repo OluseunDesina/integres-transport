@@ -101,6 +101,12 @@ describe('StaffInviteAccept', () => {
     await fixture.whenStable();
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('Not found.');
+    // The server's own words are deliberately **not** shown:
+    // `get_object_or_404` produces "No StaffInvitation matches the given
+    // query.", Django's internal phrasing naming the model class, and
+    // this screen rendered it verbatim to whoever clicked a stale invite
+    // link (spec 14 slice 6b, iteration-20 F2).
+    expect(fixture.nativeElement.textContent).toContain('This invitation link is not valid.');
+    expect(fixture.nativeElement.textContent).not.toContain('Not found.');
   });
 });

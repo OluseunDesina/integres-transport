@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
 import { ListStore, type Page } from '@shared-data';
 
 export type Booking = components['schemas']['Booking'];
@@ -29,7 +28,6 @@ function toErrorMessage(error: unknown): string {
 @Injectable({ providedIn: 'root' })
 export class BookingStore extends ListStore<Booking> {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   constructor() {
     super({}, 25);
@@ -41,11 +39,28 @@ export class BookingStore extends ListStore<Booking> {
   ): Promise<{ items: Booking[]; total: number }> {
     const { data, error } = await this.api.GET('/api/v1/bookings/mine/', {
       params: { query: { limit: page.limit, offset: page.offset } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     if (!data) {
       throw new Error(toErrorMessage(error));
     }
     return { items: data.results, total: data.count };
+  }
+
+  /**
+   * One Booking by id, for a screen that arrived holding only the id.
+   *
+   * `findByIdPaged` rather than a single-record GET because there is no
+   * single-record GET: `/bookings/mine/` is the only endpoint a
+   * passenger can read their own bookings through. The scope is passed
+   * explicitly (`{}`) rather than `this.query()`, per the standing rule
+   * — inheriting whatever filter the list happened to be showing is a
+   * recorded bug, and this store's query is empty anyway, which is
+   * exactly the sort of thing that stops being true later.
+   *
+   * Added for spec 17 slice 3's `report-issue`, which is handed a
+   * booking id in a query param and needs the trip and operator off it.
+   */
+  findById(id: string): Promise<Booking | null> {
+    return this.findByIdPaged(id, {});
   }
 }

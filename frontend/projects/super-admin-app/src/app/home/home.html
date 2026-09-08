@@ -1,17 +1,27 @@
-<div class="mx-auto max-w-2xl">
-  <h1 class="text-lg font-semibold text-slate-900">Welcome, {{ authStore.user()?.email }}</h1>
+<div class="flex flex-col gap-8">
+  <ui-page-header
+    [title]="greeting()"
+    description="Review submissions and configure the operators on the platform."
+  />
 
-  <dl class="mt-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
-    <dt class="text-slate-500">Client</dt>
-    <dd>{{ authStore.user()?.client ?? '—' }}</dd>
-    <dt class="text-slate-500">Platform staff</dt>
-    <dd>{{ authStore.user()?.isPlatformStaff }}</dd>
-  </dl>
-
-  <div
-    *appHasPermission="'super-admin:access'"
-    class="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700"
-  >
-    You have super-admin-app access.
-  </div>
+  <ul class="grid gap-4 sm:grid-cols-2">
+    @for (destination of destinations; track destination.path) {
+      <li>
+        <a
+          [routerLink]="destination.path"
+          class="flex h-full items-start gap-3 rounded-lg border border-border bg-surface p-4 hover:border-control focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >
+          <span
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary-subtle text-primary"
+          >
+            <ui-icon [name]="destination.icon" [size]="20" />
+          </span>
+          <span class="min-w-0">
+            <span class="block font-medium text-strong">{{ destination.label }}</span>
+            <span class="block text-sm text-muted">{{ destination.description }}</span>
+          </span>
+        </a>
+      </li>
+    }
+  </ul>
 </div>

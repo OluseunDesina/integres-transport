@@ -14,7 +14,10 @@ function makeRoute(overrides: Partial<Route> = {}): Route {
     name: 'Ikeja Express',
     code: '',
     description: '',
-    is_active: true,
+    available_trip_classes: [],
+    status: 'active',
+    distance_km: null,
+    estimated_duration_minutes: null,
     stops: [],
     created_at: '2026-08-06T00:00:00Z',
     ...overrides,
@@ -99,6 +102,72 @@ describe('RouteForm', () => {
       expect(apiClient.POST).not.toHaveBeenCalled();
     });
 
+    // docs/specs/15-trip-classes.md. `available_trip_classes` is a
+    // checkbox group over a local signal, mirroring the days-of-week
+    // picker — not a form control, so these read the signal.
+    describe('service classes', () => {
+      it('renders one checkbox per class', () => {
+        const labels = Array.from(
+          fixture.nativeElement.querySelectorAll('ui-checkbox label')
+        ).map((label) => (label as HTMLElement).textContent?.trim());
+
+        expect(labels).toEqual(['Premium', 'Exclusive', 'Standard', 'Mini']);
+      });
+
+      /**
+       * The reading that matters most on this screen. Empty means
+       * *every* class is allowed, and an all-unchecked group otherwise
+       * reads as "none" — the opposite. Every route that predates spec
+       * 15 has an empty list, so getting this backwards would make all
+       * of them look broken.
+       */
+      it('says that selecting nothing accepts every class', () => {
+        expect(fixture.componentInstance['allClassesAllowed']()).toBe(true);
+        expect(fixture.nativeElement.textContent).toContain('accepts every class');
+      });
+
+      it('stops saying so once a class is chosen', () => {
+        fixture.componentInstance['toggleClass']('premium', true);
+        fixture.detectChanges();
+
+        expect(fixture.nativeElement.textContent).not.toContain('accepts every class');
+      });
+
+      it('toggles a class on and off again', () => {
+        expect(fixture.componentInstance['isClassSelected']('premium')).toBe(false);
+        fixture.componentInstance['toggleClass']('premium', true);
+        expect(fixture.componentInstance['isClassSelected']('premium')).toBe(true);
+        fixture.componentInstance['toggleClass']('premium', false);
+        expect(fixture.componentInstance['isClassSelected']('premium')).toBe(false);
+      });
+
+      it('submits the chosen classes as an array', async () => {
+        apiClient.POST.and.resolveTo({ data: makeRoute() });
+        spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
+        fixture.componentInstance['form'].setValue({
+          business: 'biz-1',
+          name: 'Ikeja Express',
+          code: '',
+          description: '',
+          distance_km: '',
+          estimated_duration_minutes: '',
+        });
+        fixture.componentInstance['toggleClass']('premium', true);
+        fixture.componentInstance['toggleClass']('standard', true);
+
+        await fixture.componentInstance['onSubmit']();
+
+        expect(apiClient.POST).toHaveBeenCalledWith(
+          '/api/v1/routes/',
+          jasmine.objectContaining({
+            body: jasmine.objectContaining({
+              available_trip_classes: ['premium', 'standard'],
+            }),
+          }),
+        );
+      });
+    });
+
     it('creates a route and navigates to its edit page on success', async () => {
       apiClient.POST.and.resolveTo({ data: makeRoute() });
       const router = TestBed.inject(Router);
@@ -109,6 +178,8 @@ describe('RouteForm', () => {
         name: 'Ikeja Express',
         code: '',
         description: '',
+        distance_km: '',
+        estimated_duration_minutes: '',
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -136,6 +207,8 @@ describe('RouteForm', () => {
         name: 'Ikeja Express',
         code: '',
         description: '',
+        distance_km: '',
+        estimated_duration_minutes: '',
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -174,6 +247,99 @@ describe('RouteForm', () => {
         '/api/v1/routes/{id}/',
         jasmine.objectContaining({ params: { path: { id: 'route-1' } } }),
       );
+    });
+
+    // docs/specs/19-route-lifecycle.md slice 2.
+    describe('depth fields', () => {
+      it('prefills distance and duration when set', async () => {
+        const route = makeRoute({ distance_km: '12.50', estimated_duration_minutes: 45 });
+        const { fixture } = await setup('route-1', [route]);
+        fixture.detectChanges();
+        await fixture.whenStable();
+
+        expect(fixture.componentInstance['form'].value.distance_km).toBe('12.50');
+        expect(fixture.componentInstance['form'].value.estimated_duration_minutes).toBe('45');
+      });
+
+      it('leaves both blank rather than "0" or "null" when unset', async () => {
+        const route = makeRoute();
+        const { fixture } = await setup('route-1', [route]);
+        fixture.detectChanges();
+        await fixture.whenStable();
+
+        expect(fixture.componentInstance['form'].value.distance_km).toBe('');
+        expect(fixture.componentInstance['form'].value.estimated_duration_minutes).toBe('');
+      });
+
+      it('sends null, not an empty string, when a blank field is submitted', async () => {
+        const route = makeRoute();
+        const { fixture, apiClient } = await setup('route-1', [route]);
+        fixture.detectChanges();
+        await fixture.whenStable();
+        apiClient.PATCH.and.resolveTo({ data: route });
+
+        await fixture.componentInstance['onSubmit']();
+
+        expect(apiClient.PATCH).toHaveBeenCalledWith(
+          '/api/v1/routes/{id}/',
+          jasmine.objectContaining({
+            body: jasmine.objectContaining({
+              distance_km: null,
+              estimated_duration_minutes: null,
+            }),
+          }),
+        );
+      });
+
+      it('sends a parsed number and the raw decimal string when both are set', async () => {
+        const route = makeRoute();
+        const { fixture, apiClient } = await setup('route-1', [route]);
+        fixture.detectChanges();
+        await fixture.whenStable();
+        apiClient.PATCH.and.resolveTo({ data: route });
+        fixture.componentInstance['form'].patchValue({
+          distance_km: '12.5',
+          estimated_duration_minutes: '45',
+        });
+
+        await fixture.componentInstance['onSubmit']();
+
+        expect(apiClient.PATCH).toHaveBeenCalledWith(
+          '/api/v1/routes/{id}/',
+          jasmine.objectContaining({
+            body: jasmine.objectContaining({
+              distance_km: '12.5',
+              estimated_duration_minutes: 45,
+            }),
+          }),
+        );
+      });
+    });
+
+    describe('archived route', () => {
+      it('disables the form and shows a restore-first message', async () => {
+        const route = makeRoute({ status: 'archived' });
+        const { fixture } = await setup('route-1', [route]);
+        fixture.detectChanges();
+        await fixture.whenStable();
+        fixture.detectChanges();
+
+        expect(fixture.componentInstance['form'].disabled).toBe(true);
+        expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+          'cannot be edited',
+        );
+      });
+
+      it('refuses to submit even if called directly', async () => {
+        const route = makeRoute({ status: 'archived' });
+        const { fixture, apiClient } = await setup('route-1', [route]);
+        fixture.detectChanges();
+        await fixture.whenStable();
+
+        await fixture.componentInstance['onSubmit']();
+
+        expect(apiClient.PATCH).not.toHaveBeenCalled();
+      });
     });
 
     describe('stop ordering', () => {
@@ -249,5 +415,60 @@ describe('RouteForm', () => {
         expect(fixture.componentInstance['stopsSaved']()).toBe(true);
       });
     });
+  
+  // --- docs/specs/14 slice 4 ---
+
+  describe('sections', () => {
+    it('offers no tab list while creating, since there are no stops yet', async () => {
+      const { fixture } = await setup(null);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect((fixture.nativeElement as HTMLElement).querySelector('ui-tabs')).toBeNull();
+    });
+
+    it('splits details from stops once the route exists', async () => {
+      const { fixture } = await setup('route-1', [makeRoute()]);
+      fixture.detectChanges();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const tabs = Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('[role="tab"]'),
+      ).map((el) => el.textContent?.trim());
+      expect(tabs).toEqual(['Details', 'Stops']);
+
+      // Details is the landing panel; the stop picker is not rendered
+      // until its tab is chosen.
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Route name');
+      expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Add a stop');
+
+      fixture.componentInstance['setActiveTab']('stops');
+      fixture.detectChanges();
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Add a stop');
+    });
   });
+
+  describe('validation', () => {
+    it('renders a message when a required field is submitted empty', async () => {
+      // The rendered output, not just the request that did not happen:
+      // `ui-text-field` shows nothing unless the parent binds both
+      // `invalid` and `errorMessage`, and a form binding neither fails
+      // this way silently.
+      const { fixture, apiClient } = await setup(null);
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      await fixture.componentInstance['onSubmit']();
+      fixture.detectChanges();
+
+      expect(apiClient.POST).not.toHaveBeenCalled();
+      const error = (fixture.nativeElement as HTMLElement).querySelector(
+        'ui-text-field [role="alert"]',
+      );
+      expect(error?.textContent?.trim()).toBe('This field is required.');
+    });
+  });
+});
 });

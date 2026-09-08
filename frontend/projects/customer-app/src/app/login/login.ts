@@ -2,13 +2,13 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AuthApiService, WhiteLabelResolverService } from '@auth';
-import { AuthLayout } from '@layout';
-import { Alert, Button, TextField } from '@shared-ui';
+import { AuthLayout, BrandMark } from '@layout';
+import { Alert, Button, TextField, fieldErrorMessage } from '@shared-ui';
 
 @Component({
   selector: 'app-login',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, AuthLayout, Button, TextField, Alert],
+  imports: [ReactiveFormsModule, AuthLayout, BrandMark, Button, TextField, Alert],
   templateUrl: './login.html',
 })
 export class Login {
@@ -46,17 +46,12 @@ export class Login {
     }
   }
 
+  // Labelled, so "Email is required." names the field rather than
+  // leaving a screen-reader user to work out which of two identical
+  // messages belongs to which input.
   protected fieldError(field: 'email' | 'password'): string | null {
-    const control = this.form.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    if (control.hasError('required')) {
-      return 'This field is required.';
-    }
-    if (control.hasError('email')) {
-      return 'Enter a valid email address.';
-    }
-    return 'Invalid value.';
+    return fieldErrorMessage(this.form.controls[field], {
+      label: field === 'email' ? 'Email' : 'Password',
+    });
   }
 }

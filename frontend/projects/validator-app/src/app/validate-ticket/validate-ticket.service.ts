@@ -1,7 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
+
+import { OpenTripsService } from '../shared/open-trips.service';
 
 export type Trip = components['schemas']['Trip'];
 export type TicketValidationResult = components['schemas']['TicketValidationResult'];
@@ -28,11 +29,8 @@ function toErrorMessage(error: unknown, fallback: string): string {
 @Injectable({ providedIn: 'root' })
 export class ValidateTicketService {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
+  private readonly openTrips = inject(OpenTripsService);
 
-  private authHeader(): { Authorization: string } {
-    return { Authorization: `Bearer ${this.authStore.accessToken()}` };
-  }
 
   /**
    * Trips open for ticket validation on `serviceDate`. Exactly the
@@ -47,21 +45,10 @@ export class ValidateTicketService {
    * seats are assigned (docs/specs/10-booking-modes.md).
    */
   async loadTripsForDate(serviceDate: string): Promise<Trip[]> {
-    const headers = this.authHeader();
-    const [scheduled, inProgress] = await Promise.all([
-      this.api.GET('/api/v1/trips/', {
-        params: { query: { service_date: serviceDate, status: 'scheduled', limit: 100 } },
-        headers,
-      }),
-      this.api.GET('/api/v1/trips/', {
-        params: { query: { service_date: serviceDate, status: 'in_progress', limit: 100 } },
-        headers,
-      }),
-    ]);
-    const trips = [...(scheduled.data?.results ?? []), ...(inProgress.data?.results ?? [])];
-    return trips
-      .filter((trip) => trip.fare_collection_mode === 'prepaid')
-      .sort((a, b) => a.scheduled_departure_at.localeCompare(b.scheduled_departure_at));
+    // The filter is the only thing this adds to the shared loader, and
+    // it is the whole difference between this screen and /record.
+    const trips = await this.openTrips.loadForDate(serviceDate);
+    return trips.filter((trip) => trip.fare_collection_mode === 'prepaid');
   }
 
   /** A fresh `Idempotency-Key` per submit, same reasoning as
@@ -101,7 +88,6 @@ export class ValidateTicketService {
           header: { 'Idempotency-Key': crypto.randomUUID() },
         },
         body,
-        headers: this.authHeader(),
       }
     );
     if (data) {

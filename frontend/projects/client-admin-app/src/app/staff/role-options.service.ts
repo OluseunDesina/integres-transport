@@ -1,6 +1,5 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
 import type { SelectOption } from '@shared-ui';
 
 /**
@@ -12,12 +11,9 @@ import type { SelectOption } from '@shared-ui';
 @Injectable({ providedIn: 'root' })
 export class RoleOptionsService {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   async loadOptions(): Promise<SelectOption[]> {
-    const { data, error } = await this.api.GET('/api/v1/staff/roles/', {
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
-    });
+    const { data, error } = await this.api.GET('/api/v1/staff/roles/', {});
     if (!data) {
       throw new Error(
         error && typeof error === 'object' && 'detail' in error

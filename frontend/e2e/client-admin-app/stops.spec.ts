@@ -36,6 +36,18 @@ async function createStop(page: Page, name: string): Promise<void> {
   await expect(page).toHaveURL(/\/stops$/);
 }
 
+/**
+ * Row actions moved from bare text links plus an in-table switch into
+ * one `ui-action-menu` per row — docs/specs/14 slice 3a. Every action on
+ * this screen now goes through here.
+ */
+async function openRowMenu(page: Page, rowName: string): Promise<void> {
+  await page
+    .getByRole('row', { name: new RegExp(rowName) })
+    .getByRole('button', { name: new RegExp('^Actions for') })
+    .click();
+}
+
 test.describe('client-admin-app stops', () => {
   test('renders an axe-clean stops screen behind the nav shell', async ({ page }) => {
     await signIn(page);
@@ -103,10 +115,8 @@ test.describe('client-admin-app stops', () => {
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await createStop(page, originalName);
 
-    await page
-      .getByRole('row', { name: new RegExp(originalName) })
-      .getByRole('link', { name: 'Edit' })
-      .click();
+    await openRowMenu(page, originalName);
+    await page.getByRole('menuitem', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit stop' })).toBeVisible();
     await expect(page.getByLabel('Stop name')).toHaveValue(originalName);
 

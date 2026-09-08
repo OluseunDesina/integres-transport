@@ -2,7 +2,6 @@ import { DatePipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
-  OnInit,
   computed,
   effect,
   inject,
@@ -10,13 +9,23 @@ import {
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { HasPermissionDirective } from '@auth';
-import { Alert, Button, EmptyState, Paginator, Table } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  DensityToggle,
+  EmptyState,
+  PageHeader,
+  Paginator,
+  StatusPill,
+  Table,
+} from '@shared-ui';
+import type { Density } from '@shared-ui';
 
 import { FareRuleStore } from '../../shared/data/store/fare-rule.store';
 import { FareSegmentRuleStore } from '../../shared/data/store/fare-segment-rule.store';
-import { RouteStore } from '../../shared/data/store/route.store';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
-import { StopStore } from '../../shared/data/store/stop.store';
+import { TableDensityStore } from '../../shared/data/store/table-density.store';
+import { tripClassLabel } from '../../shared/trip-class';
 
 /**
  * Lists whichever of `FareRule`/`FareSegmentRule` applies to the
@@ -34,19 +43,27 @@ import { StopStore } from '../../shared/data/store/stop.store';
     HasPermissionDirective,
     Alert,
     Button,
+    DensityToggle,
     EmptyState,
+    PageHeader,
     Paginator,
+    StatusPill,
     Table,
   ],
   templateUrl: './fare-list.html',
 })
-export class FareList implements OnInit {
+export class FareList {
+  protected readonly tripClassLabel = tripClassLabel;
   protected readonly fareRuleStore = inject(FareRuleStore);
   protected readonly fareSegmentRuleStore = inject(FareSegmentRuleStore);
-  private readonly routeStore = inject(RouteStore);
-  private readonly stopStore = inject(StopStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   private readonly router = inject(Router);
+  private readonly densityStore = inject(TableDensityStore);
+
+  protected readonly density = this.densityStore.density;
+  protected readonly cellClass = computed(() =>
+    this.density() === 'compact' ? 'py-1' : 'py-3'
+  );
 
   protected readonly selectedBusiness = computed(() =>
     this.selectedBusinessStore
@@ -56,13 +73,6 @@ export class FareList implements OnInit {
 
   protected readonly isPerSegment = computed(
     () => this.selectedBusiness()?.fare_pricing_mode === 'per_segment'
-  );
-
-  protected readonly routeNames = computed(
-    () => new Map(this.routeStore.items().map((route) => [route.id, route.name]))
-  );
-  protected readonly stopNames = computed(
-    () => new Map(this.stopStore.items().map((stop) => [stop.id, stop.name]))
   );
 
   // See ScheduleList's identical wiring for the full untracked()/effect()
@@ -80,10 +90,13 @@ export class FareList implements OnInit {
     { allowSignalWrites: true }
   );
 
-  ngOnInit(): void {
-    void this.routeStore.getAll();
-    void this.stopStore.getAll();
-  }
+  // No `ngOnInit` loading RouteStore/StopStore any more. This screen
+  // used to build route- and stop-name maps from those shared root
+  // stores, which meant two things: a fare whose route or stop sat
+  // outside their loaded page rendered as a raw UUID, and calling
+  // `getAll()` here clobbered the routes and stops list screens' own
+  // filter and pagination state. The names now come down on the row
+  // (`FareRuleSerializer.route_name` and friends).
 
   protected onPageChange(offset: number): void {
     if (this.isPerSegment()) {
@@ -91,6 +104,10 @@ export class FareList implements OnInit {
     } else {
       void this.fareRuleStore.changePage(offset);
     }
+  }
+
+  protected onDensityChange(next: Density): void {
+    this.densityStore.set(next);
   }
 
   protected async goToNewFare(): Promise<void> {

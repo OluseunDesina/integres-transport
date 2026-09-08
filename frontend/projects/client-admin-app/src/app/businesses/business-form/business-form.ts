@@ -10,14 +10,23 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, Select, StatusPill, TextField, Toggle } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  FormSection,
+  PageHeader,
+  Select,
+  StatusPill,
+  TextField,
+  Toggle,
+} from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
 import { CURRENCY_SELECT_OPTIONS } from '../../shared/currency-options';
 import { BusinessStore, type Business } from '../../shared/data/store/business.store';
 import { documentReviewStatusTone } from '../../shared/status-tone';
 import { TIMEZONE_SELECT_OPTIONS } from '../../shared/timezone-options';
+import { applyServerErrors, clearServerErrors, fieldErrorMessage } from '../../shared/form-errors';
 
 const VERTICAL_OPTIONS: SelectOption[] = [
   { value: 'shuttle', label: 'Shuttle' },
@@ -36,7 +45,10 @@ const BOOKING_MODE_OPTIONS: SelectOption[] = [
 
 const FARE_COLLECTION_MODE_OPTIONS: SelectOption[] = [
   { value: 'prepaid', label: 'Prepaid — passengers pay before travelling' },
-  { value: 'pay_as_you_go', label: 'Pay as you go — fare charged after travel' },
+  {
+    value: 'pay_as_you_go',
+    label: 'Pay as you go — fare charged after travel',
+  },
 ];
 
 /** The axis most often confused with "Fare pricing mode" directly
@@ -74,20 +86,6 @@ const FARE_PRICING_MODE_HINT =
 
 type BusinessWriteFields = Omit<Business, 'id' | 'kyb_status' | 'kyb_submitted_at' | 'created_at'>;
 
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
-
 /**
  * One component for both create (`businesses/new`) and edit
  * (`businesses/:id/edit`) — see plan §"Design decisions". There's no
@@ -105,16 +103,9 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-business-form',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [
-    ReactiveFormsModule,
-    RouterLink,
-    Alert,
-    Button,
-    Select,
-    StatusPill,
-    TextField,
-    Toggle,
-  ],
+  imports: [ReactiveFormsModule, RouterLink, Alert,
+    FormSection,
+    PageHeader, Button, Select, StatusPill, TextField, Toggle],
   templateUrl: './business-form.html',
 })
 export class BusinessForm implements OnInit {
@@ -122,7 +113,6 @@ export class BusinessForm implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   protected readonly store = inject(BusinessStore);
 
   protected readonly verticalOptions = VERTICAL_OPTIONS;
@@ -156,8 +146,6 @@ export class BusinessForm implements OnInit {
 
   protected readonly submitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
-
-
 
   protected readonly form = this.fb.nonNullable.group({
     vertical: ['shuttle', Validators.required],
@@ -231,6 +219,7 @@ export class BusinessForm implements OnInit {
 
     this.submitting.set(true);
     this.errorMessage.set(null);
+    clearServerErrors(this.form);
     const values = this.form.getRawValue();
     const body: BusinessWriteFields = {
       vertical: values.vertical as Business['vertical'],
@@ -248,29 +237,25 @@ export class BusinessForm implements OnInit {
       capacity_enforced: values.capacity_enforced,
     };
 
-    const authHeader = {
-      Authorization: `Bearer ${this.authStore.accessToken()}`,
-    };
     const id = this.businessId();
     const { data, error } = id
       ? await this.api.PATCH('/api/v1/businesses/{id}/', {
           params: { path: { id } },
           body,
-          headers: authHeader,
         })
       : await this.api.POST('/api/v1/businesses/', {
           body: body as Business,
-          headers: authHeader,
         });
 
     this.submitting.set(false);
 
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(
+        applyServerErrors(
+          this.form,
           error,
-          'Could not save this business. Check your details and try again.',
-        ),
+          'Could not save this business. Check your details and try again.'
+        )
       );
       return;
     }
@@ -278,6 +263,9 @@ export class BusinessForm implements OnInit {
     await this.router.navigate(['/businesses']);
   }
 
+  /** Every field, not just those with a validator: any of them can
+   * come back rejected by the server, and `fieldErrorMessage`
+   * surfaces that the same way it surfaces a client-side failure. */
   protected fieldError(
     field:
       | 'vertical'
@@ -285,14 +273,12 @@ export class BusinessForm implements OnInit {
       | 'currency'
       | 'timezone'
       | 'booking_mode_default'
+      | 'fare_collection_mode'
       | 'fare_pricing_mode'
-      | 'fare_collection_mode',
+      | 'seat_selection_enabled'
+      | 'capacity_enforced'
   ): string | null {
-    const control = this.form.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+    return fieldErrorMessage(this.form.controls[field]);
   }
 
   /** `ui-toggle` is deliberately not a `ControlValueAccessor` (see its

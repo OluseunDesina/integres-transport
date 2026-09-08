@@ -2,23 +2,21 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@ang
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, Select, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  FormSection,
+  PageHeader,
+  Select,
+  TextField,
+  applyServerErrors,
+  clearServerErrors,
+  fieldErrorMessage,
+} from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
 import { RoleOptionsService } from '../role-options.service';
 
-function fieldErrors(error: unknown): Record<string, string> {
-  const result: Record<string, string> = {};
-  if (error && typeof error === 'object') {
-    for (const [field, value] of Object.entries(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        result[field] = value[0];
-      }
-    }
-  }
-  return result;
-}
 
 /**
  * Shows a success confirmation in place rather than navigating back to
@@ -29,21 +27,18 @@ function fieldErrors(error: unknown): Record<string, string> {
 @Component({
   selector: 'app-staff-invite',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, RouterLink, Alert, Button, Select, TextField],
+  imports: [ReactiveFormsModule, RouterLink, Alert, Button, FormSection, PageHeader, Select, TextField],
   templateUrl: './staff-invite.html',
 })
 export class StaffInvite implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly roleOptionsService = inject(RoleOptionsService);
   protected readonly router = inject(Router);
 
   protected readonly roleOptions = signal<SelectOption[]>([]);
   protected readonly submitting = signal(false);
   protected readonly invitedEmail = signal<string | null>(null);
-  protected readonly emailError = signal<string | null>(null);
-  protected readonly roleError = signal<string | null>(null);
   protected readonly generalError = signal<string | null>(null);
 
   protected readonly form = this.fb.nonNullable.group({
@@ -71,29 +66,20 @@ export class StaffInvite implements OnInit {
     }
 
     this.submitting.set(true);
-    this.emailError.set(null);
-    this.roleError.set(null);
+    clearServerErrors(this.form);
     this.generalError.set(null);
     const { email, role } = this.form.getRawValue();
 
     const { data, error } = await this.api.POST('/api/v1/staff/invitations/', {
       body: { email, role },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     this.submitting.set(false);
 
     if (!data) {
-      const errors = fieldErrors(error);
-      if (errors['email']) {
-        this.emailError.set(errors['email']);
-      }
-      if (errors['role']) {
-        this.roleError.set(errors['role']);
-      }
-      if (!errors['email'] && !errors['role']) {
-        this.generalError.set('Could not send this invitation. Try again.');
-      }
+      this.generalError.set(
+        applyServerErrors(this.form, error, 'Could not send this invitation. Try again.')
+      );
       return;
     }
 
@@ -102,34 +88,14 @@ export class StaffInvite implements OnInit {
 
   protected inviteAnother(): void {
     this.invitedEmail.set(null);
+    this.generalError.set(null);
+    clearServerErrors(this.form);
     this.form.reset({ email: '', role: this.roleOptions()[0]?.value ?? '' });
   }
 
-  protected emailFieldError(): string | null {
-    if (this.emailError()) {
-      return this.emailError();
-    }
-    const control = this.form.controls.email;
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    if (control.hasError('required')) {
-      return 'This field is required.';
-    }
-    if (control.hasError('email')) {
-      return 'Enter a valid email address.';
-    }
-    return 'Invalid value.';
-  }
-
-  protected roleFieldError(): string | null {
-    if (this.roleError()) {
-      return this.roleError();
-    }
-    const control = this.form.controls.role;
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+  protected fieldError(field: 'email' | 'role'): string | null {
+    return fieldErrorMessage(this.form.controls[field], {
+      label: field === 'email' ? 'Email' : 'Role',
+    });
   }
 }

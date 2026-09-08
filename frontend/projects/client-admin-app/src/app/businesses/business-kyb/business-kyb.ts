@@ -1,13 +1,32 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore, HasPermissionDirective, PermissionsService } from '@auth';
-import { Alert, Button, EmptyState, Select, StatusPill, TextField } from '@shared-ui';
+import { HasPermissionDirective, PermissionsService } from '@auth';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  FormSection,
+  PageHeader,
+  Select,
+  StatusPill,
+  Tabs,
+  TextField,
+} from '@shared-ui';
+import type { TabItem } from '@shared-ui';
 
 import { BusinessStore, type Business } from '../../shared/data/store/business.store';
 import { extractFirstErrorMessage } from '../../shared/error-message';
+import { applyServerErrors, clearServerErrors, fieldErrorMessage } from '../../shared/form-errors';
 import {
   CERTIFICATE_GUIDANCE,
   ID_GENERAL_GUIDANCE,
@@ -31,9 +50,21 @@ const COMPANY_SECTIONS = [
     title: 'Certificate of incorporation',
     guidance: CERTIFICATE_GUIDANCE,
   },
-  { type: 'proof_of_address', title: 'Proof of address', guidance: PROOF_OF_ADDRESS_GUIDANCE },
-  { type: 'tax_certificate', title: 'Tax certificate', guidance: TAX_CERTIFICATE_GUIDANCE },
-  { type: 'other', title: 'Other supporting documents', guidance: OTHER_GUIDANCE },
+  {
+    type: 'proof_of_address',
+    title: 'Proof of address',
+    guidance: PROOF_OF_ADDRESS_GUIDANCE,
+  },
+  {
+    type: 'tax_certificate',
+    title: 'Tax certificate',
+    guidance: TAX_CERTIFICATE_GUIDANCE,
+  },
+  {
+    type: 'other',
+    title: 'Other supporting documents',
+    guidance: OTHER_GUIDANCE,
+  },
 ] as const;
 
 /**
@@ -58,6 +89,9 @@ const COMPANY_SECTIONS = [
     RouterLink,
     HasPermissionDirective,
     Alert,
+    FormSection,
+    PageHeader,
+    Tabs,
     Button,
     EmptyState,
     Select,
@@ -70,7 +104,6 @@ export class BusinessKyb implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly permissions = inject(PermissionsService);
   private readonly store = inject(BusinessStore);
 
@@ -84,6 +117,21 @@ export class BusinessKyb implements OnInit {
   protected readonly notFound = signal(false);
   protected readonly loading = signal(true);
   protected readonly errorMessage = signal<string | null>(null);
+
+  /** Directors and company documents are two unrelated halves of one
+   * record, both already loaded before either renders — the model
+   * `ui-tabs` is built for. Stacked, this was the longest screen in the
+   * console and the company documents sat below four director cards
+   * plus an add form. */
+  protected readonly tabs: TabItem[] = [
+    { id: 'directors', label: 'Directors' },
+    { id: 'documents', label: 'Company documents' },
+  ];
+  protected readonly activeTab = signal('directors');
+
+  protected setActiveTab(id: string): void {
+    this.activeTab.set(id);
+  }
 
   protected readonly directors = signal<Director[]>([]);
   protected readonly documents = signal<KybDocument[]>([]);
@@ -147,14 +195,12 @@ export class BusinessKyb implements OnInit {
 
   // --- reads -------------------------------------------------------------
 
-  private authHeader(): Record<string, string> {
-    return { Authorization: `Bearer ${this.authStore.accessToken()}` };
-  }
-
   private async loadDirectors(): Promise<void> {
     const { data, error } = await this.api.GET('/api/v1/businesses/{business_id}/directors/', {
-      params: { path: { business_id: this.businessId() }, query: { limit: 100, offset: 0 } },
-      headers: this.authHeader(),
+      params: {
+        path: { business_id: this.businessId() },
+        query: { limit: 100, offset: 0 },
+      },
     });
     if (!data) {
       this.errorMessage.set(extractFirstErrorMessage(error, 'Could not load directors.'));
@@ -164,13 +210,9 @@ export class BusinessKyb implements OnInit {
   }
 
   private async loadDocuments(): Promise<void> {
-    const { data, error } = await this.api.GET(
-      '/api/v1/businesses/{business_id}/kyb-documents/',
-      {
-        params: { path: { business_id: this.businessId() } },
-        headers: this.authHeader(),
-      }
-    );
+    const { data, error } = await this.api.GET('/api/v1/businesses/{business_id}/kyb-documents/', {
+      params: { path: { business_id: this.businessId() } },
+    });
     if (!data) {
       this.errorMessage.set(extractFirstErrorMessage(error, 'Could not load documents.'));
       return;
@@ -202,12 +244,8 @@ export class BusinessKyb implements OnInit {
    * "Add director" with an empty name silently did nothing: the form was
    * invalid, `markAllAsTouched()` ran, and no message appeared anywhere.
    * Same helper shape as `business-form.ts`'s own. */
-  protected fieldError(field: 'full_name' | 'id_type'): string | null {
-    const control = this.directorForm.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+  protected fieldError(field: 'full_name' | 'id_type' | 'id_number'): string | null {
+    return fieldErrorMessage(this.directorForm.controls[field]);
   }
 
   protected async addDirector(): Promise<void> {
@@ -217,19 +255,20 @@ export class BusinessKyb implements OnInit {
     }
     this.addingDirector.set(true);
     this.errorMessage.set(null);
+    clearServerErrors(this.directorForm);
 
-    const { data, error } = await this.api.POST(
-      '/api/v1/businesses/{business_id}/directors/',
-      {
-        params: { path: { business_id: this.businessId() } },
-        body: this.directorForm.getRawValue() as Director,
-        headers: this.authHeader(),
-      }
-    );
+    const { data, error } = await this.api.POST('/api/v1/businesses/{business_id}/directors/', {
+      params: { path: { business_id: this.businessId() } },
+      body: this.directorForm.getRawValue() as Director,
+    });
     this.addingDirector.set(false);
 
     if (!data) {
-      this.errorMessage.set(extractFirstErrorMessage(error, 'Could not add this director.'));
+      this.errorMessage.set(
+        applyServerErrors(this.directorForm, error, 'Could not add this director.', {
+          unplaceable: [],
+        })
+      );
       return;
     }
     this.directorForm.reset({ full_name: '', id_type: 'nin', id_number: '' });
@@ -243,7 +282,6 @@ export class BusinessKyb implements OnInit {
     const { error } = await this.api.PATCH('/api/v1/directors/{id}/', {
       params: { path: { id: director.id } },
       body: { is_active: false } as Director,
-      headers: this.authHeader(),
     });
     if (error) {
       this.errorMessage.set(
@@ -288,14 +326,10 @@ export class BusinessKyb implements OnInit {
       formData.append('director', directorId);
     }
 
-    const { data, error } = await this.api.POST(
-      '/api/v1/businesses/{business_id}/kyb-documents/',
-      {
-        params: { path: { business_id: this.businessId() } },
-        body: formData as unknown as KybDocument,
-        headers: this.authHeader(),
-      }
-    );
+    const { data, error } = await this.api.POST('/api/v1/businesses/{business_id}/kyb-documents/', {
+      params: { path: { business_id: this.businessId() } },
+      body: formData as unknown as KybDocument,
+    });
     this.uploading.set(null);
 
     if (!data) {

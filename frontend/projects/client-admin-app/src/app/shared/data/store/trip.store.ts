@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
 import { ListStore, type Page } from '@shared-data';
 
 export type Trip = components['schemas']['Trip'];
@@ -14,6 +13,9 @@ export interface TripQuery {
   schedule?: string;
   service_date?: string;
   status?: string;
+  /** Server-side match on the route's name — a Trip has none of its own
+   * (spec 14 slice 3b). */
+  search?: string;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -29,7 +31,6 @@ function toErrorMessage(error: unknown): string {
 @Injectable({ providedIn: 'root' })
 export class TripStore extends ListStore<Trip, TripQuery> {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   constructor() {
     super({}, 25);
@@ -37,7 +38,7 @@ export class TripStore extends ListStore<Trip, TripQuery> {
 
   protected override async fetchPage(
     query: TripQuery,
-    page: Page,
+    page: Page
   ): Promise<{ items: Trip[]; total: number }> {
     const { data, error } = await this.api.GET('/api/v1/trips/', {
       params: {
@@ -49,9 +50,9 @@ export class TripStore extends ListStore<Trip, TripQuery> {
           schedule: query.schedule,
           service_date: query.service_date,
           status: query.status,
+          search: query.search,
         },
       },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     if (!data) {
       throw new Error(toErrorMessage(error));

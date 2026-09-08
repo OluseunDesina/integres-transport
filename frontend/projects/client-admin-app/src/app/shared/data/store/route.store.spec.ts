@@ -3,11 +3,6 @@ import { API_CLIENT } from '@api-client';
 
 import { RouteStore } from './route.store';
 
-interface LookupQuery {
-  limit: number;
-  offset: number;
-}
-
 describe('RouteStore', () => {
   let apiClient: { GET: jasmine.Spy };
   let store: RouteStore;
@@ -33,7 +28,7 @@ describe('RouteStore', () => {
             name: 'Ikeja Express',
             code: '',
             description: '',
-            is_active: true,
+            status: 'active',
             stops: [],
             created_at: '2026-08-06T00:00:00Z',
           },
@@ -46,7 +41,15 @@ describe('RouteStore', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/routes/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, business: undefined } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            business: undefined,
+            search: undefined,
+            status: undefined,
+          },
+        },
       })
     );
     expect(store.items().length).toBe(1);
@@ -71,41 +74,66 @@ describe('RouteStore', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/routes/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, business: 'biz-1' } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            business: 'biz-1',
+            search: undefined,
+            status: undefined,
+          },
+        },
       })
     );
   });
-  describe('findById', () => {
-    it('resolves a record past the browse page, unfiltered by the live query', async () => {
-      // Two things at once, because they failed together: the lookup
-      // must page past row 25 (the bounded form reported "not found" on
-      // any refresh or deep link), and it must NOT inherit whatever
-      // filter the list screen left behind — a deep link has to resolve
-      // whichever Business the record belongs to.
-      apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
-      await store.updateQuery({ business: 'biz-other' });
-      apiClient.GET.calls.reset();
-      apiClient.GET.and.callFake((_path: string, init: { params: { query: LookupQuery } }) => {
-        const { limit, offset } = init.params.query;
-        const results = Array.from({ length: Math.max(0, Math.min(limit, 300 - offset)) }, (_, i) => ({
-          id: 'rec-' + (offset + i),
-        }));
-        return Promise.resolve({ data: { count: 300, results } });
+
+  it('narrows by status via updateQuery()', async () => {
+    apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
+
+    await store.updateQuery({ status: 'archived' });
+
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/routes/',
+      jasmine.objectContaining({
+        params: { query: jasmine.objectContaining({ status: 'archived' }) },
+      })
+    );
+  });
+
+  describe('findDetail', () => {
+    it('calls the single-record GET and returns its body', async () => {
+      const detail = { id: 'route-1', name: 'Ikeja Express', stop_count: 2, schedule_count: 1 };
+      apiClient.GET.and.resolveTo({ data: detail });
+
+      const found = await store.findDetail('route-1');
+
+      expect(apiClient.GET).toHaveBeenCalledWith('/api/v1/routes/{id}/', {
+        params: { path: { id: 'route-1' } },
       });
-
-      const found = await store.findById('rec-250');
-
-      expect(found?.id).toBe('rec-250');
-      expect(apiClient.GET).toHaveBeenCalledWith(
-        '/api/v1/routes/',
-        jasmine.objectContaining({
-          params: { query: { limit: 100, offset: 0, business: undefined } },
-        })
-      );
+      expect(found).toEqual(jasmine.objectContaining({ id: 'route-1', stop_count: 2 }));
     });
 
-    it('returns null for an id in no page', async () => {
-      apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
+    it('returns null on a 404 rather than throwing', async () => {
+      apiClient.GET.and.resolveTo({ error: { detail: 'Not found.' } });
+
+      expect(await store.findDetail('nope')).toBeNull();
+    });
+  });
+
+  describe('findById', () => {
+    it('delegates to the single-record GET, not a bounded page', async () => {
+      apiClient.GET.and.resolveTo({ data: { id: 'route-1', name: 'Ikeja Express' } });
+
+      const found = await store.findById('route-1');
+
+      expect(apiClient.GET).toHaveBeenCalledWith('/api/v1/routes/{id}/', {
+        params: { path: { id: 'route-1' } },
+      });
+      expect(found?.id).toBe('route-1');
+    });
+
+    it('returns null when the record does not exist', async () => {
+      apiClient.GET.and.resolveTo({ error: { detail: 'Not found.' } });
 
       expect(await store.findById('nope')).toBeNull();
     });

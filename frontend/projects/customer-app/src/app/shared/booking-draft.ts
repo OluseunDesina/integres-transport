@@ -38,6 +38,22 @@ export interface SeatPickerRequest {
   scheduledDepartureAt: string;
   fromStop: StopRef;
   toStop: StopRef;
+  /**
+   * The service class this departure runs as
+   * (docs/specs/15-trip-classes.md).
+   *
+   * **Optional, and it has to stay optional.** These guards run against
+   * `history.state`, so a passenger who is mid-flow when a new build
+   * ships is carrying a state object written by the old one. A required
+   * field would fail `isSeatPickerRequest` and bounce them back to
+   * search with a half-made booking behind them — for a label.
+   *
+   * `seat-picker` shows the class from the freshly-fetched availability
+   * envelope rather than from this, per the note above about nothing
+   * here being trusted for correctness. This exists so the search
+   * screen's own result card and the confirm screen agree with it.
+   */
+  tripClass?: string;
   /** Set only when `booking-confirm` bounces the passenger back here
    * after a seat conflict, so the seat map can say why their previous
    * selection is gone. */
@@ -95,6 +111,7 @@ function isSeatPickerRequest(value: unknown): value is SeatPickerRequest {
     return false;
   }
   const notice = value['notice'];
+  const tripClass = value['tripClass'];
   return (
     isString(value['tripId']) &&
     isString(value['routeName']) &&
@@ -102,6 +119,7 @@ function isSeatPickerRequest(value: unknown): value is SeatPickerRequest {
     isString(value['scheduledDepartureAt']) &&
     isStopRef(value['fromStop']) &&
     isStopRef(value['toStop']) &&
+    (tripClass === undefined || isString(tripClass)) &&
     (notice === undefined || isString(notice))
   );
 }

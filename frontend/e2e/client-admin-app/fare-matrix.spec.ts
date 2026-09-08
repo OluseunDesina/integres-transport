@@ -84,7 +84,11 @@ test.describe('client-admin-app fare matrix', () => {
 
     const row = page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first();
     await expect(row).toBeVisible();
-    await row.getByRole('link', { name: 'Fares' }).click();
+    // Row actions moved into one ui-action-menu per row — docs/specs/14
+    // slice 3a. "Fares" is still gated on `fares.view` rather than
+    // `network.manage`, as it was when it was a link.
+    await row.getByRole('button', { name: new RegExp('^Actions for') }).click();
+    await page.getByRole('menuitem', { name: 'Fares' }).click();
     await expect(page).toHaveURL(/\/fares\/fare-matrix\//);
 
     await expect(page.getByRole('heading', { name: 'Fare grid' })).toBeVisible();

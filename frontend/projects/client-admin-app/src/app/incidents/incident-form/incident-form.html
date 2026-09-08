@@ -1,0 +1,85 @@
+@if (notFound()) {
+  <div class="flex flex-col gap-4">
+    <ui-page-header title="Incident not found" />
+    <ui-alert>
+      This incident does not exist, or belongs to another client.
+      <a class="underline underline-offset-2" routerLink="/incidents">Back to incidents</a>
+    </ui-alert>
+  </div>
+} @else {
+  <form class="flex flex-col gap-6" [formGroup]="form" (ngSubmit)="onSubmit()">
+    <ui-page-header
+      [title]="editing() ? 'Edit incident' : 'Report an incident'"
+      [description]="
+        editing()
+          ? 'Correct the details. Status is moved from the incident itself, not here.'
+          : 'Record a fault, a safety concern or anything else that needs following up.'
+      "
+    />
+
+    @if (reference(); as ref) {
+      <p class="text-sm text-muted">Reference {{ ref }}</p>
+    }
+
+    @if (errorMessage(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+
+    <ui-form-section
+      title="What happened"
+      description="A title an operator can scan in a queue, and enough detail to act on."
+    >
+      <ui-text-field
+        label="Title"
+        formControlName="title"
+        [invalid]="!!fieldError('title')"
+        [errorMessage]="fieldError('title')"
+      />
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <ui-select
+          label="Category"
+          formControlName="category"
+          [options]="categoryOptions"
+          [invalid]="!!fieldError('category')"
+          [errorMessage]="fieldError('category')"
+        />
+        <ui-select
+          label="Severity"
+          formControlName="severity"
+          [options]="severityOptions"
+          hint="High and critical notify every staff member."
+          [invalid]="!!fieldError('severity')"
+          [errorMessage]="fieldError('severity')"
+        />
+      </div>
+      <ui-textarea label="Description" formControlName="description" [rows]="4" />
+    </ui-form-section>
+
+    <ui-form-section
+      title="Equipment"
+      description="Optional. Anything printed on the unit is enough to route a fault to a technician."
+    >
+      <ui-text-field
+        label="Device reference"
+        formControlName="device_reference"
+        hint="For example the serial or asset number on a card reader."
+      />
+    </ui-form-section>
+
+    @if (editing()) {
+      <ui-form-section
+        title="Resolution"
+        description="What was done. Visible to staff only — never to the passenger who reported it."
+      >
+        <ui-textarea label="Resolution notes" formControlName="resolution_notes" [rows]="3" />
+      </ui-form-section>
+    }
+
+    <div class="flex flex-wrap items-center gap-3">
+      <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+        {{ editing() ? 'Save changes' : 'Report incident' }}
+      </ui-button>
+      <a class="text-sm text-muted underline underline-offset-2" routerLink="/incidents">Cancel</a>
+    </div>
+  </form>
+}

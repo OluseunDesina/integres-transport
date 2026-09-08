@@ -1,17 +1,11 @@
 @if (request(); as journey) {
   <div class="flex flex-col gap-6">
-    <div>
-      <h1 class="text-lg font-semibold text-slate-900">{{ heading() }}</h1>
-      <p class="mt-1 text-sm text-slate-500">
-        {{ journey.routeName }} — {{ journey.fromStop.name }} to {{ journey.toStop.name }}
-      </p>
-      <p class="text-sm text-slate-500">
-        Departs {{ journey.scheduledDepartureAt | date: 'short' }}
-      </p>
-    </div>
+    <app-booking-steps current="seats" />
+
+    <ui-page-header [title]="heading()" [description]="journeyLine()" />
 
     @if (journey.notice; as notice) {
-      <ui-alert>{{ notice }}</ui-alert>
+      <ui-alert variant="warning">{{ notice }}</ui-alert>
     }
 
     @if (loadError(); as message) {
@@ -26,7 +20,9 @@
     }
 
     @if (loading()) {
-      <p class="text-sm text-slate-500">Loading seats…</p>
+      <div role="status" aria-busy="true" aria-label="Loading seats">
+        <ui-skeleton variant="block" height="14rem" />
+      </div>
     } @else if (loadError()) {
       <!-- The retry alert above is the whole message; nothing below it
            can be trusted until the load succeeds. -->
@@ -45,34 +41,35 @@
       />
     } @else if (buysPlaces()) {
       <section class="flex flex-col gap-4">
-        <div class="flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-4">
-          <label for="passenger-count" class="text-sm font-medium text-slate-700">
-            Passengers
-          </label>
-          <select
-            id="passenger-count"
-            class="min-h-11 w-full max-w-40 rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
-            [value]="passengerCount()"
-            (change)="setPassengerCount($any($event.target).value)"
-          >
-            @for (option of placeOptions(); track option) {
-              <option [value]="option">{{ option }}</option>
-            }
-          </select>
-          <p class="text-sm text-slate-500">{{ placesHint() }}</p>
+        <div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
+          <div class="max-w-40">
+            <!-- ui-select, not a hand-rolled <select>. The raw control
+                 here was the last one in the app, and spec 14 names
+                 "properly styled controls in place of raw native
+                 selects" as this app's rebuild. The label/id pairing is
+                 the same, so getByLabel('Passengers') still finds it. -->
+            <ui-select
+              label="Passengers"
+              [options]="placeSelectOptions()"
+              [ngModel]="passengerCount().toString()"
+              [ngModelOptions]="{ standalone: true }"
+              [hint]="placesHint()"
+              (ngModelChange)="setPassengerCount($event)"
+            />
+          </div>
         </div>
 
         <div
-          class="flex flex-wrap items-center justify-between gap-4 rounded-md border border-slate-200 bg-white p-4"
+          class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-surface p-5 shadow-sm"
         >
-          <div class="text-sm">
+          <div>
             @if (fareLabel(); as fare) {
-              <p class="text-slate-500">{{ fare }} per passenger</p>
+              <p class="text-sm text-muted">{{ fare }} per passenger</p>
             }
-            <p class="font-medium text-slate-900">
-              {{ selectedCount() }} {{ selectedCount() === 1 ? 'passenger' : 'passengers' }}
+            <p class="text-lg font-semibold text-strong">
+              {{ selectionLabel() }}
               @if (totalLabel(); as total) {
-                — total {{ total }}
+                — {{ total }}
               }
             </p>
           </div>
@@ -86,22 +83,26 @@
       </section>
     } @else {
       <section class="flex flex-col gap-4">
-        <div class="flex flex-wrap items-center gap-4 text-xs text-slate-600">
+        <!-- The swatch is not the only signal: each state is named in
+             text beside it, and a seat button carries aria-pressed plus
+             a full aria-label. Colour alone would fail this repo's own
+             "colour is not the only status indicator" bar. -->
+        <div class="flex flex-wrap items-center gap-4 text-sm text-default">
           <span class="inline-flex items-center gap-2">
-            <span class="h-4 w-4 rounded border border-slate-300 bg-white"></span> Available
+            <span class="h-4 w-4 rounded border border-control bg-surface"></span> Available
           </span>
           <span class="inline-flex items-center gap-2">
-            <span class="h-4 w-4 rounded border border-slate-900 bg-slate-900"></span> Selected
+            <span class="h-4 w-4 rounded border border-primary bg-primary"></span> Selected
           </span>
           <span class="inline-flex items-center gap-2">
-            <span class="h-4 w-4 rounded border border-slate-200 bg-slate-100"></span> Taken
+            <span class="h-4 w-4 rounded border border-border bg-surface-sunken"></span> Taken
           </span>
         </div>
 
         <div
           role="group"
           aria-label="Seat map"
-          class="flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-4"
+          class="flex flex-col gap-2 rounded-xl border border-border bg-surface p-5 shadow-sm"
         >
           @for (seatRow of seatRows(); track seatRow.row) {
             <div class="flex flex-wrap items-center gap-6">
@@ -114,16 +115,16 @@
                       [attr.aria-pressed]="isSelected(entry.seat.id)"
                       [attr.aria-label]="seatLabel(entry)"
                       (click)="toggleSeat(entry)"
-                      class="inline-flex min-h-11 min-w-11 items-center justify-center rounded border px-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
-                      [class.border-slate-900]="isSelected(entry.seat.id)"
-                      [class.bg-slate-900]="isSelected(entry.seat.id)"
-                      [class.text-white]="isSelected(entry.seat.id)"
-                      [class.border-slate-300]="entry.is_available && !isSelected(entry.seat.id)"
-                      [class.bg-white]="entry.is_available && !isSelected(entry.seat.id)"
-                      [class.text-slate-900]="entry.is_available && !isSelected(entry.seat.id)"
-                      [class.border-slate-200]="!entry.is_available"
-                      [class.bg-slate-100]="!entry.is_available"
-                      [class.text-slate-400]="!entry.is_available"
+                      class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border px-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                      [class.border-primary]="isSelected(entry.seat.id)"
+                      [class.bg-primary]="isSelected(entry.seat.id)"
+                      [class.text-on-primary]="isSelected(entry.seat.id)"
+                      [class.border-control]="entry.is_available && !isSelected(entry.seat.id)"
+                      [class.bg-surface]="entry.is_available && !isSelected(entry.seat.id)"
+                      [class.text-strong]="entry.is_available && !isSelected(entry.seat.id)"
+                      [class.border-border]="!entry.is_available"
+                      [class.bg-surface-sunken]="!entry.is_available"
+                      [class.text-muted]="!entry.is_available"
                       [class.cursor-not-allowed]="!entry.is_available"
                     >
                       {{ entry.seat.seat_number }}
@@ -136,16 +137,16 @@
         </div>
 
         <div
-          class="flex flex-wrap items-center justify-between gap-4 rounded-md border border-slate-200 bg-white p-4"
+          class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-surface p-5 shadow-sm"
         >
-          <div class="text-sm">
+          <div>
             @if (fareLabel(); as fare) {
-              <p class="text-slate-500">{{ fare }} per seat</p>
+              <p class="text-sm text-muted">{{ fare }} per seat</p>
             }
-            <p class="font-medium text-slate-900">
-              {{ selectedCount() }} seat(s) selected
+            <p class="text-lg font-semibold text-strong">
+              {{ selectionLabel() }}
               @if (totalLabel(); as total) {
-                — total {{ total }}
+                — {{ total }}
               }
             </p>
           </div>

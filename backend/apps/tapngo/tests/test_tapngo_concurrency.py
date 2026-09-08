@@ -42,7 +42,11 @@ def test_exactly_one_concurrent_board_tap_opens_a_journey_for_the_same_passenger
         RouteStopFactory(client=client, route=route, stop=stop_a, sequence=1)
         RouteStopFactory(client=client, route=route, stop=stop_b, sequence=2)
         trip = TripFactory(
-            client=client, route=route, business=route.business, booking_mode="tap_and_go"
+            client=client,
+            route=route,
+            business=route.business,
+            booking_mode="open_seating",
+            fare_collection_mode="pay_as_you_go",
         )
         passenger = PassengerUserFactory(client=client)
         _credential, token = issue_credential(passenger=passenger, channel="qr", label="")
@@ -100,7 +104,11 @@ def test_concurrent_board_taps_for_different_passengers_do_not_conflict() -> Non
         RouteStopFactory(client=client, route=route, stop=stop_a, sequence=1)
         RouteStopFactory(client=client, route=route, stop=stop_b, sequence=2)
         trip = TripFactory(
-            client=client, route=route, business=route.business, booking_mode="tap_and_go"
+            client=client,
+            route=route,
+            business=route.business,
+            booking_mode="open_seating",
+            fare_collection_mode="pay_as_you_go",
         )
         tokens = []
         for _ in range(WORKER_COUNT):

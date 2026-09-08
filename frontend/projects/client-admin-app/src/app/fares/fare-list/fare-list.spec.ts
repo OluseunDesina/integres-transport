@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import { expectColumnVisibilityParity } from '@shared-ui';
 import { AuthStore } from '@auth';
 import type { AuthUser } from '@auth';
 
@@ -11,7 +12,10 @@ import {
   type FareSegmentRule,
 } from '../../shared/data/store/fare-segment-rule.store';
 import { RouteStore, type Route } from '../../shared/data/store/route.store';
-import { SelectedBusinessStore, type Business } from '../../shared/data/store/selected-business.store';
+import {
+  SelectedBusinessStore,
+  type Business,
+} from '../../shared/data/store/selected-business.store';
 import { StopStore, type Stop } from '../../shared/data/store/stop.store';
 
 function makeUser(overrides: Partial<AuthUser>): AuthUser {
@@ -52,6 +56,11 @@ function makeFareRule(overrides: Partial<FareRule> = {}): FareRule {
     id: 'fare-1',
     business: 'biz-1',
     route: 'route-1',
+    route_name: 'Ikeja Express',
+    // '' is the wildcard class — what every fare rule created before
+    // spec 15 backfilled to, so this fixture keeps describing the rules
+    // this screen has always listed.
+    trip_class: '',
     amount: '500.00',
     effective_from: '2026-01-01T00:00:00Z',
     effective_to: null,
@@ -65,8 +74,12 @@ function makeFareSegmentRule(overrides: Partial<FareSegmentRule> = {}): FareSegm
     id: 'fare-seg-1',
     business: 'biz-1',
     route: 'route-1',
+    route_name: 'Ikeja Express',
     from_stop: 'stop-1',
+    from_stop_name: 'Yaba',
     to_stop: 'stop-2',
+    to_stop_name: 'Lekki',
+    trip_class: '',
     amount: '300.00',
     effective_from: '2026-01-01T00:00:00Z',
     effective_to: null,
@@ -116,7 +129,13 @@ async function setup(businesses: Business[]) {
   authStore.setSession('a', 'r', makeUser({ permissions: ['client-admin:access', 'fares.view'] }));
 
   const fixture = TestBed.createComponent(FareList);
-  return { fixture, fareRuleStore, fareSegmentRuleStore, routeStore, stopStore };
+  return {
+    fixture,
+    fareRuleStore,
+    fareSegmentRuleStore,
+    routeStore,
+    stopStore,
+  };
 }
 
 describe('FareList', () => {
@@ -128,12 +147,16 @@ describe('FareList', () => {
     let routeStore: FakeListStore<Route>;
 
     beforeEach(async () => {
-      ({ fixture, fareRuleStore, routeStore } = await setup([makeBusiness({ fare_pricing_mode: 'flat' })]));
+      ({ fixture, fareRuleStore, routeStore } = await setup([
+        makeBusiness({ fare_pricing_mode: 'flat' }),
+      ]));
       fixture.detectChanges();
     });
 
     it('scopes the FareRule query to the active Business on init', () => {
-      expect(fareRuleStore.updateQuery).toHaveBeenCalledWith({ business: 'biz-1' });
+      expect(fareRuleStore.updateQuery).toHaveBeenCalledWith({
+        business: 'biz-1',
+      });
     });
 
     it('shows the flat-fare empty state when there are no rows', () => {
@@ -151,6 +174,15 @@ describe('FareList', () => {
       expect(fixture.nativeElement.textContent).toContain('Ikeja Express');
       expect(fixture.nativeElement.textContent).toContain('500.00');
     });
+
+    // --- docs/specs/14, responsive columns ---
+
+    it('keeps every column hidden in the header hidden in its cells', () => {
+      fareRuleStore.items.set([makeFareRule()]);
+      fixture.detectChanges();
+
+      expectColumnVisibilityParity(fixture.nativeElement, 'fare-list flat rows');
+    });
   });
 
   describe('a per-segment-pricing Business', () => {
@@ -167,20 +199,32 @@ describe('FareList', () => {
     });
 
     it('scopes the FareSegmentRule query to the active Business on init', () => {
-      expect(fareSegmentRuleStore.updateQuery).toHaveBeenCalledWith({ business: 'biz-1' });
+      expect(fareSegmentRuleStore.updateQuery).toHaveBeenCalledWith({
+        business: 'biz-1',
+      });
     });
 
-    it('renders a per-segment fare row with its stop names', () => {
-      routeStore.items.set([{ id: 'route-1', business: 'biz-1', name: 'Ikeja Express' } as Route]);
-      stopStore.items.set([
-        { id: 'stop-1', name: 'Ikeja Bus Stop' } as Stop,
-        { id: 'stop-2', name: 'Lekki Toll Gate' } as Stop,
+    it('renders a per-segment fare row with names taken from the row itself', () => {
+      // Slice 3b: these used to be resolved through the shared root
+      // RouteStore/StopStore, so a fare whose route or stop sat outside
+      // their loaded page rendered as a raw UUID — and loading them here
+      // clobbered the routes and stops list screens' own state. The
+      // serializer nests the names now.
+      fareSegmentRuleStore.items.set([
+        makeFareSegmentRule({
+          from_stop_name: 'Ikeja Bus Stop',
+          to_stop_name: 'Lekki Toll Gate',
+        }),
       ]);
-      fareSegmentRuleStore.items.set([makeFareSegmentRule()]);
       fixture.detectChanges();
 
       expect(fixture.nativeElement.textContent).toContain('Ikeja Bus Stop');
       expect(fixture.nativeElement.textContent).toContain('Lekki Toll Gate');
+    });
+
+    it('reads no shared route or stop store at all', () => {
+      expect(routeStore.getAll).not.toHaveBeenCalled();
+      expect(stopStore.getAll).not.toHaveBeenCalled();
     });
   });
 });

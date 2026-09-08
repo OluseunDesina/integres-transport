@@ -25,4 +25,9 @@ urlpatterns = [
         views.NotificationTicketReminderSweepView.as_view(),
         name="internal-task-notification-ticket-reminder-sweep",
     ),
+    path(
+        "internal/tasks/prune-telemetry/",
+        views.PruneTelemetryView.as_view(),
+        name="internal-task-prune-telemetry",
+    ),
 ]

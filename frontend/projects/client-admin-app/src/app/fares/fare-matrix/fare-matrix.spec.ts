@@ -23,6 +23,7 @@ function makeRoute(overrides: Partial<Route> = {}): Route {
     business: 'biz-1',
     name: 'Ikeja — Lekki',
     code: 'IKL',
+    status: 'active',
     stops: [],
     created_at: '2026-08-26T00:00:00Z',
     ...overrides,
@@ -35,6 +36,8 @@ function makeMatrix(overrides: Partial<FareMatrixPayload> = {}): FareMatrixPaylo
     route: 'route-1',
     currency: 'NGN',
     fare_pricing_mode: 'per_segment',
+    // The wildcard grid, which is where this screen opens.
+    trip_class: '',
     stops: [IKEJA, YABA, LEKKI],
     cells: [
       { from_stop: IKEJA.id, to_stop: YABA.id, amount: '500.00', fare_segment_rule: 'rule-1' },
@@ -125,9 +128,15 @@ async function setup(
 }
 
 function cellInput(fixture: ComponentFixture<FareMatrix>, label: string): HTMLInputElement {
-  const input = fixture.nativeElement.querySelector(
-    `input[aria-label="${label}"]`,
-  ) as HTMLInputElement | null;
+  // Exact first, then prefix: on a class grid an inherited cell's
+  // accessible name gains a sentence explaining the inheritance
+  // (spec 15), so "Ikeja to Yaba fare" is a prefix rather than the
+  // whole name there. The exact form is still asserted directly by the
+  // accessible-name test above, so nothing is loosened away here.
+  const input = (fixture.nativeElement.querySelector(`input[aria-label="${label}"]`) ??
+    fixture.nativeElement.querySelector(
+      `input[aria-label^="${label}"]`,
+    )) as HTMLInputElement | null;
   if (!input) {
     throw new Error(`No cell input labelled "${label}"`);
   }
@@ -219,8 +228,8 @@ describe('FareMatrix', () => {
 
       expect(fixture.componentInstance['dirtyKeys']().size).toBe(1);
       expect(fixture.nativeElement.textContent).toContain('1 unsaved change');
-      expect(cellInput(fixture, 'Yaba to Lekki fare').classList).toContain('bg-amber-50');
-      expect(cellInput(fixture, 'Ikeja to Yaba fare').classList).not.toContain('bg-amber-50');
+      expect(cellInput(fixture, 'Yaba to Lekki fare').classList).toContain('bg-warning-surface');
+      expect(cellInput(fixture, 'Ikeja to Yaba fare').classList).not.toContain('bg-warning-surface');
     });
 
     it('does not treat a differently-formatted equal amount as an edit', async () => {
@@ -275,7 +284,11 @@ describe('FareMatrix', () => {
       expect(apiClient.PUT).toHaveBeenCalledWith(
         '/api/v1/routes/{id}/fare-matrix/',
         jasmine.objectContaining({
-          params: { path: { id: 'route-1' } },
+          // `trip_class: ''` is the wildcard grid — required since spec
+          // 15, and asserted here rather than loosened away, because a
+          // save that reached a different class's grid would supersede
+          // rules this screen never showed the operator.
+          params: { path: { id: 'route-1' }, query: { trip_class: '' } },
           body: {
             cells: [{ from_stop: YABA.id, to_stop: LEKKI.id, amount: '900.00' }],
           },
@@ -367,6 +380,253 @@ describe('FareMatrix', () => {
       // Still shows the prices — reading what a route charges is the
       // whole point of a read-only view.
       expect(cellInput(fixture, 'Ikeja to Yaba fare').value).toBe('500.00');
+    });
+  });
+});
+
+// --- docs/specs/15-trip-classes.md ---
+
+/**
+ * One grid per class, so the endpoint takes a required `?trip_class=`.
+ * These tests exist for the two things that make that dangerous rather
+ * than merely fiddly: a save must land in the class on screen, and an
+ * inherited price must never be mistaken for one this class owns.
+ */
+describe('FareMatrix service classes', () => {
+  /** Resolves a different payload per requested class, which is what
+   * the real endpoint does — a single canned response would hide the
+   * inheritance behaviour entirely. */
+  function byClass(grids: Record<string, FareMatrixPayload>) {
+    return (_path: string, init: { params: { query: { trip_class: string } } }) => {
+      const grid = grids[init.params.query.trip_class];
+      return Promise.resolve(
+        grid ? { data: grid, response: { status: 200 } } : { error: {}, response: { status: 400 } },
+      );
+    };
+  }
+
+  function unpriced(trip_class: string): FareMatrixPayload {
+    return makeMatrix({
+      trip_class,
+      cells: [
+        { from_stop: IKEJA.id, to_stop: YABA.id, amount: null, fare_segment_rule: null },
+        { from_stop: IKEJA.id, to_stop: LEKKI.id, amount: null, fare_segment_rule: null },
+        { from_stop: YABA.id, to_stop: LEKKI.id, amount: null, fare_segment_rule: null },
+      ],
+    });
+  }
+
+  it('opens on the wildcard grid, where every pre-spec-15 price lives', async () => {
+    const { fixture, apiClient } = await setup();
+
+    expect(fixture.componentInstance['tripClass']()).toBe('');
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/routes/{id}/fare-matrix/',
+      jasmine.objectContaining({
+        params: { path: { id: 'route-1' }, query: { trip_class: '' } },
+      }),
+    );
+  });
+
+  it('does not read the wildcard grid twice while showing it', async () => {
+    const { apiClient } = await setup();
+
+    expect(apiClient.GET.calls.count()).toBe(1);
+  });
+
+  it('reloads the grid when a class is chosen', async () => {
+    const { fixture, apiClient } = await setup();
+    apiClient.GET.and.callFake(
+      byClass({ '': makeMatrix(), premium: unpriced('premium') }),
+    );
+    apiClient.GET.calls.reset();
+
+    fixture.componentInstance['onTripClassChange']('premium');
+    await fixture.whenStable();
+
+    expect(apiClient.GET.calls.allArgs().map((args) => args[1].params.query.trip_class)).toEqual([
+      'premium',
+      '',
+    ]);
+  });
+
+  it('saves into the class on screen, never a default', async () => {
+    const { fixture, apiClient } = await setup();
+    apiClient.GET.and.callFake(byClass({ '': makeMatrix(), premium: unpriced('premium') }));
+    apiClient.PUT.and.resolveTo({
+      data: { created: 1, superseded: 0, closed: 0, unchanged: 0 },
+    });
+
+    fixture.componentInstance['onTripClassChange']('premium');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    type(fixture, 'Ikeja to Yaba fare', '900');
+    fixture.componentInstance['onSave']();
+    await fixture.whenStable();
+
+    expect(apiClient.PUT).toHaveBeenCalledWith(
+      '/api/v1/routes/{id}/fare-matrix/',
+      jasmine.objectContaining({
+        params: { path: { id: 'route-1' }, query: { trip_class: 'premium' } },
+      }),
+    );
+  });
+
+  describe('inherited cells', () => {
+    async function onPremiumGrid() {
+      const harness = await setup();
+      harness.apiClient.GET.and.callFake(
+        byClass({ '': makeMatrix(), premium: unpriced('premium') }),
+      );
+      harness.fixture.componentInstance['onTripClassChange']('premium');
+      await harness.fixture.whenStable();
+      harness.fixture.detectChanges();
+      return harness;
+    }
+
+    /**
+     * A placeholder, not a value — that one choice is what makes all
+     * three required behaviours fall out: the browser renders it muted,
+     * typing replaces it, and leaving it alone keeps the input empty so
+     * the cell is never dirty and never submitted.
+     */
+    it('shows the wildcard amount as a placeholder', async () => {
+      const { fixture } = await onPremiumGrid();
+      const input = fixture.nativeElement.querySelector(
+        'input[aria-label^="Ikeja to Yaba fare"]',
+      ) as HTMLInputElement;
+
+      expect(input.placeholder).toBe('500.00');
+      expect(input.value).toBe('');
+    });
+
+    /** The other half of "visually distinct **and** labelled": a dimmed
+     * number nobody can hear is worse than no number. */
+    it('says in the accessible name that the amount is inherited', async () => {
+      const { fixture } = await onPremiumGrid();
+      const input = fixture.nativeElement.querySelector(
+        'input[aria-label^="Ikeja to Yaba fare"]',
+      ) as HTMLInputElement;
+
+      expect(input.getAttribute('aria-label')).toContain('inherits 500.00');
+      expect(input.getAttribute('aria-label')).toContain('Any class');
+    });
+
+    /**
+     * The load-bearing one. If an inherited amount were seeded into
+     * `draft`, every inherited cell would read as dirty on load and the
+     * first save would copy the whole wildcard grid into this class —
+     * silently detaching it from prices the operator still edits
+     * elsewhere.
+     */
+    it('leaves an untouched inherited cell out of the save', async () => {
+      const { fixture, apiClient } = await onPremiumGrid();
+      apiClient.PUT.and.resolveTo({
+        data: { created: 1, superseded: 0, closed: 0, unchanged: 0 },
+      });
+
+      expect(fixture.componentInstance['dirtyKeys']().size).toBe(0);
+
+      type(fixture, 'Yaba to Lekki fare', '250');
+      fixture.componentInstance['onSave']();
+      await fixture.whenStable();
+
+      const body = apiClient.PUT.calls.mostRecent().args[1].body;
+      expect(body.cells.length).toBe(1);
+      expect(body.cells[0]).toEqual(
+        jasmine.objectContaining({ from_stop: YABA.id, to_stop: LEKKI.id, amount: '250.00' }),
+      );
+    });
+
+    /**
+     * The placeholder carries information, so it has to meet the same
+     * contrast bar as text. Tailwind's preflight draws `::placeholder`
+     * as `currentColor` at 50%, which over this field measures
+     * **2.64:1** — well under 4.5:1, and the inherited amount would
+     * have been the one thing on the grid a low-vision operator could
+     * not read. `text-muted` is 4.76:1; the italic means the
+     * inherited/owned distinction is not carried by contrast alone.
+     * Caught in the spec 15 visual pass, not by any assertion.
+     */
+    it('draws the placeholder at a readable contrast, and not by colour alone', async () => {
+      const { fixture } = await onPremiumGrid();
+      const input = fixture.nativeElement.querySelector(
+        'input[aria-label^="Ikeja to Yaba fare"]',
+      ) as HTMLInputElement;
+
+      expect(input.className).toContain('placeholder:text-muted');
+      expect(input.className).toContain('placeholder:italic');
+    });
+
+    it('stops calling a cell inherited once it has its own price', async () => {
+      const { fixture } = await onPremiumGrid();
+
+      type(fixture, 'Ikeja to Yaba fare', '900');
+
+      const input = fixture.nativeElement.querySelector(
+        'input[aria-label^="Ikeja to Yaba fare"]',
+      ) as HTMLInputElement;
+      expect(input.placeholder).toBe('');
+    });
+
+    it('shows nothing as inherited on the wildcard grid itself', async () => {
+      const { fixture } = await setup();
+
+      expect(fixture.componentInstance['hasInheritedCells']()).toBeFalse();
+    });
+  });
+
+  describe('switching with unsaved edits', () => {
+    it('warns instead of discarding them', async () => {
+      const { fixture, apiClient, dialogSpy } = await setup();
+      apiClient.GET.and.callFake(byClass({ '': makeMatrix(), premium: unpriced('premium') }));
+      type(fixture, 'Yaba to Lekki fare', '250');
+      apiClient.GET.calls.reset();
+
+      fixture.componentInstance['onTripClassChange']('premium');
+
+      expect(dialogSpy.open).toHaveBeenCalled();
+      // Nothing loaded, and the grid on screen is still the one being
+      // edited — a silent discard is the single outcome this must not
+      // have.
+      expect(apiClient.GET).not.toHaveBeenCalled();
+      expect(fixture.componentInstance['tripClass']()).toBe('');
+    });
+
+    it('names how much would be lost, and from which grid', async () => {
+      const { fixture, dialogSpy } = await setup();
+      type(fixture, 'Yaba to Lekki fare', '250');
+
+      fixture.componentInstance['onTripClassChange']('premium');
+      const data = dialogSpy.open.calls.mostRecent().args[1]?.data as ConfirmDialogData;
+
+      expect(data.confirmLabel()).toBe('Discard and switch');
+      expect(fixture.componentInstance['dirtyKeys']().size).toBe(1);
+    });
+
+    it('switches once confirmed', async () => {
+      const { fixture, apiClient, dialogSpy } = await setup();
+      apiClient.GET.and.callFake(byClass({ '': makeMatrix(), premium: unpriced('premium') }));
+      type(fixture, 'Yaba to Lekki fare', '250');
+
+      fixture.componentInstance['onTripClassChange']('premium');
+      const data = dialogSpy.open.calls.mostRecent().args[1]?.data as ConfirmDialogData;
+      await data.onConfirm();
+      await fixture.whenStable();
+
+      expect(fixture.componentInstance['tripClass']()).toBe('premium');
+      expect(fixture.componentInstance['dirtyKeys']().size).toBe(0);
+    });
+
+    it('switches straight away when there is nothing to lose', async () => {
+      const { fixture, apiClient, dialogSpy } = await setup();
+      apiClient.GET.and.callFake(byClass({ '': makeMatrix(), premium: unpriced('premium') }));
+
+      fixture.componentInstance['onTripClassChange']('premium');
+      await fixture.whenStable();
+
+      expect(dialogSpy.open).not.toHaveBeenCalled();
+      expect(fixture.componentInstance['tripClass']()).toBe('premium');
     });
   });
 });

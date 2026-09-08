@@ -132,17 +132,28 @@ describe('BusinessKyb', () => {
 
   it('shows every required document section', async () => {
     await setup(['client-admin:access', 'client.view']);
-    const text = fixture.nativeElement.textContent as string;
 
+    // Both halves are reachable from the tab list without a fetch, which
+    // is why they are tabs rather than two routes.
+    const text = fixture.nativeElement.textContent as string;
     expect(text).toContain('Directors');
-    expect(text).toContain('Certificate of incorporation');
-    expect(text).toContain('Proof of address');
-    expect(text).toContain('Tax certificate');
-    expect(text).toContain('Other supporting documents');
+
+    fixture.componentInstance['setActiveTab']('documents');
+    fixture.detectChanges();
+    const documentsText = fixture.nativeElement.textContent as string;
+    expect(documentsText).toContain('Certificate of incorporation');
+    expect(documentsText).toContain('Proof of address');
+    expect(documentsText).toContain('Tax certificate');
+    expect(documentsText).toContain('Other supporting documents');
   });
 
   it('tells the operator what counts as valid proof of address', async () => {
     await setup(['client-admin:access', 'client.view']);
+    // Company documents live on their own tab now — the screen was the
+    // longest in the console with both halves stacked.
+    fixture.componentInstance['setActiveTab']('documents');
+    fixture.detectChanges();
+
     // The whole point of the rebuild: an operator should learn what a
     // valid document looks like before uploading, not from a rejection.
     expect(fixture.nativeElement.textContent).toContain('dated within the last 3 months');
@@ -151,6 +162,11 @@ describe('BusinessKyb', () => {
   it('distinguishes supplied sections from outstanding ones', async () => {
     stubReads([], [makeDocument({ document_type: 'proof_of_address' })]);
     await setup(['client-admin:access', 'client.view']);
+    // Company documents live on their own tab now — the screen was the
+    // longest in the console with both halves stacked.
+    fixture.componentInstance['setActiveTab']('documents');
+    fixture.detectChanges();
+
     const text = fixture.nativeElement.textContent as string;
 
     // The old UI could not express this at all — it only ever offered

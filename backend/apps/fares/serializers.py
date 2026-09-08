@@ -60,6 +60,26 @@ def _resolve_stop(value: Any) -> Stop:
         raise serializers.ValidationError("Unknown stop.", code="unknown_stop") from None
 
 
+def _trip_class_field(**kwargs: Any) -> serializers.ChoiceField:
+    """A class choice that also accepts `""`, the wildcard meaning "any
+    class" — docs/specs/15-trip-classes.md. `allow_blank` is what makes
+    the wildcard expressible over HTTP at all.
+
+    Callers that want it optional pass `required=True` off and **no**
+    `default=`: a serializer default makes drf-spectacular emit the field
+    as *required* in the generated request type (the quirk
+    `RouteCreate.code` already carries), which would force every existing
+    caller to start sending it. Omitted means absent from
+    `validated_data`, and the service's own `ANY_TRIP_CLASS` default
+    applies — one default, in one place.
+    """
+    return serializers.ChoiceField(
+        choices=Business.TripClass.choices,
+        allow_blank=True,
+        **kwargs,
+    )
+
+
 class FareListQuerySerializer(serializers.Serializer):
     """Shared `?business=&route=` query shape for both list endpoints —
     mirrors apps.network.serializers.NetworkListQuerySerializer's own
@@ -82,12 +102,29 @@ class FareRuleSerializer(serializers.ModelSerializer[FareRule]):
     PATCH uses `FareRuleSupersedeSerializer` — amount changes create a
     new version rather than mutating this row."""
 
+    # Spec 14 slice 3b: client-admin's fare list used to resolve this
+    # through the shared root RouteStore, so a fare whose route sat
+    # outside that store's loaded page rendered as a raw UUID — and any
+    # other screen filtering or paginating that store could cause it
+    # mid-session. The list view already `select_related("route")`s.
+    route_name = serializers.CharField(source="route.name", read_only=True)
+    # Declared explicitly rather than left to ModelSerializer: the model
+    # field is `blank=True`, but the inferred read-only ChoiceField loses
+    # that, and the generated frontend type then claimed `trip_class` was
+    # always one of the four classes. Every rule that predates spec 15
+    # returns `""`, so that type was wrong about every row in the
+    # database — the kind of lie a consumer only discovers by switching
+    # on a value the types said could not occur.
+    trip_class = _trip_class_field(read_only=True)
+
     class Meta:
         model = FareRule
         fields = [
             "id",
             "business",
             "route",
+            "route_name",
+            "trip_class",
             "amount",
             "effective_from",
             "effective_to",
@@ -99,6 +136,10 @@ class FareRuleSerializer(serializers.ModelSerializer[FareRule]):
 class FareRuleCreateSerializer(serializers.Serializer):
     business = serializers.UUIDField()
     route = serializers.UUIDField()
+    # Defaults to the wildcard, which is what every rule created before
+    # spec 15 effectively was — so an omitted class keeps meaning
+    # "prices every class", not "prices none of them".
+    trip_class = _trip_class_field(required=False)
     amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0"))
     effective_from = serializers.DateTimeField(required=False)
 
@@ -161,14 +202,27 @@ class FareRuleSupersedeSerializer(serializers.Serializer):
 
 
 class FareSegmentRuleSerializer(serializers.ModelSerializer[FareSegmentRule]):
+    # Same reasoning as FareRuleSerializer.route_name — the segment list
+    # additionally needed *stop* names, which it was resolving through
+    # the shared root StopStore with the same failure mode.
+    route_name = serializers.CharField(source="route.name", read_only=True)
+    from_stop_name = serializers.CharField(source="from_stop.name", read_only=True)
+    to_stop_name = serializers.CharField(source="to_stop.name", read_only=True)
+    # Same reasoning as FareRuleSerializer.trip_class above.
+    trip_class = _trip_class_field(read_only=True)
+
     class Meta:
         model = FareSegmentRule
         fields = [
             "id",
             "business",
             "route",
+            "route_name",
             "from_stop",
+            "from_stop_name",
             "to_stop",
+            "to_stop_name",
+            "trip_class",
             "amount",
             "effective_from",
             "effective_to",
@@ -182,6 +236,7 @@ class FareSegmentRuleCreateSerializer(serializers.Serializer):
     route = serializers.UUIDField()
     from_stop = serializers.UUIDField()
     to_stop = serializers.UUIDField()
+    trip_class = _trip_class_field(required=False)
     amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0"))
     effective_from = serializers.DateTimeField(required=False)
 
@@ -283,3 +338,121 @@ class TripFareQuerySerializer(serializers.Serializer):
 class TripFareQuoteSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=10, decimal_places=2)
     currency = serializers.CharField()
+
+
+# --- Fare matrix (docs/specs/12-fare-matrix.md) ---------------------------
+
+
+class FareMatrixStopSerializer(serializers.Serializer):
+    """Schema-only shape for a stop in the matrix's axis list."""
+
+    id = serializers.UUIDField()
+    name = serializers.CharField()
+    sequence = serializers.IntegerField()
+
+
+class FareMatrixCellSerializer(serializers.Serializer):
+    """One forward stop pair. `amount` is null where the segment has no
+    currently-effective rule — an unpriced cell, which the grid renders
+    as empty and booking rejects as `FareNotConfigured`.
+
+    `fare_segment_rule` is echoed so a later save can tell that the tip
+    it is superseding has moved since the grid was loaded."""
+
+    from_stop = serializers.UUIDField()
+    to_stop = serializers.UUIDField()
+    amount = serializers.DecimalField(
+        max_digits=10, decimal_places=2, allow_null=True
+    )
+    fare_segment_rule = serializers.UUIDField(allow_null=True)
+
+
+class FareMatrixSerializer(serializers.Serializer):
+    """GET response. `currency` comes from the Business that owns the
+    route, deliberately read from this payload by the frontend rather
+    than looked up elsewhere — a previous slice shipped a bug reading a
+    `currency` field off `LedgerAccount`, which has none."""
+
+    route = serializers.UUIDField()
+    currency = serializers.CharField()
+    fare_pricing_mode = serializers.CharField()
+    # Which class's grid this is — echoed back so a client can never
+    # render one class's prices under another's heading.
+    trip_class = serializers.CharField(allow_blank=True)
+    stops = FareMatrixStopSerializer(many=True)
+    cells = FareMatrixCellSerializer(many=True)
+
+
+class FareMatrixQuerySerializer(serializers.Serializer):
+    """`?trip_class=` on both GET and PUT — **required**, and the one
+    place spec 15's changes are not purely additive to a caller.
+
+    A missing parameter is a 400 rather than a silent edit of the
+    wildcard grid. Spec 12's own rule is why: the grid already submits
+    only edited cells, because a stale `null` for an untouched cell
+    would *close* a rule another operator created. Widening that blast
+    radius to "the wrong class's grid entirely" is not acceptable, so
+    the class has to be said out loud.
+
+    `""` is a legal, explicit value — the wildcard grid.
+    """
+
+    trip_class = _trip_class_field()
+
+
+class FareMatrixCellWriteSerializer(serializers.Serializer):
+    """One submitted cell. A null `amount` means "stop selling this
+    segment" and closes the rule with no successor.
+
+    `min_value` is exclusive of zero deliberately: a genuinely free
+    segment is a policy decision, not a `0.00` fare, which looks
+    indistinguishable from a data-entry slip.
+    """
+
+    from_stop = serializers.UUIDField()
+    to_stop = serializers.UUIDField()
+    amount = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        allow_null=True,
+        min_value=Decimal("0.01"),
+    )
+
+    def validate_from_stop(self, value: Any) -> Stop:
+        return _resolve_stop(value)
+
+    def validate_to_stop(self, value: Any) -> Stop:
+        return _resolve_stop(value)
+
+
+class FareMatrixWriteSerializer(serializers.Serializer):
+    """PUT body. One `effective_from` for the whole submission, so a
+    matrix save is a single coherent price change rather than N
+    independent timelines drifting apart by milliseconds."""
+
+    effective_from = serializers.DateTimeField(required=False)
+    cells = FareMatrixCellWriteSerializer(many=True)
+
+    def validate_cells(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[tuple[str, str]] = set()
+        for cell in value:
+            key = (str(cell["from_stop"].id), str(cell["to_stop"].id))
+            if key in seen:
+                raise serializers.ValidationError(
+                    f"Segment {cell['from_stop'].name} -> {cell['to_stop'].name} "
+                    "appears more than once.",
+                    code="duplicate_segment",
+                )
+            seen.add(key)
+        return value
+
+
+class FareMatrixSaveResultSerializer(serializers.Serializer):
+    """What a save actually did. `unchanged` is reported rather than
+    hidden so the operator can see that submitting the whole grid did
+    not churn every cell's version history."""
+
+    created = serializers.IntegerField()
+    superseded = serializers.IntegerField()
+    closed = serializers.IntegerField()
+    unchanged = serializers.IntegerField()

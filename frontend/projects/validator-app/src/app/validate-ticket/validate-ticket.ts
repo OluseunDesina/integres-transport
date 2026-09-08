@@ -1,8 +1,10 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Alert, Button, Select, TextField } from '@shared-ui';
+import { Alert, Button, PageHeader, Select, TextField } from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
+
+import { TRIP_STATUS_LABEL, formatServiceDate, ticketStatusLabel } from '../shared/labels';
 
 import { ValidateTicketService, type TicketValidationResult, type Trip } from './validate-ticket.service';
 
@@ -27,7 +29,7 @@ function formatDeparture(iso: string): string {
 @Component({
   selector: 'app-validate-ticket',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, Select, TextField, Button, Alert],
+  imports: [ReactiveFormsModule, Alert, Button, PageHeader, Select, TextField],
   templateUrl: './validate-ticket.html',
 })
 export class ValidateTicket implements OnInit {
@@ -66,6 +68,17 @@ export class ValidateTicket implements OnInit {
   protected readonly selectedTrip = computed(() =>
     this.trips().find((trip) => trip.id === this.selectedTripId())
   );
+  /** The trip line, in words. Rendered `{{ trip.status }}` and a raw ISO
+   * `service_date` until slice 6b. */
+  protected tripLine(trip: Trip): string {
+    return `${trip.route.name} · ${formatServiceDate(trip.service_date)} · ${TRIP_STATUS_LABEL[trip.status]}`;
+  }
+
+  /** The outcome, in a word, leading the result panel. */
+  protected statusLabel(data: TicketValidationResult): string {
+    return ticketStatusLabel(data.status);
+  }
+
 
   async ngOnInit(): Promise<void> {
     // Subscribed **before** the first load is awaited, not after. The

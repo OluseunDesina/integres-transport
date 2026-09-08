@@ -53,7 +53,7 @@ test.describe('customer-app open seating', () => {
     await page.getByLabel('Travel date').fill(todayISO());
     await page.getByRole('button', { name: 'Search' }).click();
 
-    await page.getByRole('button', { name: 'Choose seats' }).first().click();
+    await page.getByRole('button', { name: 'Continue with' }).first().click();
 
     // The load-bearing difference: no seat map at all, and a different
     // question asked in its place.
@@ -81,13 +81,19 @@ test.describe('customer-app open seating', () => {
     await expect(page).toHaveURL(/\/my-bookings$/);
     const row = page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first();
     await expect(row).toBeVisible();
-    await expect(row.getByText('Pending payment')).toBeVisible();
+    // toContainText, not getByText: the status pill renders in both
+    // responsive tiers (the md:hidden sub-line and the md:table-cell
+    // column), so a text locator is a strict-mode violation — the
+    // same duplication the responsive-tables slice already hit.
+    await expect(row).toContainText('Pending payment');
 
     // Left cancelled rather than pending, so repeated runs do not leave
     // a growing pile of unpaid bookings on the fixture trip.
-    await row.getByRole('button', { name: 'Cancel' }).click();
+    // Cancel lives in the row's action menu since spec 14 slice 5.
+    await row.getByRole('button', { name: 'Actions for' }).click();
+    await page.getByRole('menuitem', { name: 'Cancel booking' }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByRole('button', { name: 'Cancel booking' }).click();
-    await expect(row.getByText('Cancelled')).toBeVisible();
+    await expect(row).toContainText('Cancelled');
   });
 });

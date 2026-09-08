@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
+import { API_CLIENT } from '@api-client';
 import { AuthApiService } from '@auth';
 
 import { Register } from './register';
@@ -22,7 +23,13 @@ describe('Register', () => {
 
     await TestBed.configureTestingModule({
       imports: [Register],
-      providers: [provideRouter([]), { provide: AuthApiService, useValue: authApi }],
+      providers: [
+        provideRouter([]),
+        { provide: AuthApiService, useValue: authApi },
+        // The brand mark this screen renders resolves white-label
+        // through `WhiteLabelResolverService`, which injects API_CLIENT.
+        { provide: API_CLIENT, useValue: { GET: jasmine.createSpy('GET').and.resolveTo({}) } },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(Register);
@@ -46,6 +53,29 @@ describe('Register', () => {
 
     expect(authApi.register).not.toHaveBeenCalled();
     expect(component['fieldError']('confirmPassword')).toBe('Passwords do not match.');
+    // Rendered, not merely computed. `passwordMismatch` is a *form*-level
+    // error and `fieldErrorMessage` reads control-level errors only, so
+    // this is the one message the slice 6b migration could have dropped
+    // silently — and ui-text-field shows nothing unless the parent binds
+    // both `invalid` and `errorMessage`.
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Passwords do not match.');
+  });
+
+  it('names the field that is missing, not just that something is', async () => {
+    component['form'].controls.email.markAsTouched();
+    fixture.detectChanges();
+
+    expect(component['fieldError']('email')).toBe('Email is required.');
+    expect(fixture.nativeElement.textContent).toContain('Email is required.');
+  });
+
+  it('reports a malformed email as malformed rather than missing', async () => {
+    component['form'].controls.email.setValue('not-an-email');
+    component['form'].controls.email.markAsTouched();
+    fixture.detectChanges();
+
+    expect(component['fieldError']('email')).toBe('Enter a valid email address.');
   });
 
   it('shows the server error message when registration fails', async () => {

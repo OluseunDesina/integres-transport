@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
-import { Alert, EmptyState, Paginator, StatusPill, Table } from '@shared-ui';
+import { Alert, EmptyState, PageHeader, Paginator, StatusPill, Table, summaryLine } from '@shared-ui';
 import type { StatusPillTone } from '@shared-ui';
 
 import { FareJourneyStore, type FareJourney } from '../shared/data/store/fare-journey.store';
@@ -31,7 +31,7 @@ const STATUS_LABEL: Record<FareJourneyStatus, string> = {
 @Component({
   selector: 'app-journeys',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, Alert, EmptyState, Paginator, StatusPill, Table],
+  imports: [DatePipe, Alert, EmptyState, PageHeader, Paginator, StatusPill, Table],
   templateUrl: './journeys.html',
 })
 export class Journeys implements OnInit {
@@ -50,5 +50,13 @@ export class Journeys implements OnInit {
 
   protected amountLabel(journey: FareJourney): string {
     return journey.amount ? formatMoney(journey.amount, journey.currency) : '—';
+  }
+
+  /** The columns hidden below `md`, re-flowed under the route name. */
+  protected summaryFor(journey: FareJourney): string {
+    return summaryLine([
+      `${journey.board_stop} → ${journey.alight_stop ?? '—'}`,
+      this.amountLabel(journey),
+    ]);
   }
 }

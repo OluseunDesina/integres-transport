@@ -47,7 +47,15 @@ describe('ScheduleStore', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/schedules/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, business: undefined } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            business: undefined,
+            search: undefined,
+            is_active: undefined,
+          },
+        },
       })
     );
     expect(store.items().length).toBe(1);
@@ -72,7 +80,15 @@ describe('ScheduleStore', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/schedules/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, business: 'biz-1' } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            business: 'biz-1',
+            search: undefined,
+            is_active: undefined,
+          },
+        },
       })
     );
   });
@@ -88,9 +104,12 @@ describe('ScheduleStore', () => {
       apiClient.GET.calls.reset();
       apiClient.GET.and.callFake((_path: string, init: { params: { query: LookupQuery } }) => {
         const { limit, offset } = init.params.query;
-        const results = Array.from({ length: Math.max(0, Math.min(limit, 300 - offset)) }, (_, i) => ({
-          id: 'rec-' + (offset + i),
-        }));
+        const results = Array.from(
+          { length: Math.max(0, Math.min(limit, 300 - offset)) },
+          (_, i) => ({
+            id: 'rec-' + (offset + i),
+          })
+        );
         return Promise.resolve({ data: { count: 300, results } });
       });
 
@@ -100,7 +119,15 @@ describe('ScheduleStore', () => {
       expect(apiClient.GET).toHaveBeenCalledWith(
         '/api/v1/schedules/',
         jasmine.objectContaining({
-          params: { query: { limit: 100, offset: 0, business: undefined } },
+          params: {
+            query: {
+              limit: 100,
+              offset: 0,
+              business: undefined,
+              search: undefined,
+              is_active: undefined,
+            },
+          },
         })
       );
     });

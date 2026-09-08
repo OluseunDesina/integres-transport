@@ -4,6 +4,7 @@ import { By } from '@angular/platform-browser';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import { AuthStore } from '@auth';
+import { expectColumnVisibilityParity } from '@shared-ui';
 
 import { SettlementRuns } from './settlement-runs';
 import {
@@ -195,4 +196,13 @@ describe('SettlementRuns', () => {
       'A settlement run for this business and period already exists.'
     );
   });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makeRun()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'settlement-runs');
+  });
+
 });

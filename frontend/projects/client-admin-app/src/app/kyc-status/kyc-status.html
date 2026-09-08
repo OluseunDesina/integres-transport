@@ -1,58 +1,77 @@
-<div class="mx-auto flex max-w-lg flex-col gap-8">
-  <div>
-    <h1 class="mb-4 text-lg font-semibold text-slate-900">KYC Status</h1>
+<div class="mx-auto max-w-2xl">
+  <ui-page-header
+    class="mb-6"
+    title="KYC status"
+    description="Where this client's own identity verification stands, and the documents supporting it."
+  />
 
-    @if (loadError(); as message) {
-      <ui-alert>{{ message }}</ui-alert>
-    } @else if (loading() && !me()) {
-      <p class="text-sm text-slate-500">Loading…</p>
-    } @else if (me(); as clientMe) {
-      <ui-status-pill
-        [label]="clientMe.kyc_status"
-        [tone]="documentReviewStatusTone(clientMe.kyc_status)"
-      />
+  @if (loadError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (loading() && !me()) {
+    <p class="text-sm text-muted">Loading…</p>
+  } @else {
+    <div class="flex flex-col gap-8">
+      @if (me(); as clientMe) {
+        <ui-form-section title="Status" description="Set by the platform team when they review.">
+          <div class="flex flex-col gap-2">
+            <div>
+              <ui-status-pill
+                [label]="clientMe.kyc_status"
+                [tone]="documentReviewStatusTone(clientMe.kyc_status)"
+              />
+            </div>
 
-      @if (clientMe.kyc_submitted_at) {
-        <p class="mt-2 text-sm text-slate-500">
-          Submitted {{ clientMe.kyc_submitted_at | date: 'medium' }}
-        </p>
-      }
-
-      @if (clientMe.kyc_status === 'rejected' && clientMe.kyc_rejection_reason) {
-        <p class="mt-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {{ clientMe.kyc_rejection_reason }}
-        </p>
-      }
-
-      <div class="mt-6">
-        <h2 class="mb-2 text-sm font-medium text-slate-700">Documents</h2>
-        @if (clientMe.documents.length === 0) {
-          <p class="text-sm text-slate-500">No documents uploaded yet.</p>
-        } @else {
-          <ul class="flex flex-col gap-2">
-            @for (document of clientMe.documents; track document.id) {
-              <li class="flex items-center justify-between rounded-md border border-slate-200 px-3 py-2 text-sm">
-                <span>{{ document.document_type }}</span>
-                <a [href]="document.file" target="_blank" rel="noopener" class="font-medium text-slate-700 underline">
-                  View
-                </a>
-              </li>
+            @if (clientMe.kyc_submitted_at) {
+              <p class="text-sm text-muted">
+                Submitted {{ clientMe.kyc_submitted_at | date: 'medium' }}
+              </p>
             }
-          </ul>
-        }
-      </div>
-    }
-  </div>
+          </div>
 
-  <div>
-    <h2 class="mb-1 text-sm font-medium text-slate-700">Upload a document</h2>
-    <p class="mb-4 text-sm text-slate-500">
-      You can upload additional documents at any time — uploading after your KYC is approved adds
-      the document but doesn't change your status.
-    </p>
+          @if (clientMe.kyc_status === 'rejected' && clientMe.kyc_rejection_reason) {
+            <ui-alert>{{ clientMe.kyc_rejection_reason }}</ui-alert>
+          }
+        </ui-form-section>
 
+        <ui-form-section
+          title="Documents"
+          description="Everything supplied so far, newest last."
+        >
+          @if (clientMe.documents.length === 0) {
+            <p class="text-sm text-muted">No documents uploaded yet.</p>
+          } @else {
+            <ul class="flex flex-col gap-2">
+              @for (document of clientMe.documents; track document.id) {
+                <li
+                  class="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm"
+                >
+                  <span class="text-default">{{ documentTypeLabel(document.document_type) }}</span>
+                  <a
+                    [href]="document.file"
+                    target="_blank"
+                    rel="noopener"
+                    class="font-medium text-default underline hover:text-strong"
+                    >View</a
+                  >
+                </li>
+              }
+            </ul>
+          }
+        </ui-form-section>
+      }
+    </div>
+  }
+
+  <!-- Outside the load-state branch on purpose: uploading does not read
+       the status, and a failed status fetch must not take the ability to
+       supply a document with it. -->
+  <ui-form-section
+    class="mt-8 block"
+    title="Upload a document"
+    description="You can upload additional documents at any time — uploading after your KYC is approved adds the document but doesn't change your status."
+  >
     @if (uploadError(); as message) {
-      <ui-alert class="mb-4">{{ message }}</ui-alert>
+      <ui-alert>{{ message }}</ui-alert>
     }
 
     <form (ngSubmit)="onUpload()" class="flex flex-col gap-4" novalidate>
@@ -74,5 +93,5 @@
         </ui-button>
       </div>
     </form>
-  </div>
+  </ui-form-section>
 </div>

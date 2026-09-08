@@ -1,5 +1,8 @@
 <div class="flex flex-col gap-6">
-  <h1 class="text-lg font-semibold text-slate-900">Record a tap</h1>
+  <ui-page-header
+    title="Record a tap"
+    description="Scan or type a passenger's credential to board them."
+  />
 
   <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
     <ui-text-field label="Service date" type="date" formControlName="serviceDate" />
@@ -7,8 +10,10 @@
     <ui-select label="Trip" [options]="tripOptions()" formControlName="tripId" />
 
     @if (selectedTrip(); as trip) {
-      <p class="-mt-2 text-sm text-slate-500">
-        {{ trip.route.name }} · {{ trip.service_date }} · {{ trip.status }}
+      <!-- Labels, not raw enums: this line rendered "scheduled" and a
+           raw ISO date until slice 6b. -->
+      <p class="-mt-2 text-sm text-muted">
+        {{ tripLine(trip) }}
         <span class="block">
           @if (isPrepaid()) {
             Prepaid — a tap boards the passenger's ticket.
@@ -29,27 +34,20 @@
          where a fare starts and ends. A prepaid passenger already
          bought a specific journey, so there is nothing to ask. -->
     @if (!isPrepaid()) {
-      <div class="flex flex-col gap-1">
-        <span class="text-sm font-medium text-slate-700">Tap type</span>
-        <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Tap type">
-          <ui-button
-            type="button"
-            [variant]="tapType() === 'board' ? 'primary' : 'secondary'"
-            [ariaPressed]="tapType() === 'board'"
-            (pressed)="setTapType('board')"
-          >
-            Board
-          </ui-button>
-          <ui-button
-            type="button"
-            [variant]="tapType() === 'alight' ? 'primary' : 'secondary'"
-            [ariaPressed]="tapType() === 'alight'"
-            (pressed)="setTapType('alight')"
-          >
-            Alight
-          </ui-button>
-        </div>
-      </div>
+      <!-- A real radio group, segmented. This was a `role="radiogroup"`
+           div wrapping two `ui-button`s with `aria-pressed` — it
+           announced as a radio group and behaved as two independent
+           toggles, with no arrow-key selection and two tab stops. The
+           segmented variant keeps the two large one-handed targets a
+           conductor needs and lets the browser own the keyboard. -->
+      <ui-radio-group
+        label="Tap type"
+        [options]="tapTypeOptions"
+        [segmented]="true"
+        [ngModel]="tapType()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="setTapType($event)"
+      />
 
       <ui-select label="Stop" [options]="stopOptions()" formControlName="stopId" />
     }
@@ -66,20 +64,9 @@
   @if (result(); as outcome) {
     @if (outcome.ok) {
       @if (outcome.kind === 'ticket') {
-        <ui-alert variant="success">
-          {{ outcome.data.status }} — {{ outcome.data.passenger_name }}
-          @if (outcome.data.seat_number) {
-            , seat {{ outcome.data.seat_number }}
-          }
-          ({{ outcome.data.from_stop }} → {{ outcome.data.to_stop }})
-        </ui-alert>
+        <ui-alert variant="success">{{ ticketOutcomeLabel(outcome.data) }}</ui-alert>
       } @else {
-        <ui-alert variant="success">
-          Recorded. Journey {{ outcome.data.journey.status }}
-          @if (outcome.data.journey.amount) {
-            — {{ outcome.data.journey.amount }} {{ outcome.data.journey.currency }}
-          }
-        </ui-alert>
+        <ui-alert variant="success">{{ journeyOutcomeLabel(outcome.data) }}</ui-alert>
       }
     } @else {
       <ui-alert>{{ outcome.message }}</ui-alert>

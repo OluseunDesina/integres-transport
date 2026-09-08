@@ -25,15 +25,26 @@ def _get_business(value: Any) -> Business:
 
 
 class FleetListQuerySerializer(serializers.Serializer):
-    """Validates `?business=<uuid>` on every GET in this app — same
-    tenant-scoped-manager-lookup-or-400 convention as
+    """Validates `?business=<uuid>&search=&is_active=` on every GET in
+    this app — same tenant-scoped-manager-lookup-or-400 convention as
     apps.network.serializers.NetworkListQuerySerializer, deliberately
     kept as its own copy rather than a cross-app import (small per-app
     serializers of near-identical shape is the established precedent,
     see apps.identity's own StaffInvitationCreatedResponseSerializer
-    docstring)."""
+    docstring).
+
+    `search` is validated here and applied by each view, which owns its
+    own field list — a VehicleType is found by name, a Vehicle by
+    registration, a Driver by name/phone/licence. It only ever narrows,
+    so no term a caller can type reaches another Client's rows
+    (docs/specs/14-design-system-and-ui-rebuild.md, slice 3a)."""
 
     business = serializers.UUIDField(required=False)
+    # `allow_blank`: the frontend filter bar emits '' when its search box
+    # is cleared, and rejecting that would 400 on the way back to the
+    # unfiltered list.
+    search = serializers.CharField(required=False, allow_blank=True)
+    is_active = serializers.BooleanField(required=False)
 
     def validate_business(self, value: Any) -> Business:
         return _get_business(value)
@@ -42,7 +53,7 @@ class FleetListQuerySerializer(serializers.Serializer):
 class VehicleTypeSerializer(serializers.ModelSerializer[VehicleType]):
     class Meta:
         model = VehicleType
-        fields = ["id", "business", "name", "capacity", "is_active", "created_at"]
+        fields = ["id", "business", "name", "capacity", "trip_class", "is_active", "created_at"]
         read_only_fields = ["id", "business", "created_at"]
 
     def update(self, instance: VehicleType, validated_data: dict[str, Any]) -> VehicleType:
@@ -54,6 +65,14 @@ class VehicleTypeCreateSerializer(serializers.Serializer):
     business = serializers.UUIDField()
     name = serializers.CharField(max_length=100)
     capacity = serializers.IntegerField(min_value=1)
+    # `required=False` with **no** `default=`, deliberately: a serializer
+    # default makes drf-spectacular emit the field as *required* in the
+    # generated request type (the same quirk `RouteCreate.code` already
+    # carries), which would force every existing caller to start sending
+    # it. Omitted here means the key is absent from validated_data and
+    # the service's own `Business.TripClass.STANDARD` default applies —
+    # one default, in one place.
+    trip_class = serializers.ChoiceField(choices=Business.TripClass.choices, required=False)
 
     def validate_business(self, value: Any) -> Business:
         return _get_business(value)

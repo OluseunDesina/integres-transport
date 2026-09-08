@@ -88,7 +88,10 @@ describe('PaystackConfig', () => {
 
     await createComponent();
 
-    expect(fixture.nativeElement.textContent).toContain('Not yet configured');
+    // A warning alert now, not a muted sentence: without a payout
+    // destination this business cannot be settled at all, which the old
+    // grey "Not yet configured — fill in the form below." understated.
+    expect(fixture.nativeElement.textContent).toContain('No payout destination is configured');
     expect(fixture.nativeElement.textContent).not.toContain(
       'Could not load the current Paystack configuration.'
     );
@@ -187,5 +190,71 @@ describe('PaystackConfig', () => {
       jasmine.objectContaining({ params: { path: { id: 'biz-1' } } })
     );
     expect(fixture.nativeElement.textContent).toContain('Paystack account saved.');
+  });
+
+  /** The GET spy has no default, so every test that renders the form
+   * must resolve it — an unresolved promise leaves `loading` true and
+   * the form unrendered. */
+  function respondNotConfigured(): void {
+    apiClient.GET.and.resolveTo({
+      data: undefined,
+      error: { detail: 'No Paystack account configured for this business yet.' },
+      response: { status: 404 },
+    });
+  }
+
+  /**
+   * The defect this slice fixed here: three of these four fields bound
+   * **neither** `invalid` nor `errorMessage`, so an empty submit refused
+   * to send and said nothing about why — spec 11's recorded trap, whose
+   * whole point is that a test asserting only "no request happened"
+   * passes against it.
+   */
+  it('says why it refused an invalid submit, in the DOM', async () => {
+    respondNotConfigured();
+    await createComponent();
+    apiClient.PATCH.calls.reset();
+
+    fixture.componentInstance['form'].setValue({
+      bank_code: '058',
+      account_number: '0123456789',
+      account_name: 'Acme Shuttle',
+      recipient_code: '',
+      is_active: true,
+    });
+    await fixture.componentInstance['onSubmit']();
+    fixture.detectChanges();
+
+    expect(apiClient.PATCH).not.toHaveBeenCalled();
+    expect(fixture.nativeElement.textContent).toContain('This field is required.');
+  });
+
+  it('puts a rejected field on its own control, not only in the page alert', async () => {
+    respondNotConfigured();
+    await createComponent();
+    fixture.componentInstance['form'].patchValue({ recipient_code: 'RCP_bad' });
+    apiClient.PATCH.and.resolveTo({
+      error: { recipient_code: ['No such recipient on Paystack.'] },
+    });
+
+    await fixture.componentInstance['onSubmit']();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance['fieldError']('recipient_code')).toBe(
+      'No such recipient on Paystack.'
+    );
+    expect(fixture.componentInstance['loadError']()).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('No such recipient on Paystack.');
+  });
+
+  it('still shows a non-field error on the page', async () => {
+    respondNotConfigured();
+    await createComponent();
+    fixture.componentInstance['form'].patchValue({ recipient_code: 'RCP_1' });
+    apiClient.PATCH.and.resolveTo({ error: { detail: 'Paystack is unreachable.' } });
+
+    await fixture.componentInstance['onSubmit']();
+
+    expect(fixture.componentInstance['loadError']()).toBe('Paystack is unreachable.');
   });
 });

@@ -54,13 +54,24 @@ describe('BookingStore (client-admin)', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/bookings/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, trip: 'trip-1', status: 'cancelled' } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            business: undefined,
+            trip: 'trip-1',
+            status: 'cancelled',
+            search: undefined,
+          },
+        },
       })
     );
   });
 
   it('surfaces the server error message on failure', async () => {
-    apiClient.GET.and.resolveTo({ error: { detail: 'You do not have permission.' } });
+    apiClient.GET.and.resolveTo({
+      error: { detail: 'You do not have permission.' },
+    });
 
     await store.getAll();
 

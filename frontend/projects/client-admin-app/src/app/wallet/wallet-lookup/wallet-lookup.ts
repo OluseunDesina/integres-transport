@@ -3,12 +3,12 @@ import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/cor
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, EmptyState, Stat, Table, TextField } from '@shared-ui';
+import { Alert, Button, EmptyState, Stat, Table, TextField, PageHeader } from '@shared-ui';
 
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 
 type Wallet = components['schemas']['Wallet'];
+type Passenger = components['schemas']['Passenger'];
 
 function extractFirstErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object') {
@@ -38,32 +38,51 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
  * actual submission, not a live list filter — matches this repo's
  * "reactive forms only" convention for forms, same as `business-form.ts`.
  *
- * **Named limitation**: `GET /wallet/?business=&passenger=` requires
- * the passenger's UUID directly — there is no search-by-name/email on
- * the backend today, so staff must already have the id in hand (e.g.
- * from a support ticket). Not solved here; a real fix needs a new
- * backend lookup capability, out of scope for this read-only slice.
+ * **The limitation this screen shipped with is gone.**
+ * `GET /wallet/?business=&passenger=` still takes a UUID, and there was
+ * no way to obtain one — so this screen only worked if a support ticket
+ * happened to quote the id, which is to say it mostly did not.
+ * `GET /passengers/lookup/` (spec 18 slice 2) is that missing
+ * capability: the agent types the address the passenger gives them, and
+ * the id is resolved behind the form.
+ *
+ * The endpoint accepts `wallet.view` as well as `booking.manage` for
+ * exactly this reason. Gating it on `booking.manage` alone — which is
+ * what its own spec proposed — would have left this screen broken for
+ * every Staff user, who hold `wallet.view` and deliberately not the
+ * other. The recorded rule: check a gating codename is reachable before
+ * building a control that needs it.
  */
 @Component({
   selector: 'app-wallet-lookup',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, ReactiveFormsModule, Alert, Button, EmptyState, Stat, Table, TextField],
+  imports: [
+    DatePipe,
+    ReactiveFormsModule,
+    Alert,
+    Button,
+    EmptyState,
+    PageHeader,
+    Stat,
+    Table,
+    TextField,
+  ],
   templateUrl: './wallet-lookup.html',
 })
 export class WalletLookup {
   private readonly fb = inject(FormBuilder);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   protected readonly selectedBusinessStore = inject(SelectedBusinessStore);
 
   protected readonly form = this.fb.nonNullable.group({
-    passengerId: ['', Validators.required],
+    email: ['', [Validators.required, Validators.email]],
   });
 
   protected readonly submitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
+  protected readonly notFound = signal(false);
   protected readonly wallet = signal<Wallet | null>(null);
-  protected readonly searchedPassengerId = signal<string | null>(null);
+  protected readonly passenger = signal<Passenger | null>(null);
 
   protected async onSubmit(): Promise<void> {
     const businessId = this.selectedBusinessStore.selectedBusinessId();
@@ -74,12 +93,33 @@ export class WalletLookup {
 
     this.submitting.set(true);
     this.errorMessage.set(null);
+    this.notFound.set(false);
     this.wallet.set(null);
-    const passengerId = this.form.getRawValue().passengerId;
+    this.passenger.set(null);
+
+    // Two calls, in order: resolve the person, then read their wallet.
+    // The id never appears in the form — an agent has no reason to see
+    // a UUID, and typing one was the whole problem.
+    const lookup = await this.api.GET('/api/v1/passengers/lookup/', {
+      params: { query: { email: this.form.getRawValue().email } },
+    });
+
+    if (!lookup.data) {
+      this.submitting.set(false);
+      if (lookup.response?.status === 404) {
+        // Not an error box: "no account uses that address" is an
+        // ordinary answer, and it tells the agent something useful.
+        this.notFound.set(true);
+        return;
+      }
+      this.errorMessage.set(
+        extractFirstErrorMessage(lookup.error, 'Could not look that passenger up.')
+      );
+      return;
+    }
 
     const { data, error } = await this.api.GET('/api/v1/wallet/', {
-      params: { query: { business: businessId, passenger: passengerId } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+      params: { query: { business: businessId, passenger: lookup.data.id } },
     });
 
     this.submitting.set(false);
@@ -92,14 +132,16 @@ export class WalletLookup {
     }
 
     this.wallet.set(data);
-    this.searchedPassengerId.set(passengerId);
+    this.passenger.set(lookup.data);
   }
 
   protected fieldError(): string | null {
-    const control = this.form.controls.passengerId;
+    const control = this.form.controls.email;
     if (!control.touched || control.valid) {
       return null;
     }
-    return 'Enter the passenger’s id.';
+    return control.hasError('required')
+      ? 'Enter the passenger’s email address.'
+      : 'Enter a complete email address.';
   }
 }

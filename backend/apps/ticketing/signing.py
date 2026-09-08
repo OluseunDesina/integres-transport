@@ -34,10 +34,21 @@ class TicketSigningError(Exception):
 
 
 class TicketClaims(TypedDict):
+    """`ticket_id` is the identifier a validator resolves the row by.
+
+    It replaced `seat_reservation_id` in that role
+    (docs/specs/10-booking-modes.md): an open-seating ticket has no seat
+    reservation, so the old key could not identify one. The two seat
+    claims stay in the payload as optional, informational fields — a
+    validator device can show which seat was sold without a round trip —
+    but nothing looks a ticket up by them any more.
+    """
+
+    ticket_id: str
     booking_id: str
-    seat_reservation_id: str
+    seat_reservation_id: str | None
     trip_id: str
-    seat_id: str
+    seat_id: str | None
     from_stop_id: str
     to_stop_id: str
     issued_at: int
@@ -62,6 +73,17 @@ def _uuid_from_bytes(value: bytes) -> str:
     return str(UUID(bytes=value))
 
 
+def _optional_uuid_to_bytes(value: str | None) -> bytes | None:
+    return None if value is None else _uuid_to_bytes(value)
+
+
+def _optional_uuid_from_bytes(value: bytes | None) -> str | None:
+    """Absent and explicitly-null are the same thing here — an
+    open-seating ticket has no seat, and a payload that simply omits
+    the claim is as valid as one carrying `None`."""
+    return None if value is None else _uuid_from_bytes(value)
+
+
 def _b64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
@@ -73,25 +95,37 @@ def _b64url_decode(data: str) -> bytes:
 
 def sign_ticket(
     *,
+    ticket_id: str,
     booking_id: str,
-    seat_reservation_id: str,
+    seat_reservation_id: str | None,
     trip_id: str,
-    seat_id: str,
+    seat_id: str | None,
     from_stop_id: str,
     to_stop_id: str,
     issued_at: datetime,
     expires_at: datetime,
 ) -> str:
     """Signs with `TICKET_SIGNING_ACTIVE_KID`'s private key. Returns the
-    base64url QR payload text."""
+    base64url QR payload text.
+
+    `ticket_id` must be the id the `Ticket` row will actually be created
+    with — `apps.ticketing.services.issue_ticket` pre-generates it,
+    which it can because `BaseModel.id` is `default=uuid.uuid4` rather
+    than database-assigned. Signing has to happen before the insert,
+    since `signed_payload` is a column on the row being inserted.
+
+    The two seat claims are `None` for open seating
+    (docs/specs/10-booking-modes.md); they are informational either way
+    and nothing resolves a ticket by them."""
     kid = settings.TICKET_SIGNING_ACTIVE_KID
     keys = _signing_keys()
     signing_key = SigningKey(base64.b64decode(keys[kid]))
     claims = {
+        "ticket_id": _uuid_to_bytes(ticket_id),
         "booking_id": _uuid_to_bytes(booking_id),
-        "seat_reservation_id": _uuid_to_bytes(seat_reservation_id),
+        "seat_reservation_id": _optional_uuid_to_bytes(seat_reservation_id),
         "trip_id": _uuid_to_bytes(trip_id),
-        "seat_id": _uuid_to_bytes(seat_id),
+        "seat_id": _optional_uuid_to_bytes(seat_id),
         "from_stop_id": _uuid_to_bytes(from_stop_id),
         "to_stop_id": _uuid_to_bytes(to_stop_id),
         "issued_at": int(issued_at.timestamp()),
@@ -138,10 +172,11 @@ def verify_and_decode(*, payload: str) -> TicketClaims:
 
     try:
         return TicketClaims(
+            ticket_id=_uuid_from_bytes(claims["ticket_id"]),
             booking_id=_uuid_from_bytes(claims["booking_id"]),
-            seat_reservation_id=_uuid_from_bytes(claims["seat_reservation_id"]),
+            seat_reservation_id=_optional_uuid_from_bytes(claims.get("seat_reservation_id")),
             trip_id=_uuid_from_bytes(claims["trip_id"]),
-            seat_id=_uuid_from_bytes(claims["seat_id"]),
+            seat_id=_optional_uuid_from_bytes(claims.get("seat_id")),
             from_stop_id=_uuid_from_bytes(claims["from_stop_id"]),
             to_stop_id=_uuid_from_bytes(claims["to_stop_id"]),
             issued_at=int(claims["issued_at"]),

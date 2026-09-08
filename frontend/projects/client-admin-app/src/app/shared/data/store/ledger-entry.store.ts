@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
 import { ListStore, type Page } from '@shared-data';
 
 export type JournalEntry = components['schemas']['JournalEntry'];
@@ -32,7 +31,6 @@ function toErrorMessage(error: unknown): string {
 @Injectable({ providedIn: 'root' })
 export class LedgerEntryStore extends ListStore<JournalEntry, LedgerEntryQuery> {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   constructor() {
     super({}, 25);
@@ -54,7 +52,6 @@ export class LedgerEntryStore extends ListStore<JournalEntry, LedgerEntryQuery> 
           account: query.account,
         },
       },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     if (!data) {
       throw new Error(toErrorMessage(error));

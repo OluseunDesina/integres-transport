@@ -42,6 +42,18 @@ async function createSchedule(page: Page, routeName: string): Promise<void> {
   await expect(page).toHaveURL(/\/schedules$/);
 }
 
+/**
+ * Row actions moved from bare text links plus an in-table switch into
+ * one `ui-action-menu` per row — docs/specs/14 slice 3a. Every action on
+ * this screen now goes through here.
+ */
+async function openRowMenu(page: Page, rowName: string): Promise<void> {
+  await page
+    .getByRole('row', { name: new RegExp(rowName) })
+    .getByRole('button', { name: new RegExp('^Actions for') })
+    .click();
+}
+
 test.describe('client-admin-app schedules', () => {
   test('renders an axe-clean schedules screen behind the nav shell', async ({ page }) => {
     await signIn(page);
@@ -85,7 +97,12 @@ test.describe('client-admin-app schedules', () => {
 
     const row = page.getByRole('row', { name: new RegExp(routeName) });
     await expect(row).toBeVisible();
-    await expect(row.getByText('Mon/Wed')).toBeVisible();
+    // `toContainText` on the row, not `getByText` inside it: a value in
+    // a column hidden below `md` also appears in the row's responsive
+    // sub-line, so it is in the DOM twice and a text locator is
+    // ambiguous by design. The assertion means "the row shows this",
+    // which is what this expresses.
+    await expect(row).toContainText('Mon/Wed');
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
@@ -99,10 +116,8 @@ test.describe('client-admin-app schedules', () => {
     await createRoute(page, routeName);
     await createSchedule(page, routeName);
 
-    await page
-      .getByRole('row', { name: new RegExp(routeName) })
-      .getByRole('link', { name: 'Edit' })
-      .click();
+    await openRowMenu(page, routeName);
+    await page.getByRole('menuitem', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit schedule' })).toBeVisible();
     await expect(page.getByLabel('Route')).toBeDisabled();
     await expect(page.getByLabel('Mon')).toBeChecked();
@@ -112,7 +127,7 @@ test.describe('client-admin-app schedules', () => {
 
     await expect(page).toHaveURL(/\/schedules$/);
     const row = page.getByRole('row', { name: new RegExp(routeName) });
-    await expect(row.getByText('Mon/Wed/Fri')).toBeVisible();
+    await expect(row).toContainText('Mon/Wed/Fri');
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);

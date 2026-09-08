@@ -38,6 +38,18 @@ async function createDriver(
   await expect(page).toHaveURL(/\/drivers$/);
 }
 
+/**
+ * Row actions moved from bare text links plus an in-table switch into
+ * one `ui-action-menu` per row — docs/specs/14 slice 3a. Every action on
+ * this screen now goes through here.
+ */
+async function openRowMenu(page: Page, rowName: string): Promise<void> {
+  await page
+    .getByRole('row', { name: new RegExp(rowName) })
+    .getByRole('button', { name: new RegExp('^Actions for') })
+    .click();
+}
+
 test.describe('client-admin-app drivers', () => {
   test('renders an axe-clean drivers screen behind the nav shell', async ({ page }) => {
     await signIn(page);
@@ -76,7 +88,12 @@ test.describe('client-admin-app drivers', () => {
 
     const row = page.getByRole('row', { name: new RegExp(name) });
     await expect(row).toBeVisible();
-    await expect(row.getByText('Compliant')).toBeVisible();
+    // `toContainText` on the row, not `getByText` inside it: a value in
+    // a column hidden below `md` also appears in the row's responsive
+    // sub-line, so it is in the DOM twice and a text locator is
+    // ambiguous by design. The assertion means "the row shows this",
+    // which is what this expresses.
+    await expect(row).toContainText('Compliant');
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
@@ -109,10 +126,8 @@ test.describe('client-admin-app drivers', () => {
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await createDriver(page, originalName, licenseNumber);
 
-    await page
-      .getByRole('row', { name: new RegExp(originalName) })
-      .getByRole('link', { name: 'Edit' })
-      .click();
+    await openRowMenu(page, originalName);
+    await page.getByRole('menuitem', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit driver' })).toBeVisible();
     await expect(page.getByLabel('Name')).toHaveValue(originalName);
 

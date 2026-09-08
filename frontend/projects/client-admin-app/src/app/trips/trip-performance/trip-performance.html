@@ -1,0 +1,127 @@
+<div class="flex flex-col gap-6">
+  <ui-page-header
+    title="Trip performance"
+    description="How one departure did — how full it was, whether it left on time, and what it earned."
+  >
+    <nav breadcrumb aria-label="Breadcrumb">
+      <a
+        routerLink="/trips"
+        class="text-sm font-medium text-primary underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >Trips</a
+      >
+    </nav>
+    <!-- Across to the manifest for the same departure. Behind
+         `*appHasPermission="'booking.view'"` rather than rendered
+         unconditionally: this screen's own guard is `analytics.view`,
+         and the two codenames are held by different people. -->
+    <a
+      actions
+      *appHasPermission="'booking.view'"
+      [routerLink]="['/trips', tripId, 'manifest']"
+      class="text-sm font-medium text-primary underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      >View manifest</a
+    >
+  </ui-page-header>
+
+  @if (store.notFound()) {
+    <ui-empty-state
+      title="Trip not found"
+      description="It may have been deleted, or it belongs to a different client."
+    />
+  } @else if (store.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (store.loading()) {
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-busy="true">
+      @for (card of [0, 1, 2, 3]; track card) {
+        <div class="rounded-md border border-border bg-surface p-4">
+          <ui-skeleton [lines]="2" />
+        </div>
+      }
+    </div>
+  } @else if (trip(); as t) {
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">
+        {{ t.route }}
+      </h2>
+      <ui-status-pill [label]="t.status" [tone]="statusTone(t.status)" />
+      <ui-status-pill [label]="tripClassLabel(t.trip_class)" />
+      <span class="text-sm text-muted">{{ t.service_date }} · {{ t.booking_mode }}</span>
+    </div>
+
+    <section class="flex flex-col gap-4">
+      <h3 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">Capacity</h3>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <ui-stat label="Occupancy" [hint]="occupancyHint()">{{ occupancyLabel() }}</ui-stat>
+        <ui-stat label="Places sold">{{ capacity()?.seats_sold }}</ui-stat>
+        <!--
+          "Not available", never 0. There is no denominator without an
+          assigned vehicle, and a zero here would read as an empty bus
+          rather than as an unknown one.
+        -->
+        <ui-stat label="Capacity">{{ totalSeatsLabel() }}</ui-stat>
+      </div>
+      <div class="rounded-md border border-border bg-surface p-4">
+        <h4 class="mb-3 text-sm font-medium text-default">How full it was</h4>
+        <ui-chart
+          type="doughnut"
+          [series]="occupancySeries()"
+          title="Places sold and empty"
+          labelHeading="Places"
+          [valueFormatter]="placesFormatter"
+          height="9rem"
+          emptyMessage="No capacity is known for this trip, so there is nothing to measure against."
+        />
+      </div>
+    </section>
+
+    <section class="flex flex-col gap-4">
+      <h3 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">
+        Punctuality
+      </h3>
+      @if (punctuality(); as p) {
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ui-stat label="Departure">{{ delayLabel() }}</ui-stat>
+          <ui-stat label="Scheduled">{{ p.scheduled_departure_at | date: 'short' }}</ui-stat>
+          <ui-stat label="Actual">{{ p.actual_departure_at | date: 'short' }}</ui-stat>
+        </div>
+        <div>
+          <ui-status-pill
+            [label]="p.on_time ? 'Left on time' : 'Left late'"
+            [tone]="punctualityTone()"
+          />
+        </div>
+      } @else {
+        <!-- Distinguishable from "0 minutes late", which is what a
+             zero-filled block would have said. -->
+        <ui-empty-state
+          title="Not departed yet"
+          description="Punctuality is measured at departure. A trip that has not left is not running late."
+        />
+      }
+    </section>
+
+    <section class="flex flex-col gap-4">
+      <h3 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">Revenue</h3>
+      @if (money().length === 0) {
+        <ui-empty-state
+          title="No payments for this trip"
+          description="Nothing has settled against this departure yet."
+        />
+      } @else {
+        @for (entry of money(); track entry.currency) {
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <ui-stat label="Net revenue" hint="After Integra's commission.">
+              {{ moneyLabel(entry.revenue, entry.currency) }}
+            </ui-stat>
+            <ui-stat label="Gross" hint="What passengers paid.">
+              {{ moneyLabel(entry.gross, entry.currency) }}
+            </ui-stat>
+            <ui-stat label="Net per place sold">
+              {{ moneyLabel(entry.revenue_per_seat, entry.currency) }}
+            </ui-stat>
+          </div>
+        }
+      }
+    </section>
+  }
+</div>

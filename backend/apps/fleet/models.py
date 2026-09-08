@@ -15,6 +15,20 @@ class VehicleType(BaseModel):
     business = models.ForeignKey(Business, on_delete=models.PROTECT, related_name="+")
     name = models.CharField(max_length=100)
     capacity = models.PositiveIntegerField()
+    # docs/specs/15-trip-classes.md. What class of service this vehicle
+    # *is* — as opposed to Schedule/Trip.trip_class, which is what a
+    # departure is *sold as*. The two must agree at assignment time
+    # (apps.scheduling.services.assign_trip_resources), but the Trip's
+    # is authoritative: a Trip is generated, and bookable, long before
+    # any vehicle is assigned to it.
+    #
+    # Exactly one class per type — see Business.TripClass's docstring
+    # for why mixed-class vehicles are out of scope.
+    trip_class = models.CharField(
+        max_length=20,
+        choices=Business.TripClass.choices,
+        default=Business.TripClass.STANDARD,
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

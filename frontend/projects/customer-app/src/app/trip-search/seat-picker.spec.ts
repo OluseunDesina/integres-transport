@@ -12,6 +12,11 @@ const JOURNEY: SeatPickerRequest = {
   scheduledDepartureAt: '2026-09-01T06:30:00Z',
   fromStop: { id: 'stop-a', name: 'Ikeja' },
   toStop: { id: 'stop-c', name: 'CMS' },
+  // Deliberately disagrees with the envelope's `standard` in
+  // `respondWith`, so a test that reads the carried state instead of
+  // the freshly-fetched envelope fails — see the class-source test
+  // below (docs/specs/15-trip-classes.md slice 3).
+  tripClass: 'mini',
 };
 
 function makeSeat(
@@ -54,6 +59,7 @@ describe('SeatPicker', () => {
   ) {
     const body = {
       booking_mode: 'reservation',
+      trip_class: 'standard',
       status: seats.length === 0 ? 'not_configured' : 'open',
       seats,
       capacity_remaining: null,
@@ -150,6 +156,51 @@ describe('SeatPicker', () => {
 
     expect(component['seatRows']().length).toBe(1);
     expect(component['seatRows']()[0].row).toBeNull();
+  });
+
+  /**
+   * The flat fallback used to render whatever order the API sent.
+   *
+   * `apps.seating.services.get_availability` reads
+   * `Seat.objects.filter(...)` with no `order_by`, so it inherits
+   * `Seat.Meta.ordering = ["-created_at"]` and returns the seats newest
+   * first — iteration-15 photographed a bus reading 3B, 3A, 2B, 2A, 1B,
+   * 1A. The row/column path was never affected; it sorts itself.
+   */
+  it('sorts the flat fallback, because the response is newest-first', async () => {
+    respondWith([
+      makeSeat('seat-6', '3B', true),
+      makeSeat('seat-5', '3A', true),
+      makeSeat('seat-2', '1B', true),
+      makeSeat('seat-1', '1A', true),
+    ]);
+
+    await createComponent();
+
+    expect(component['seatRows']()[0].segments[0].map((s) => s.seat.seat_number)).toEqual([
+      '1A',
+      '1B',
+      '3A',
+      '3B',
+    ]);
+  });
+
+  // A plain string sort puts 10A before 2A, which is the second way to
+  // get a seat map wrong after not sorting it at all.
+  it('orders seat 10 after seat 9, not after seat 1', async () => {
+    respondWith([
+      makeSeat('seat-10', '10A', true),
+      makeSeat('seat-9', '9A', true),
+      makeSeat('seat-2', '2A', true),
+    ]);
+
+    await createComponent();
+
+    expect(component['seatRows']()[0].segments[0].map((s) => s.seat.seat_number)).toEqual([
+      '2A',
+      '9A',
+      '10A',
+    ]);
   });
 
   it('splits a row into segments at an aisle column gap', async () => {
@@ -279,12 +330,52 @@ describe('SeatPicker', () => {
     expect(navigateSpy).toHaveBeenCalledWith(['/book'], {
       state: {
         ...JOURNEY,
+        // The envelope's class, not JOURNEY's own `mini`.
+        tripClass: 'standard',
         kind: 'seats',
         seats: [{ id: 'seat-1', seatNumber: '1A' }],
         farePerSeat: '750.00',
         currency: 'NGN',
       },
     });
+  });
+
+  // --- service classes, docs/specs/15-trip-classes.md slice 3 ---------
+
+  it('renders the class from the availability envelope, not from carried state', async () => {
+    // JOURNEY carries `mini`; the envelope says `premium`. Only reading
+    // the envelope can pass — which is the point, because router state
+    // survives a refresh and can be arbitrarily stale, while the
+    // envelope was fetched moments ago.
+    respondWith([makeSeat('seat-1', '1A', true)], undefined, { trip_class: 'premium' });
+
+    await createComponent();
+    fixture.detectChanges();
+
+    expect(component['serviceClass']()).toBe('Premium');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Premium service');
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Mini service');
+  });
+
+  it('hands the envelope’s class on to the confirm screen, overwriting the carried one', async () => {
+    respondWith([makeSeat('seat-1', '1A', true)], undefined, { trip_class: 'premium' });
+    await createComponent();
+    component['toggleSeat'](makeSeat('seat-1', '1A', true) as never);
+
+    await component['continueToConfirm']();
+
+    const state = navigateSpy.calls.mostRecent().args[1].state;
+    expect(state.tripClass).toBe('premium');
+  });
+
+  it('leaves no dangling separator when the envelope carries no class', async () => {
+    respondWith([makeSeat('seat-1', '1A', true)], undefined, { trip_class: '' });
+
+    await createComponent();
+
+    expect(component['serviceClass']()).toBe('');
+    expect(component['journeyLine']()).not.toContain('service');
+    expect(component['journeyLine']()?.endsWith('·')).toBeFalse();
   });
 
   it('does not continue with nothing selected', async () => {
@@ -318,7 +409,12 @@ describe('SeatPicker', () => {
       const host = fixture.nativeElement as HTMLElement;
       expect(host.querySelector('h1')?.textContent).toContain('How many passengers?');
       expect(host.querySelector('[role="group"]')).toBeNull();
-      expect(host.querySelector('#passenger-count')).not.toBeNull();
+      // A ui-select now, not a hand-rolled <select> with a fixed id —
+      // the component generates its own, and the label is what a user
+      // (and getByLabel) actually reaches it by.
+      const label = host.querySelector('ui-select label');
+      expect(label?.textContent?.trim()).toBe('Passengers');
+      expect(host.querySelector(`#${label?.getAttribute('for')}`)?.tagName).toBe('SELECT');
     });
 
     it('offers no more places than are actually left', async () => {
@@ -350,6 +446,7 @@ describe('SeatPicker', () => {
       expect(navigateSpy).toHaveBeenCalledWith(['/book'], {
         state: {
           ...JOURNEY,
+          tripClass: 'standard',
           kind: 'places',
           passengerCount: 3,
           farePerSeat: '750.00',

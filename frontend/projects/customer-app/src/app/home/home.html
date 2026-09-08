@@ -1,10 +1,33 @@
-<div class="flex flex-col gap-6">
-  <div>
-    <h1 class="text-lg font-semibold text-slate-900">Welcome, {{ authStore.user()?.email }}</h1>
-    <p class="mt-1 text-sm text-slate-500">Find a departure and reserve your seat.</p>
-  </div>
+<div class="flex flex-col gap-8">
+  <ui-page-header [title]="greeting()" description="Find a departure and reserve your seat." />
 
-  <div>
-    <ui-button (pressed)="goToSearch()">Search trips</ui-button>
-  </div>
+  <!-- The primary action gets a surface of its own rather than sitting
+       as one button among six nav links. This is the only thing most
+       passengers open the app to do. -->
+  <section class="rounded-xl border border-border bg-surface p-6 shadow-sm">
+    <h2 class="text-lg font-semibold text-strong">Where are you going?</h2>
+    <p class="mt-1 text-muted">
+      Pick a route, a pair of stops and a date, and we'll show what's running.
+    </p>
+    <div class="mt-4">
+      <ui-button (pressed)="goToSearch()">Search trips</ui-button>
+    </div>
+  </section>
+
+  <section class="flex flex-col gap-3">
+    <h2 class="text-sm font-medium uppercase tracking-wide text-muted">Your account</h2>
+    <ul class="grid gap-3 sm:grid-cols-3">
+      @for (link of quickLinks; track link.path) {
+        <li>
+          <a
+            [routerLink]="link.path"
+            class="flex h-full flex-col gap-1 rounded-lg border border-border bg-surface p-4 hover:border-control focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          >
+            <span class="font-medium text-strong">{{ link.label }}</span>
+            <span class="text-sm text-muted">{{ link.description }}</span>
+          </a>
+        </li>
+      }
+    </ul>
+  </section>
 </div>

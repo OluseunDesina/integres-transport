@@ -1,14 +1,16 @@
-import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, EmptyState } from '@shared-ui';
+import { FormsModule } from '@angular/forms';
+import { Alert, Button, EmptyState, PageHeader, Select, Skeleton, plural } from '@shared-ui';
+import type { SelectOption } from '@shared-ui';
 
+import { BookingSteps } from '../shared/booking-steps';
 import type { BookingRequest, SeatPickerRequest } from '../shared/booking-draft';
 import { readSeatPickerRequest } from '../shared/booking-draft';
 import { formatMoney, multiplyDecimal } from '../shared/money';
+import { tripClassLabel } from '../shared/trip-class';
 
 type SeatAvailability = components['schemas']['SeatAvailability'];
 type Bookability = components['schemas']['TripBookability'];
@@ -49,6 +51,19 @@ function splitAtAisleGaps(seats: SeatAvailability[]): SeatAvailability[][] {
     segments.push(current);
   }
   return segments;
+}
+
+/**
+ * Orders seat numbers the way a person reads them: 1A, 1B, 2A … 10A.
+ *
+ * `numeric: true` is the whole point — a plain string compare puts 10A
+ * before 2A, which is the second-most-common way to render a seat map
+ * wrongly after not sorting it at all.
+ */
+const SEAT_NUMBER_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+function bySeatNumber(a: SeatAvailability, b: SeatAvailability): number {
+  return SEAT_NUMBER_COLLATOR.compare(a.seat.seat_number, b.seat.seat_number);
 }
 
 function toErrorMessage(error: unknown, fallback: string): string {
@@ -95,12 +110,20 @@ function toErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-seat-picker',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, Alert, Button, EmptyState],
+  imports: [
+    FormsModule,
+    BookingSteps,
+    Alert,
+    Button,
+    EmptyState,
+    PageHeader,
+    Select,
+    Skeleton,
+  ],
   templateUrl: './seat-picker.html',
 })
 export class SeatPicker implements OnInit {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly router = inject(Router);
 
   protected readonly request = signal<SeatPickerRequest | null>(readSeatPickerRequest(this.router));
@@ -164,6 +187,59 @@ export class SeatPicker implements OnInit {
     return Array.from({ length: Math.max(Math.min(cap, UNLIMITED_PLACES_CAP), 1) }, (_, i) => i + 1);
   });
 
+  /** `placeOptions` in the shape `ui-select` takes. The numbers stay the
+   * source of truth — the cap arithmetic above is the part worth
+   * testing, and it should not have to know about a UI type. */
+  protected readonly placeSelectOptions = computed<SelectOption[]>(() =>
+    this.placeOptions().map((count) => ({ value: String(count), label: String(count) }))
+  );
+
+  /** The journey itself, under the heading. Was three stacked lines of
+   * muted text above the old hand-written `<h1>`; `ui-page-header` takes
+   * one description, and the departure time belongs with the route
+   * rather than on a line of its own. */
+  /** The class this trip actually runs as, from the availability
+   * envelope's own `trip_class` — never from `request().tripClass`.
+   * This file's whole contract is that carried router state is not
+   * trusted for correctness, and the envelope was fetched moments ago
+   * (docs/specs/15-trip-classes.md slice 3). Blank until it arrives,
+   * which keeps the journey line from flashing a stale class. */
+  protected readonly serviceClass = computed(() =>
+    tripClassLabel(this.bookability()?.trip_class)
+  );
+
+  protected readonly journeyLine = computed(() => {
+    const journey = this.request();
+    if (!journey) {
+      return null;
+    }
+    const departs = new Date(journey.scheduledDepartureAt).toLocaleString(undefined, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const parts = [
+      journey.routeName,
+      `${journey.fromStop.name} to ${journey.toStop.name}`,
+      `departs ${departs}`,
+    ];
+    const serviceClass = this.serviceClass();
+    if (serviceClass) {
+      parts.push(`${serviceClass} service`);
+    }
+    return parts.join(' · ');
+  });
+
+  /** "2 seats selected" / "3 passengers" — the count in words rather
+   * than the old "seat(s)", which no one writes on purpose. */
+  protected readonly selectionLabel = computed(() =>
+    this.buysPlaces()
+      ? plural(this.selectedCount(), 'passenger')
+      : `${plural(this.selectedCount(), 'seat')} selected`
+  );
+
   /**
    * Groups seats into rows when the VehicleType defines `row`/`column`
    * geometry, and falls back to a single wrapped row of seat numbers
@@ -173,7 +249,24 @@ export class SeatPicker implements OnInit {
   protected readonly seatRows = computed<SeatRow[]>(() => {
     const seats = this.availability();
     if (seats.every((entry) => entry.seat.row === null)) {
-      return [{ row: null, segments: [seats] }];
+      // Sorted, because the response is not.
+      // `apps.seating.services.get_availability` reads
+      // `Seat.objects.filter(...)` with no `order_by`, so it inherits
+      // `Seat.Meta.ordering = ["-created_at"]` and hands back the seats
+      // **newest first** — a bus rendered 3B, 3A, 2B, 2A, 1B, 1A, which
+      // is what iteration-15 photographed.
+      //
+      // The row/column path below is unaffected: it sorts rows and then
+      // columns itself. Only this no-geometry fallback trusted the
+      // order it was given.
+      //
+      // The root cause is that missing `order_by` — the same
+      // `-created_at` trap spec 10 already recorded for quick-book seat
+      // *allocation* and fixed there, without anyone checking the seat
+      // map a passenger actually looks at. Fixed here rather than in
+      // `get_availability` only because this slice makes no backend
+      // change; the backend ordering is still worth correcting.
+      return [{ row: null, segments: [[...seats].sort(bySeatNumber)] }];
     }
     const byRow = new Map<number | null, SeatAvailability[]>();
     for (const entry of seats) {
@@ -236,14 +329,10 @@ export class SeatPicker implements OnInit {
 
     const path = { path: { id: request.tripId } };
     const query = { from_stop: request.fromStop.id, to_stop: request.toStop.id };
-    const headers = { Authorization: `Bearer ${this.authStore.accessToken()}` };
 
     const [availability, fare] = await Promise.all([
-      this.api.GET('/api/v1/trips/{id}/availability/', {
-        params: { ...path, query },
-        headers,
-      }),
-      this.api.GET('/api/v1/trips/{id}/fare/', { params: { ...path, query }, headers }),
+      this.api.GET('/api/v1/trips/{id}/availability/', { params: { ...path, query } }),
+      this.api.GET('/api/v1/trips/{id}/fare/', { params: { ...path, query } }),
     ]);
 
     this.loading.set(false);
@@ -305,13 +394,17 @@ export class SeatPicker implements OnInit {
   }
 
   protected async continueToConfirm(): Promise<void> {
-    const request = this.request();
+    const carried = this.request();
     const fare = this.farePerSeat();
-    if (!request || fare === null || this.selectedCount() === 0) {
+    if (!carried || fare === null || this.selectedCount() === 0) {
       return;
     }
     const money = { farePerSeat: fare, currency: this.currency() };
     const selected = this.selectedSeatIds();
+    // Overwrites whatever the search screen carried in: the envelope is
+    // the fresher of the two, and the confirm screen is the last thing
+    // the passenger reads before committing.
+    const request = { ...carried, tripClass: this.bookability()?.trip_class ?? carried.tripClass };
     const state: BookingRequest = this.buysPlaces()
       ? { ...request, ...money, kind: 'places', passengerCount: this.passengerCount() }
       : {

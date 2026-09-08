@@ -5,6 +5,284 @@ info:
   description: Automated Fare Collection platform API. Versioned from v1; see docs/adr/
     for tenancy, auth and domain-model decisions.
 paths:
+  /api/v1/activity/mine/:
+    get:
+      operationId: activity_mine_retrieve
+      description: |-
+        GET /activity/mine/ — the signed-in passenger's own recent
+        activity: wallet top-ups, booking payments, tickets boarded and
+        pay-as-you-go fares, newest first.
+
+        `IsAuthenticated` only, matching every other "mine" passenger
+        endpoint (`GET /wallet/mine/`, `GET /activity/mine/`'s own sibling)
+        — passengers hold no Role/Permission to gate on (docs/adr/0003).
+        Polled on the same `poll_interval_seconds`-in-the-response
+        discipline as `GET /trips/live/`, at its own, wider interval:
+        a passenger's history changes far less often than a vehicle's
+        position, so there is no `ETag`/`?since=` machinery here — the
+        fleet-bandwidth motivation for that in spec 20 slice 2 does not
+        apply to one passenger's own small, bounded feed.
+      tags:
+      - activity
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+          description: ''
+  /api/v1/analytics/dashboard/:
+    get:
+      operationId: analytics_dashboard_retrieve
+      description: |-
+        GET /analytics/dashboard/ — the whole dashboard in one request.
+
+        One envelope rather than a dozen endpoints the client fans out to
+        and reduces locally: that pattern is the source of four separate
+        production bugs recorded in CLAUDE.md, and on a dashboard it would
+        produce silently wrong totals plausible enough that nobody checks.
+      parameters:
+      - in: query
+        name: booking_status
+        schema:
+          type: string
+        description: Booking status. Separate from `status`, which is a PaymentIntent
+          status — one field validated against two enums cannot validate either.
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Scope to one Business.
+      - in: query
+        name: channel
+        schema:
+          type: string
+        description: Payment channel. `wallet` and `unknown` are accepted alongside
+          the values Paystack reports.
+      - in: query
+        name: date_from
+        schema:
+          type: string
+        description: Inclusive start, as a local date in the resolved timezone. Defaults
+          to 29 days before date_to.
+      - in: query
+        name: date_to
+        schema:
+          type: string
+        description: Inclusive end, as a local date. Defaults to today.
+      - in: query
+        name: granularity
+        schema:
+          type: string
+          enum:
+          - day
+          - month
+          - week
+        description: Trend bucket size. Each has its own range cap; a longer range
+          is a 400 naming the coarser granularity that would answer it.
+      - in: query
+        name: route
+        schema:
+          type: string
+        description: Scope to one Route.
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: PaymentIntent status.
+      - in: query
+        name: trip_class
+        schema:
+          type: string
+        description: Scope to one class.
+      tags:
+      - analytics
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dashboard'
+          description: ''
+  /api/v1/analytics/payments/summary/:
+    get:
+      operationId: analytics_payments_summary_retrieve
+      description: |-
+        GET /analytics/payments/summary/ — the metrics strip above the
+        transactions table.
+
+        Gated on `payments.view`, not `analytics.view`: it describes exactly
+        the rows `GET /payments/` returns for the same filters, so anyone
+        who may read that table may read its totals. It takes the identical
+        filter set through the identical shared module, which is what makes
+        the strip and the table incapable of disagreeing.
+      parameters:
+      - in: query
+        name: booking_status
+        schema:
+          type: string
+        description: Booking status. Separate from `status`, which is a PaymentIntent
+          status — one field validated against two enums cannot validate either.
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Scope to one Business.
+      - in: query
+        name: channel
+        schema:
+          type: string
+        description: Payment channel. `wallet` and `unknown` are accepted alongside
+          the values Paystack reports.
+      - in: query
+        name: date_from
+        schema:
+          type: string
+        description: Inclusive start, as a local date in the resolved timezone. Defaults
+          to 29 days before date_to.
+      - in: query
+        name: date_to
+        schema:
+          type: string
+        description: Inclusive end, as a local date. Defaults to today.
+      - in: query
+        name: granularity
+        schema:
+          type: string
+          enum:
+          - day
+          - month
+          - week
+        description: Trend bucket size. Each has its own range cap; a longer range
+          is a 400 naming the coarser granularity that would answer it.
+      - in: query
+        name: route
+        schema:
+          type: string
+        description: Scope to one Route.
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: PaymentIntent status.
+      - in: query
+        name: trip_class
+        schema:
+          type: string
+        description: Scope to one class.
+      tags:
+      - analytics
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentSummary'
+          description: ''
+  /api/v1/analytics/revenue/:
+    get:
+      operationId: analytics_revenue_retrieve
+      description: GET /analytics/revenue/ — totals, trend and breakdowns.
+      parameters:
+      - in: query
+        name: booking_status
+        schema:
+          type: string
+        description: Booking status. Separate from `status`, which is a PaymentIntent
+          status — one field validated against two enums cannot validate either.
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Scope to one Business.
+      - in: query
+        name: channel
+        schema:
+          type: string
+        description: Payment channel. `wallet` and `unknown` are accepted alongside
+          the values Paystack reports.
+      - in: query
+        name: date_from
+        schema:
+          type: string
+        description: Inclusive start, as a local date in the resolved timezone. Defaults
+          to 29 days before date_to.
+      - in: query
+        name: date_to
+        schema:
+          type: string
+        description: Inclusive end, as a local date. Defaults to today.
+      - in: query
+        name: granularity
+        schema:
+          type: string
+          enum:
+          - day
+          - month
+          - week
+        description: Trend bucket size. Each has its own range cap; a longer range
+          is a 400 naming the coarser granularity that would answer it.
+      - in: query
+        name: route
+        schema:
+          type: string
+        description: Scope to one Route.
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: PaymentIntent status.
+      - in: query
+        name: trip_class
+        schema:
+          type: string
+        description: Scope to one class.
+      tags:
+      - analytics
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevenueReport'
+          description: ''
+  /api/v1/analytics/trips/{id}/performance/:
+    get:
+      operationId: analytics_trips_performance_retrieve
+      description: |-
+        GET /analytics/trips/{id}/performance/ — one trip's operational
+        and financial outcome.
+
+        Takes no filter set: the trip *is* the scope. Resolved through
+        `Trip.objects`, so another Client's trip is a 404 rather than a
+        permission error — the same posture every other object-scoped
+        endpoint in this backend takes.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - analytics
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripPerformance'
+          description: ''
   /api/v1/auth/client-admin/token/:
     post:
       operationId: auth_client_admin_token_create
@@ -134,6 +412,24 @@ paths:
         (docs/adr/0003, and see `apps.fares.views.TripFareView`'s own note
         on this same distinction).
       parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's bookings. An unknown or another
+          Client's Business id returns 400.
+      - in: query
+        name: date_from
+        schema:
+          type: string
+        description: Inclusive start, as a local date. Omitting both dates lists every
+          booking rather than defaulting to a period — a list is bounded by its pagination,
+          not by a window nothing on screen mentions.
+      - in: query
+        name: date_to
+        schema:
+          type: string
+        description: Inclusive end.
       - name: limit
         required: false
         in: query
@@ -146,6 +442,12 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match on the route name or the passenger's
+          email.
       - in: query
         name: status
         schema:
@@ -284,33 +586,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/Booking'
           description: ''
-  /api/v1/bookings/{id}/pay-from-wallet/:
-    post:
-      operationId: bookings_pay_from_wallet_create
-      description: |-
-        POST /bookings/{id}/pay-from-wallet/ — Phase 7. Passenger, own
-        booking only; no request body (the booking id in the path is the
-        whole request). Mirrors `BookingCancelView`'s own
-        404-not-found/403-not-yours split, since both operate on a specific
-        passenger's own booking by id.
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
-      tags:
-      - bookings
-      security:
-      - jwtAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PaymentIntent'
-          description: ''
   /api/v1/bookings/mine/:
     get:
       operationId: bookings_mine_list
@@ -339,6 +614,64 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedBookingList'
           description: ''
+  /api/v1/bookings/staff/:
+    post:
+      operationId: bookings_staff_create
+      description: |-
+        `POST /bookings/staff/` — book for a passenger at the counter
+        (docs/specs/18-manifest-and-staff-booking.md slice 2).
+
+        Gated on **`booking.manage`**, which Owner and Manager hold and
+        Staff deliberately do not. Reading a manifest (`booking.view`) and
+        creating a financial obligation for someone who is not in the room
+        are different authorities, and the second is the one that needs a
+        name on it.
+
+        Every rejection a passenger would meet is met here identically,
+        because the body is validated by a subclass of the passenger's own
+        serializer and the write goes through the same service. The
+        exception list below is `BookingListCreateView.create`'s, unchanged
+        — deliberately not shortened, since a counter agent needs the *same*
+        distinctions a passenger gets (a departure with no vehicle assigned
+        is an operator's problem, not a full bus).
+
+        **No cash tender.** ADR-0006's chart of accounts has no cash
+        account, so a counter agent either settles from the passenger's
+        wallet or leaves the booking `pending_payment` for them to pay. This
+        is the single biggest limitation of the flow and it is deliberate —
+        inventing a cash account is a ledger change needing an ADR
+        amendment, a float model and a reconciliation story.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+        description: Client-generated key. A retried request with the same key and
+          body returns the original Booking rather than creating a second one.
+        required: true
+      tags:
+      - bookings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffBookingCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StaffBookingCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StaffBookingCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffBooking'
+          description: ''
   /api/v1/businesses/:
     get:
       operationId: businesses_list
@@ -355,6 +688,11 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match on the business name.
       tags:
       - businesses
       security:
@@ -391,7 +729,104 @@ paths:
               schema:
                 $ref: '#/components/schemas/Business'
           description: ''
+  /api/v1/businesses/{business_id}/directors/:
+    get:
+      operationId: businesses_directors_list
+      description: |-
+        docs/specs/11-kyb-directors.md. Gated per-method the same way
+        BusinessListCreateView is, and on the same pair: reads are
+        `client.view` (there is no `business.view` codename — `apps.businesses`
+        seeds only a write one), writes are `business.manage`.
+      parameters:
+      - in: path
+        name: business_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - businesses
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDirectorList'
+          description: ''
+    post:
+      operationId: businesses_directors_create
+      description: |-
+        docs/specs/11-kyb-directors.md. Gated per-method the same way
+        BusinessListCreateView is, and on the same pair: reads are
+        `client.view` (there is no `business.view` codename — `apps.businesses`
+        seeds only a write one), writes are `business.manage`.
+      parameters:
+      - in: path
+        name: business_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - businesses
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Director'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Director'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Director'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Director'
+          description: ''
   /api/v1/businesses/{business_id}/kyb-documents/:
+    get:
+      operationId: businesses_kyb_documents_list
+      parameters:
+      - in: path
+        name: business_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - businesses
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/KybDocument'
+          description: ''
     post:
       operationId: businesses_kyb_documents_create
       parameters:
@@ -571,6 +1006,38 @@ paths:
               schema:
                 $ref: '#/components/schemas/TokenObtainResponse'
           description: ''
+  /api/v1/directors/{id}/:
+    patch:
+      operationId: directors_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - directors
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDirector'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDirector'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDirector'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Director'
+          description: ''
   /api/v1/drivers/:
     get:
       operationId: drivers_list
@@ -581,6 +1048,11 @@ paths:
           type: string
         description: Filter to a single Business's rows. An unknown or another Client's
           Business id returns 400.
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+        description: Filter to active or inactive rows. Omit for both.
       - name: limit
         required: false
         in: query
@@ -593,6 +1065,12 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match. Vehicle types match on name;
+          vehicles on registration number; drivers on name, phone or licence number.
       tags:
       - drivers
       security:
@@ -661,6 +1139,122 @@ paths:
               schema:
                 $ref: '#/components/schemas/Driver'
           description: ''
+  /api/v1/exports/{resource}/:
+    get:
+      operationId: exports_retrieve
+      description: |-
+        GET /exports/{resource}/ — the caller's current filtered view, as CSV.
+
+        **Everything is materialised inside `get()`**, while
+        `TenancyMiddleware`'s transaction and RLS session variables are still
+        live. See `apps/analytics/exports.py`'s module docstring for why this
+        is not a `StreamingHttpResponse` — the short version is that a lazily
+        iterated body runs its queries after the tenancy context is gone, and
+        hands the operator a silently empty file that reports `200 OK`.
+
+        **Not `exclude=True`.** The path has to reach the generated
+        `schema.ts` so the frontend can download it through the typed client
+        and inherit `authMiddleware`'s bearer token and 401-refresh; a raw
+        `fetch` with a hand-attached header would re-create the stale-token
+        bug docs/specs/13-session-resilience.md records.
+      parameters:
+      - in: query
+        name: booking_status
+        schema:
+          type: string
+        description: Booking status. Separate from `status`, which is a PaymentIntent
+          status — one field validated against two enums cannot validate either.
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Scope to one Business.
+      - in: query
+        name: channel
+        schema:
+          type: string
+        description: Payment channel. `wallet` and `unknown` are accepted alongside
+          the values Paystack reports.
+      - in: query
+        name: date_from
+        schema:
+          type: string
+        description: Inclusive start, as a local date in the resolved timezone. Defaults
+          to 29 days before date_to.
+      - in: query
+        name: date_to
+        schema:
+          type: string
+        description: Inclusive end, as a local date. Defaults to today.
+      - in: query
+        name: format
+        schema:
+          type: string
+          enum:
+          - csv
+          - json
+      - in: query
+        name: granularity
+        schema:
+          type: string
+          enum:
+          - day
+          - month
+          - week
+        description: Trend bucket size. Each has its own range cap; a longer range
+          is a 400 naming the coarser granularity that would answer it.
+      - in: path
+        name: resource
+        schema:
+          type: string
+          enum:
+          - bookings
+          - manifest
+          - revenue
+          - revenue-trend
+          - route-revenue
+          - transactions
+          - trip-class-revenue
+          - trip-performance
+        description: Which surface to export.
+        required: true
+      - in: query
+        name: route
+        schema:
+          type: string
+        description: Scope to one Route.
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: PaymentIntent status.
+      - in: query
+        name: trip_class
+        schema:
+          type: string
+        description: Scope to one class.
+      tags:
+      - exports
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: attachment; filename="integra-<resource>-<from>-to-<to>.csv"
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+          description: The rows matching the current filters, as CSV — UTF-8 with
+            a BOM, RFC 4180 line endings. Every row that matches, not one page.
+        '400':
+          description: Invalid filters, or more rows than EXPORT_MAX_ROWS.
+        '404':
+          description: Unknown export resource.
   /api/v1/fare-journeys/:
     get:
       operationId: fare_journeys_list
@@ -670,6 +1264,12 @@ paths:
         slice, matching `apps.booking.views.BookingListCreateView`'s GET
         branch.
       parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's journeys, through their Trip. An
+          unknown or another Client's Business id returns 400.
       - name: limit
         required: false
         in: query
@@ -941,6 +1541,385 @@ paths:
               schema:
                 $ref: '#/components/schemas/Health'
           description: ''
+  /api/v1/incidents/:
+    get:
+      operationId: incidents_list
+      description: '`GET`/`POST /incidents/` — the operator queue and its create form.'
+      parameters:
+      - in: query
+        name: assigned_to
+        schema:
+          type: string
+      - in: query
+        name: business
+        schema:
+          type: string
+      - in: query
+        name: category
+        schema:
+          type: string
+      - in: query
+        name: date_from
+        schema:
+          type: string
+      - in: query
+        name: date_to
+        schema:
+          type: string
+      - in: query
+        name: driver
+        schema:
+          type: string
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: open_only
+        schema:
+          type: string
+      - in: query
+        name: route
+        schema:
+          type: string
+      - in: query
+        name: search
+        schema:
+          type: string
+      - in: query
+        name: severity
+        schema:
+          type: string
+      - in: query
+        name: source
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: string
+      - in: query
+        name: trip
+        schema:
+          type: string
+      - in: query
+        name: vehicle
+        schema:
+          type: string
+      tags:
+      - incidents
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedIncidentList'
+          description: ''
+    post:
+      operationId: incidents_create
+      description: '`GET`/`POST /incidents/` — the operator queue and its create form.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+        description: Client-generated key. A retried request with the same key and
+          body returns the original Incident rather than filing a second one.
+        required: true
+      tags:
+      - incidents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/IncidentCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IncidentCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+          description: ''
+  /api/v1/incidents/{id}/:
+    get:
+      operationId: incidents_retrieve
+      description: |-
+        `GET`/`PATCH /incidents/{id}/`.
+
+        `PATCH` cannot move `status` — see
+        `apps.incidents.services.update_incident`. Another Client's incident
+        is a 404 rather than a 403: the tenant-scoped manager simply does not
+        contain it, and saying "forbidden" would confirm it exists.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - incidents
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentDetail'
+          description: ''
+    patch:
+      operationId: incidents_partial_update
+      description: |-
+        `GET`/`PATCH /incidents/{id}/`.
+
+        `PATCH` cannot move `status` — see
+        `apps.incidents.services.update_incident`. Another Client's incident
+        is a 404 rather than a 403: the tenant-scoped manager simply does not
+        contain it, and saying "forbidden" would confirm it exists.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - incidents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedIncidentUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedIncidentUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedIncidentUpdate'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentDetail'
+          description: ''
+  /api/v1/incidents/{id}/notes/:
+    post:
+      operationId: incidents_notes_create
+      description: '`POST /incidents/{id}/notes/` — an internal note on the trail.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - incidents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentNote'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/IncidentNote'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IncidentNote'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentActivity'
+          description: ''
+  /api/v1/incidents/{id}/transition/:
+    post:
+      operationId: incidents_transition_create
+      description: '`POST /incidents/{id}/transition/` — the only way status moves.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - incidents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentTransition'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/IncidentTransition'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IncidentTransition'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentDetail'
+          description: ''
+  /api/v1/incidents/assignable-users/:
+    get:
+      operationId: incidents_assignable_users_list
+      description: |-
+        `GET /incidents/assignable-users/` — who an incident can be
+        handed to.
+
+        This exists because `GET /staff/` is gated on `staff.manage`, which
+        only the **Owner** preset holds. Manager and Staff both hold
+        `incidents.manage` and are exactly the people who triage incidents,
+        so populating an assignee picker from `/staff/` would 403 for almost
+        everyone who needs it.
+
+        Narrower than `/staff/` on purpose — `AssignableUserSerializer`
+        carries no Role and no permission list.
+
+        `User` is not a `BaseModel` and `User.objects` is the plain unscoped
+        manager (docs/adr/0003), so the `client` filter here is the only
+        thing scoping this response.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - incidents
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAssignableUserList'
+          description: ''
+  /api/v1/incidents/mine/:
+    get:
+      operationId: incidents_mine_list
+      description: |-
+        `GET /incidents/mine/` — the reporter's own reports, reduced.
+
+        Parity with `apps.booking.views.BookingMineView`. The reduced shape
+        is a distinct serializer class rather than an exclusion list, so
+        staff notes on a safety report cannot leak back to the person who
+        filed it.
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - incidents
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPassengerIncidentList'
+          description: ''
+  /api/v1/incidents/report/:
+    post:
+      operationId: incidents_report_create
+      description: |-
+        `POST /incidents/report/` — a passenger reports a problem.
+
+        `IsAuthenticated` only, no codename: passengers have no Role
+        (docs/adr/0003), so any `HasPermission` gate would exclude them by
+        construction.
+
+        Throttled, and this is the first non-auth **POST** scope in this
+        backend. `ScopedRateThrottle` keys on the authenticated user, so the
+        limit is per passenger — the abuse vector the spec's Failure Modes
+        section names. There is no anonymous reporting to rate-limit by IP,
+        because the customer app is authenticated throughout.
+
+        Responds with the **passenger** serializer, not the staff one: the
+        reporter must not learn who the incident was assigned to just
+        because they filed it.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+        description: Client-generated key. A retried request with the same key and
+          body returns the original Incident rather than filing a second one.
+        required: true
+      tags:
+      - incidents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentReport'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/IncidentReport'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IncidentReport'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PassengerIncident'
+          description: ''
   /api/v1/ledger/accounts/:
     get:
       operationId: ledger_accounts_list
@@ -1105,6 +2084,60 @@ paths:
               schema:
                 $ref: '#/components/schemas/NotificationReadAllResponse'
           description: ''
+  /api/v1/passengers/lookup/:
+    get:
+      operationId: passengers_lookup_retrieve
+      description: |-
+        `GET /passengers/lookup/?email=` — resolve one passenger of this
+        Client, so staff can act for them.
+
+        Two capabilities need this, which is why it takes either codename:
+
+        - **`booking.manage`** — the counter-booking flow
+          (docs/specs/18-manifest-and-staff-booking.md slice 2) needs a
+          passenger id before it can book.
+        - **`wallet.view`** — `client-admin-app`'s wallet-lookup screen has
+          shipped since spec 5 with its limitation written into its own
+          docstring: `GET /wallet/?business=&passenger=` takes a UUID and
+          there was no way to obtain one, so the screen only worked if a
+          support ticket happened to quote it. That is the capability this
+          endpoint is; gating it on `booking.manage` alone would have left
+          the screen broken for every Staff user, since Staff hold
+          `wallet.view` and deliberately not `booking.manage`.
+
+        Widening the gate widens who can confirm an address is registered.
+        That is a real cost and it was taken deliberately: the alternative
+        was a second endpoint doing the same lookup under a different name,
+        which is the same disclosure with more code.
+
+        Lives in `apps.identity` rather than `apps.booking` because the data
+        is `identity.User` — the app that owns the data owns the endpoint,
+        and it now has two consumers in different apps, so hanging it off
+        either one would make the other depend on it.
+
+        Throttled: an exact-match endpoint is still an enumeration oracle if
+        you let someone hammer it. A `404` is returned for both "no such
+        passenger" and "a passenger of another Client", with one message —
+        the distinction is exactly what an attacker wants.
+      parameters:
+      - in: query
+        name: email
+        schema:
+          type: string
+        description: Exact (case-insensitive) email address. Not a search — a partial
+          address matches nothing.
+        required: true
+      tags:
+      - passengers
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Passenger'
+          description: ''
   /api/v1/payments/:
     get:
       operationId: payments_list
@@ -1133,6 +2166,11 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match on the PSP reference.
       - in: query
         name: status
         schema:
@@ -1276,6 +2314,17 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match. Routes match on name or code;
+          stops on name or address.
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: Filter to a single status. Omit to see every status except archived.
       tags:
       - routes
       security:
@@ -1313,8 +2362,38 @@ paths:
                 $ref: '#/components/schemas/Route'
           description: ''
   /api/v1/routes/{id}/:
+    get:
+      operationId: routes_retrieve
+      description: |-
+        GET (detail) + PATCH (mutable fields) on `/routes/{id}/` —
+        docs/specs/19-route-lifecycle.md. One resource, one path; the two
+        methods differ in permission and response shape the same way
+        `RouteListCreateView` already splits GET from POST.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - routes
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteDetail'
+          description: ''
     patch:
       operationId: routes_partial_update
+      description: |-
+        GET (detail) + PATCH (mutable fields) on `/routes/{id}/` —
+        docs/specs/19-route-lifecycle.md. One resource, one path; the two
+        methods differ in permission and response shape the same way
+        `RouteListCreateView` already splits GET from POST.
       parameters:
       - in: path
         name: id
@@ -1335,6 +2414,161 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/PatchedRoute'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Route'
+          description: ''
+  /api/v1/routes/{id}/duplicate/:
+    post:
+      operationId: routes_duplicate_create
+      description: |-
+        POST /routes/{id}/duplicate/ — returns the new draft route.
+        docs/specs/19-route-lifecycle.md: no request body, since there is
+        nothing to choose — the copy is always a draft with a suffixed name
+        and no code.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - routes
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Route'
+          description: ''
+  /api/v1/routes/{id}/fare-matrix/:
+    get:
+      operationId: routes_fare_matrix_retrieve
+      description: |-
+        The stop-pair fare grid for one Route —
+        docs/specs/12-fare-matrix.md.
+
+        Per-stop-pair pricing has existed end to end since Phase 4; it was
+        unreachable and, once reached, unusable at scale — a 10-stop route
+        is 45 forward pairs, entered one create flow at a time. This is the
+        bulk read/write that makes it tractable.
+
+        The view orchestrates and never writes: `apps.fares.matrix` calls
+        the existing service functions, which own the versioning. See that
+        module's docstring for why that separation is load-bearing.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: query
+        name: trip_class
+        schema:
+          type: string
+        description: Which class's grid to read or write. The empty string is the
+          wildcard grid, whose prices apply to any class with no grid of its own.
+          Required — see docs/specs/15-trip-classes.md for why this is not defaulted.
+        required: true
+      tags:
+      - routes
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FareMatrix'
+          description: ''
+    put:
+      operationId: routes_fare_matrix_update
+      description: |-
+        The stop-pair fare grid for one Route —
+        docs/specs/12-fare-matrix.md.
+
+        Per-stop-pair pricing has existed end to end since Phase 4; it was
+        unreachable and, once reached, unusable at scale — a 10-stop route
+        is 45 forward pairs, entered one create flow at a time. This is the
+        bulk read/write that makes it tractable.
+
+        The view orchestrates and never writes: `apps.fares.matrix` calls
+        the existing service functions, which own the versioning. See that
+        module's docstring for why that separation is load-bearing.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: query
+        name: trip_class
+        schema:
+          type: string
+        description: Which class's grid to read or write. The empty string is the
+          wildcard grid, whose prices apply to any class with no grid of its own.
+          Required — see docs/specs/15-trip-classes.md for why this is not defaulted.
+        required: true
+      tags:
+      - routes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FareMatrixWrite'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/FareMatrixWrite'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/FareMatrixWrite'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FareMatrixSaveResult'
+          description: ''
+  /api/v1/routes/{id}/status/:
+    post:
+      operationId: routes_status_create
+      description: |-
+        POST /routes/{id}/status/ — the only way `Route.status` moves.
+        Mirrors `apps.scheduling.views.TripStatusView`'s shape.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - routes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RouteStatus'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RouteStatus'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RouteStatus'
+        required: true
       security:
       - jwtAuth: []
       responses:
@@ -1433,6 +2667,11 @@ paths:
           type: string
         description: Filter to a single Business's rows. An unknown or another Client's
           Business id returns 400.
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+        description: Filter to active or inactive schedules. Omit for both.
       - name: limit
         required: false
         in: query
@@ -1445,6 +2684,12 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match on the schedule's route name.
+          A Schedule has no name of its own.
       tags:
       - schedules
       security:
@@ -1600,6 +2845,11 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match on the staff member's email.
       tags:
       - staff
       security:
@@ -1760,6 +3010,11 @@ paths:
           type: string
         description: Filter to a single Business's rows. An unknown or another Client's
           Business id returns 400.
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+        description: Filter to active or inactive rows. Omit for both.
       - name: limit
         required: false
         in: query
@@ -1772,6 +3027,12 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match. Routes match on name or code;
+          stops on name or address.
       tags:
       - stops
       security:
@@ -2286,6 +3547,99 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedTapCredentialList'
           description: ''
+  /api/v1/telemetry/devices/:
+    get:
+      operationId: telemetry_devices_list
+      description: |-
+        GET/POST /telemetry/devices/ — both gated on `fleet.manage`, per
+        the spec's API table (device management has no separate `.view`
+        codename).
+      parameters:
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      tags:
+      - telemetry
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTelemetryDeviceList'
+          description: ''
+    post:
+      operationId: telemetry_devices_create
+      description: |-
+        GET/POST /telemetry/devices/ — both gated on `fleet.manage`, per
+        the spec's API table (device management has no separate `.view`
+        codename).
+      tags:
+      - telemetry
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryDeviceCreate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TelemetryDeviceCreate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TelemetryDeviceCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryDeviceIssued'
+          description: ''
+  /api/v1/telemetry/devices/{id}/:
+    patch:
+      operationId: telemetry_devices_partial_update
+      description: PATCH /telemetry/devices/{id}/ — revoke and/or reassign.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - telemetry
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTelemetryDeviceUpdate'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTelemetryDeviceUpdate'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTelemetryDeviceUpdate'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryDevice'
+          description: ''
   /api/v1/ticketing/revoked/:
     get:
       operationId: ticketing_revoked_retrieve
@@ -2335,6 +3689,12 @@ paths:
     get:
       operationId: trips_list
       parameters:
+      - in: query
+        name: business
+        schema:
+          type: string
+        description: Filter to a single Business's rows. An unknown or another Client's
+          Business id returns 400.
       - name: limit
         required: false
         in: query
@@ -2358,6 +3718,12 @@ paths:
           type: string
         description: Filter to a single Schedule.
       - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match on the trip's route name. A
+          Trip has no name of its own.
+      - in: query
         name: service_date
         schema:
           type: string
@@ -2367,6 +3733,11 @@ paths:
         schema:
           type: string
         description: Filter to a single status.
+      - in: query
+        name: trip_class
+        schema:
+          type: string
+        description: Filter to a single service class (premium/exclusive/standard/mini).
       tags:
       - trips
       security:
@@ -2437,13 +3808,18 @@ paths:
           description: ''
   /api/v1/trips/{id}/availability/:
     get:
-      operationId: trips_availability_list
+      operationId: trips_availability_retrieve
       description: |-
-        Seat availability for a Trip's segment —
-        docs/specs/4-fares-seating-booking.md §3. Not permission-codename
-        gated: same IsAuthenticated + ordinary tenancy scoping as
+        Whether a Trip's segment can be booked —
+        docs/specs/4-fares-seating-booking.md §3 and
+        docs/specs/10-booking-modes.md. Not permission-codename gated: same
+        IsAuthenticated + ordinary tenancy scoping as
         apps.fares.views.TripFareView, and for the same reason (passengers
         have no Role — see that view's own docstring).
+
+        Returns an envelope rather than the bare seat array it used to,
+        because a bare array cannot say *why* it is empty. See
+        `TripBookabilitySerializer`.
       parameters:
       - in: query
         name: from_stop
@@ -2470,9 +3846,46 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/SeatAvailability'
+                $ref: '#/components/schemas/TripBookability'
+          description: ''
+  /api/v1/trips/{id}/class/:
+    post:
+      operationId: trips_class_create
+      description: |-
+        POST /trips/{id}/class/ — docs/specs/15-trip-classes.md.
+
+        Its own endpoint rather than a field on the assignment PATCH; see
+        TripClassSerializer's docstring for why. Modelled on TripStatusView,
+        the other guarded single-field Trip mutation.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - trips
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TripClass'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TripClass'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TripClass'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Trip'
           description: ''
   /api/v1/trips/{id}/fare/:
     get:
@@ -2512,6 +3925,81 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TripFareQuote'
+          description: ''
+  /api/v1/trips/{id}/live/:
+    get:
+      operationId: trip_live_retrieve
+      description: |-
+        GET /trips/{id}/live/ — one trip's live detail. `scheduling.view`
+        staff, or a passenger holding a ticket (or, on a pay-as-you-go trip,
+        a fare journey) on it — checked by hand rather than via
+        `permission_classes`, since neither `HasPermission` nor
+        `HasAnyPermission` can express "this codename, or ownership of the
+        object". Another passenger's trip is a 404, never a 403: confirming
+        it exists is exactly what a 403 would do, and an unknown trip id is
+        already a 404 by construction (`Trip.objects` is tenant-scoped).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - trips
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripLiveEnvelope'
+          description: ''
+  /api/v1/trips/{id}/manifest/:
+    get:
+      operationId: trips_manifest_retrieve
+      description: |-
+        `GET /trips/{id}/manifest/` — who is aboard.
+
+        Gated on `booking.view`, which Owner, Manager **and** Staff already
+        hold: the person who most needs this is the one standing at the
+        door. `booking.manage` (slice 2) is a different authority — creating
+        a financial obligation for someone else — and is not required here.
+
+        Lives in `apps.booking` rather than `apps.scheduling` even though the
+        path is under `trips/`, matching how `apps.fares` owns
+        `trips/{id}/fare/` and `apps.tapngo` owns `trips/{id}/taps/`: the
+        app that owns the data owns the endpoint, and the codename follows
+        the data.
+
+        Another Client's trip is a 404 rather than a 403 — the tenant-scoped
+        manager simply does not contain it, and "forbidden" would confirm it
+        exists.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: query
+        name: include_cancelled
+        schema:
+          type: boolean
+        description: Include cancelled and expired bookings, each flagged with `is_cancelled`.
+          Excluded by default. `pending_payment` bookings are always included regardless
+          — an operator needs to know a held seat is unpaid.
+      tags:
+      - trips
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripManifest'
           description: ''
   /api/v1/trips/{id}/status/:
     post:
@@ -2597,8 +4085,15 @@ paths:
         POST /trips/{trip_id}/tickets/validate/ — the validator action,
         gated on `ticketing.validate`. Mirrors `apps.tapngo.views.TapRecordView`'s
         exact shape: `Idempotency-Key` header required before anything else,
-        each typed exception from `validate_ticket` mapped to its own
+        each typed exception from the service layer mapped to its own
         status.
+
+        Takes either fare medium: a scanned ticket QR (`payload`) or a tap
+        credential (`token`, docs/specs/10-booking-modes.md's universal
+        tap). One endpoint rather than two, because both board the same
+        `Ticket` and return the same result — a credential presented here
+        is not a `TapEvent` and cannot be one, since `TapEvent.journey` is
+        non-null and a prepaid trip opens no journey.
       parameters:
       - in: header
         name: Idempotency-Key
@@ -2626,7 +4121,6 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/TicketValidate'
-        required: true
       security:
       - jwtAuth: []
       responses:
@@ -2635,6 +4129,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TicketValidationResult'
+          description: ''
+  /api/v1/trips/live/:
+    get:
+      operationId: trips_live_list
+      description: |-
+        GET /trips/live/ — every in-progress trip with live state.
+        `scheduling.view`, the same codename that gates the rest of the
+        scheduling read surface: live monitoring is scheduling visibility,
+        not a new capability — the spec's own call for why this needed no
+        new permission codename.
+
+        `ETag`/`If-None-Match` is checked **before** any per-trip envelope
+        is built (occupancy and incident counts included), so a genuinely
+        quiet poll costs one cheap query, not one per trip. `?since=` then
+        narrows a real `200` to the trips that actually moved — see
+        `apps.telemetry.live.compute_fleet_etag`/`include_in_delta` for why
+        these are two independent layers, not one mechanism.
+      parameters:
+      - in: query
+        name: since
+        schema:
+          type: string
+        description: ISO-8601 timestamp. Narrows the response to trips whose live
+          state changed after this instant — see `apps.telemetry.live.include_in_delta`.
+          Omit for a full snapshot.
+      tags:
+      - trips
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripsLiveResponse'
           description: ''
   /api/v1/trips/search/:
     get:
@@ -2675,6 +4204,11 @@ paths:
           type: string
         description: The service date to search (YYYY-MM-DD).
         required: true
+      - in: query
+        name: trip_class
+        schema:
+          type: string
+        description: Filter to a single service class (premium/exclusive/standard/mini).
       tags:
       - trips
       security:
@@ -2696,6 +4230,11 @@ paths:
           type: string
         description: Filter to a single Business's rows. An unknown or another Client's
           Business id returns 400.
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+        description: Filter to active or inactive rows. Omit for both.
       - name: limit
         required: false
         in: query
@@ -2708,6 +4247,12 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match. Vehicle types match on name;
+          vehicles on registration number; drivers on name, phone or licence number.
       tags:
       - vehicle-types
       security:
@@ -2883,6 +4428,11 @@ paths:
           type: string
         description: Filter to a single Business's rows. An unknown or another Client's
           Business id returns 400.
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+        description: Filter to active or inactive rows. Omit for both.
       - name: limit
         required: false
         in: query
@@ -2895,6 +4445,12 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match. Vehicle types match on name;
+          vehicles on registration number; drivers on name, phone or licence number.
       tags:
       - vehicles
       security:
@@ -3084,12 +4640,99 @@ components:
         * `integra_commission` - Integra commission
         * `psp_suspense` - PSP suspense
         * `refund_contra` - Refund / concession contra
+    ActivityEntry:
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/TypeEnum'
+        occurred_at:
+          type: string
+          format: date-time
+        business:
+          type: string
+        route:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        wallet_balance:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+      required:
+      - amount
+      - business
+      - currency
+      - occurred_at
+      - reference
+      - route
+      - type
+      - wallet_balance
+    ActivityResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityEntry'
+        poll_interval_seconds:
+          type: integer
+      required:
+      - poll_interval_seconds
+      - results
+    AssignableUser:
+      type: object
+      description: |-
+        `GET /incidents/assignable-users/` — just enough to populate an
+        assignee picker.
+
+        Deliberately **not** `apps.identity.serializers.StaffSerializer`,
+        which nests each user's Role and that Role's full permission list.
+        Choosing who to hand a broken reader to does not require knowing
+        everyone's permissions, and this endpoint is reachable by every
+        `incidents.manage` holder rather than only `staff.manage` (Owner).
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        email:
+          type: string
+          format: email
+          readOnly: true
+        first_name:
+          type: string
+          readOnly: true
+        last_name:
+          type: string
+          readOnly: true
+      required:
+      - email
+      - first_name
+      - id
+      - last_name
+    BlankEnum:
+      enum:
+      - ''
     Booking:
       type: object
       properties:
         id:
           type: string
           format: uuid
+          readOnly: true
+        reference:
+          type: string
           readOnly: true
         business:
           type: string
@@ -3105,7 +4748,7 @@ components:
           readOnly: true
         status:
           allOf:
-          - $ref: '#/components/schemas/BookingStatusEnum'
+          - $ref: '#/components/schemas/Status53fEnum'
           readOnly: true
         total_amount:
           type: string
@@ -3134,6 +4777,7 @@ components:
       - currency
       - id
       - passenger
+      - reference
       - seats
       - status
       - total_amount
@@ -3149,6 +4793,22 @@ components:
         reason:
           type: string
           default: ''
+    BookingCounts:
+      type: object
+      properties:
+        total:
+          type: integer
+        paid:
+          type: integer
+        cancelled:
+          type: integer
+        pending_payment:
+          type: integer
+      required:
+      - cancelled
+      - paid
+      - pending_payment
+      - total
     BookingCreate:
       type: object
       description: |-
@@ -3168,25 +4828,33 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BookingSeatRequest'
+        passenger_count:
+          type: integer
+          minimum: 1
+        from_stop:
+          type: string
+          format: uuid
+        to_stop:
+          type: string
+          format: uuid
       required:
-      - seats
       - trip
     BookingModeDefaultEnum:
       enum:
       - reservation
-      - tap_and_go
+      - open_seating
       type: string
       description: |-
         * `reservation` - Reservation
-        * `tap_and_go` - Tap and go
+        * `open_seating` - Open seating
     BookingModeEnum:
       enum:
       - reservation
-      - tap_and_go
+      - open_seating
       type: string
       description: |-
         * `reservation` - Reservation
-        * `tap_and_go` - Tap and go
+        * `open_seating` - Open seating
     BookingSeatRequest:
       type: object
       properties:
@@ -3242,14 +4910,27 @@ components:
       enum:
       - pending_payment
       - paid
+      - completed
       - cancelled
       - expired
       type: string
       description: |-
         * `pending_payment` - Pending payment
         * `paid` - Paid
+        * `completed` - Completed
         * `cancelled` - Cancelled
         * `expired` - Expired
+    BookingTrendPoint:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        count:
+          type: integer
+      required:
+      - count
+      - date
     BookingTrip:
       type: object
       description: |-
@@ -3269,11 +4950,14 @@ components:
         service_date:
           type: string
           format: date
+        trip_class:
+          type: string
       required:
       - id
       - route
       - scheduled_departure_at
       - service_date
+      - trip_class
     BookingTripRoute:
       type: object
       properties:
@@ -3298,13 +4982,18 @@ components:
           type: string
           maxLength: 255
         currency:
-          type: string
-          maxLength: 8
+          $ref: '#/components/schemas/CurrencyEnum'
         timezone:
           type: string
           maxLength: 64
         booking_mode_default:
           $ref: '#/components/schemas/BookingModeDefaultEnum'
+        fare_collection_mode:
+          $ref: '#/components/schemas/ManifestKindEnum'
+        seat_selection_enabled:
+          type: boolean
+        capacity_enforced:
+          type: boolean
         fare_pricing_mode:
           $ref: '#/components/schemas/FarePricingModeEnum'
         is_active:
@@ -3367,9 +5056,15 @@ components:
           items:
             $ref: '#/components/schemas/KybDocument'
           readOnly: true
+        directors:
+          type: array
+          items:
+            $ref: '#/components/schemas/Director'
+          readOnly: true
       required:
       - client
       - client_name
+      - directors
       - documents
       - id
       - kyb_status
@@ -3427,7 +5122,8 @@ components:
           - $ref: '#/components/schemas/VerticalEnum'
           readOnly: true
         currency:
-          type: string
+          allOf:
+          - $ref: '#/components/schemas/CurrencyEnum'
           readOnly: true
         is_active:
           type: boolean
@@ -3436,11 +5132,16 @@ components:
           allOf:
           - $ref: '#/components/schemas/KybStatusEnum'
           readOnly: true
+        booking_mode_default:
+          allOf:
+          - $ref: '#/components/schemas/BookingModeDefaultEnum'
+          readOnly: true
         created_at:
           type: string
           format: date-time
           readOnly: true
       required:
+      - booking_mode_default
       - client
       - client_name
       - created_at
@@ -3450,6 +5151,46 @@ components:
       - kyb_status
       - name
       - vertical
+    CategoryEnum:
+      enum:
+      - hardware
+      - vehicle
+      - safety
+      - service
+      - gps
+      - announcement
+      - other
+      type: string
+      description: |-
+        * `hardware` - Hardware
+        * `vehicle` - Vehicle
+        * `safety` - Safety
+        * `service` - Service quality
+        * `gps` - GPS / location
+        * `announcement` - Stop announcement
+        * `other` - Other
+    ChannelBreakdown:
+      type: object
+      description: |-
+        `channel` is `wallet` for balance-funded payments (which have no
+        PSP leg at all) and `unknown` for anything with no captured channel
+        — never guessed.
+      properties:
+        currency:
+          type: string
+        channel:
+          type: string
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        transaction_volume:
+          type: integer
+      required:
+      - amount
+      - channel
+      - currency
+      - transaction_volume
     ChannelEnum:
       enum:
       - qr
@@ -3618,6 +5359,24 @@ components:
       - email
       - name
       - password
+    CurrencyEnum:
+      enum:
+      - NGN
+      - ZAR
+      - GHS
+      - KES
+      - XOF
+      - USD
+      - BWP
+      type: string
+      description: |-
+        * `NGN` - Nigerian Naira (NGN)
+        * `ZAR` - South African Rand (ZAR)
+        * `GHS` - Ghanaian Cedi (GHS)
+        * `KES` - Kenyan Shilling (KES)
+        * `XOF` - West African CFA Franc (XOF)
+        * `USD` - US Dollar (USD)
+        * `BWP` - Botswana Pula (BWP)
     CustomerTokenObtain:
       type: object
       description: |-
@@ -3636,6 +5395,57 @@ components:
       required:
       - email
       - password
+    Dashboard:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/Period'
+        routes:
+          $ref: '#/components/schemas/RouteCounts'
+        trips:
+          $ref: '#/components/schemas/TripCounts'
+        bookings:
+          $ref: '#/components/schemas/BookingCounts'
+        incidents:
+          $ref: '#/components/schemas/IncidentCounts'
+        money:
+          type: array
+          items:
+            $ref: '#/components/schemas/MoneyEntry'
+        trends:
+          $ref: '#/components/schemas/DashboardTrends'
+        recent_incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecentIncident'
+        recent_transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecentTransaction'
+      required:
+      - bookings
+      - incidents
+      - money
+      - period
+      - recent_incidents
+      - recent_transactions
+      - routes
+      - trends
+      - trips
+    DashboardTrends:
+      type: object
+      properties:
+        revenue:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevenueTrendPoint'
+        bookings:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingTrendPoint'
+      required:
+      - bookings
+      - revenue
     DecisionEnum:
       enum:
       - approve
@@ -3644,6 +5454,42 @@ components:
       description: |-
         * `approve` - approve
         * `reject` - reject
+    Director:
+      type: object
+      description: |-
+        docs/specs/11-kyb-directors.md. `business` is read-only — it comes
+        from the URL (`/businesses/{business_id}/directors/`), never the
+        body, so a director cannot be created against a Business the caller
+        didn't address.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        full_name:
+          type: string
+          maxLength: 255
+        id_type:
+          $ref: '#/components/schemas/IdTypeEnum'
+        id_number:
+          type: string
+          maxLength: 50
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - created_at
+      - full_name
+      - id
+      - id_type
     DocumentTypeEnum:
       enum:
       - certificate_of_incorporation
@@ -3861,6 +5707,144 @@ components:
       required:
       - id
       - name
+    FareMatrix:
+      type: object
+      description: |-
+        GET response. `currency` comes from the Business that owns the
+        route, deliberately read from this payload by the frontend rather
+        than looked up elsewhere — a previous slice shipped a bug reading a
+        `currency` field off `LedgerAccount`, which has none.
+      properties:
+        route:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        fare_pricing_mode:
+          type: string
+        trip_class:
+          type: string
+        stops:
+          type: array
+          items:
+            $ref: '#/components/schemas/FareMatrixStop'
+        cells:
+          type: array
+          items:
+            $ref: '#/components/schemas/FareMatrixCell'
+      required:
+      - cells
+      - currency
+      - fare_pricing_mode
+      - route
+      - stops
+      - trip_class
+    FareMatrixCell:
+      type: object
+      description: |-
+        One forward stop pair. `amount` is null where the segment has no
+        currently-effective rule — an unpriced cell, which the grid renders
+        as empty and booking rejects as `FareNotConfigured`.
+
+        `fare_segment_rule` is echoed so a later save can tell that the tip
+        it is superseding has moved since the grid was loaded.
+      properties:
+        from_stop:
+          type: string
+          format: uuid
+        to_stop:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        fare_segment_rule:
+          type: string
+          format: uuid
+          nullable: true
+      required:
+      - amount
+      - fare_segment_rule
+      - from_stop
+      - to_stop
+    FareMatrixCellWrite:
+      type: object
+      description: |-
+        One submitted cell. A null `amount` means "stop selling this
+        segment" and closes the rule with no successor.
+
+        `min_value` is exclusive of zero deliberately: a genuinely free
+        segment is a policy decision, not a `0.00` fare, which looks
+        indistinguishable from a data-entry slip.
+      properties:
+        from_stop:
+          type: string
+          format: uuid
+        to_stop:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+      required:
+      - amount
+      - from_stop
+      - to_stop
+    FareMatrixSaveResult:
+      type: object
+      description: |-
+        What a save actually did. `unchanged` is reported rather than
+        hidden so the operator can see that submitting the whole grid did
+        not churn every cell's version history.
+      properties:
+        created:
+          type: integer
+        superseded:
+          type: integer
+        closed:
+          type: integer
+        unchanged:
+          type: integer
+      required:
+      - closed
+      - created
+      - superseded
+      - unchanged
+    FareMatrixStop:
+      type: object
+      description: Schema-only shape for a stop in the matrix's axis list.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        sequence:
+          type: integer
+      required:
+      - id
+      - name
+      - sequence
+    FareMatrixWrite:
+      type: object
+      description: |-
+        PUT body. One `effective_from` for the whole submission, so a
+        matrix save is a single coherent price change rather than N
+        independent timelines drifting apart by milliseconds.
+      properties:
+        effective_from:
+          type: string
+          format: date-time
+        cells:
+          type: array
+          items:
+            $ref: '#/components/schemas/FareMatrixCellWrite'
+      required:
+      - cells
     FarePricingModeEnum:
       enum:
       - flat
@@ -3888,6 +5872,14 @@ components:
           type: string
           format: uuid
           readOnly: true
+        route_name:
+          type: string
+          readOnly: true
+        trip_class:
+          readOnly: true
+          oneOf:
+          - $ref: '#/components/schemas/TripClassEnum'
+          - $ref: '#/components/schemas/BlankEnum'
         amount:
           type: string
           format: decimal
@@ -3914,6 +5906,8 @@ components:
       - effective_to
       - id
       - route
+      - route_name
+      - trip_class
     FareRuleCreate:
       type: object
       properties:
@@ -3923,6 +5917,10 @@ components:
         route:
           type: string
           format: uuid
+        trip_class:
+          oneOf:
+          - $ref: '#/components/schemas/TripClassEnum'
+          - $ref: '#/components/schemas/BlankEnum'
         amount:
           type: string
           format: decimal
@@ -3949,14 +5947,28 @@ components:
           type: string
           format: uuid
           readOnly: true
+        route_name:
+          type: string
+          readOnly: true
         from_stop:
           type: string
           format: uuid
+          readOnly: true
+        from_stop_name:
+          type: string
           readOnly: true
         to_stop:
           type: string
           format: uuid
           readOnly: true
+        to_stop_name:
+          type: string
+          readOnly: true
+        trip_class:
+          readOnly: true
+          oneOf:
+          - $ref: '#/components/schemas/TripClassEnum'
+          - $ref: '#/components/schemas/BlankEnum'
         amount:
           type: string
           format: decimal
@@ -3982,9 +5994,13 @@ components:
       - effective_from
       - effective_to
       - from_stop
+      - from_stop_name
       - id
       - route
+      - route_name
       - to_stop
+      - to_stop_name
+      - trip_class
     FareSegmentRuleCreate:
       type: object
       properties:
@@ -4000,6 +6016,10 @@ components:
         to_stop:
           type: string
           format: uuid
+        trip_class:
+          oneOf:
+          - $ref: '#/components/schemas/TripClassEnum'
+          - $ref: '#/components/schemas/BlankEnum'
         amount:
           type: string
           format: decimal
@@ -4017,6 +6037,563 @@ components:
       type: object
       properties:
         status:
+          type: string
+      required:
+      - status
+    IdTypeEnum:
+      enum:
+      - nin
+      - passport
+      - drivers_licence
+      - voters_card
+      type: string
+      description: |-
+        * `nin` - National Identification Number (NIN)
+        * `passport` - International passport
+        * `drivers_licence` - Driver's licence
+        * `voters_card` - Voter's card
+    Incident:
+      type: object
+      description: |-
+        The staff list shape.
+
+        **No activity trail here.** A nested trail on a paginated list is one
+        extra query per row; the detail serializer below is where it belongs,
+        and a query-count test pins that.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        reference:
+          type: string
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+        category:
+          allOf:
+          - $ref: '#/components/schemas/CategoryEnum'
+          readOnly: true
+        severity:
+          allOf:
+          - $ref: '#/components/schemas/SeverityEnum'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/IncidentStatusEnum'
+          readOnly: true
+        source:
+          allOf:
+          - $ref: '#/components/schemas/SourceEc5Enum'
+          readOnly: true
+        trip:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        route:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        route_name:
+          type: string
+          readOnly: true
+          nullable: true
+        vehicle:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        vehicle_registration:
+          type: string
+          readOnly: true
+          nullable: true
+        driver:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        driver_name:
+          type: string
+          readOnly: true
+          nullable: true
+        stop:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        stop_name:
+          type: string
+          readOnly: true
+          nullable: true
+        device_reference:
+          type: string
+          readOnly: true
+        reported_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        reported_by_email:
+          type: string
+          readOnly: true
+          nullable: true
+        assigned_to:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        assigned_to_email:
+          type: string
+          readOnly: true
+          nullable: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        resolution_notes:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assigned_to
+      - assigned_to_email
+      - business
+      - category
+      - created_at
+      - description
+      - device_reference
+      - driver
+      - driver_name
+      - id
+      - latitude
+      - longitude
+      - reference
+      - reported_by
+      - reported_by_email
+      - resolution_notes
+      - resolved_at
+      - route
+      - route_name
+      - severity
+      - source
+      - status
+      - stop
+      - stop_name
+      - title
+      - trip
+      - updated_at
+      - vehicle
+      - vehicle_registration
+    IncidentActivity:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/IncidentActivityKindEnum'
+          readOnly: true
+        actor:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        actor_email:
+          type: string
+          readOnly: true
+          nullable: true
+        from_status:
+          type: string
+          readOnly: true
+        to_status:
+          type: string
+          readOnly: true
+        note:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actor
+      - actor_email
+      - created_at
+      - from_status
+      - id
+      - kind
+      - note
+      - to_status
+    IncidentActivityKindEnum:
+      enum:
+      - status_change
+      - assignment
+      - severity_change
+      - note
+      type: string
+      description: |-
+        * `status_change` - Status change
+        * `assignment` - Assignment
+        * `severity_change` - Severity change
+        * `note` - Note
+    IncidentCounts:
+      type: object
+      description: |-
+        Real since docs/specs/17-incidents.md. Shipped one spec early as a
+        hardcoded zero precisely so filling it in was additive rather than a
+        breaking envelope change for a frontend already reading this shape.
+
+        `open` is `apps.incidents.models.OPEN_STATUSES` — open, acknowledged
+        or investigating — not the literal `open` status alone.
+      properties:
+        open:
+          type: integer
+      required:
+      - open
+    IncidentCreate:
+      type: object
+      description: |-
+        `POST /incidents/` body. `source` is absent on purpose — it is
+        forced to `operator` in the service, never read from the request.
+      properties:
+        business:
+          type: string
+          format: uuid
+        title:
+          type: string
+          maxLength: 255
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+        description:
+          type: string
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        trip:
+          type: string
+          format: uuid
+          nullable: true
+        route:
+          type: string
+          format: uuid
+          nullable: true
+        vehicle:
+          type: string
+          format: uuid
+          nullable: true
+        driver:
+          type: string
+          format: uuid
+          nullable: true
+        stop:
+          type: string
+          format: uuid
+          nullable: true
+        device_reference:
+          type: string
+          maxLength: 64
+        assigned_to:
+          type: string
+          format: uuid
+          nullable: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+      required:
+      - business
+      - category
+      - title
+    IncidentDetail:
+      type: object
+      description: |-
+        The staff list shape.
+
+        **No activity trail here.** A nested trail on a paginated list is one
+        extra query per row; the detail serializer below is where it belongs,
+        and a query-count test pins that.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        reference:
+          type: string
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+        category:
+          allOf:
+          - $ref: '#/components/schemas/CategoryEnum'
+          readOnly: true
+        severity:
+          allOf:
+          - $ref: '#/components/schemas/SeverityEnum'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/IncidentStatusEnum'
+          readOnly: true
+        source:
+          allOf:
+          - $ref: '#/components/schemas/SourceEc5Enum'
+          readOnly: true
+        trip:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        route:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        route_name:
+          type: string
+          readOnly: true
+          nullable: true
+        vehicle:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        vehicle_registration:
+          type: string
+          readOnly: true
+          nullable: true
+        driver:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        driver_name:
+          type: string
+          readOnly: true
+          nullable: true
+        stop:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        stop_name:
+          type: string
+          readOnly: true
+          nullable: true
+        device_reference:
+          type: string
+          readOnly: true
+        reported_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        reported_by_email:
+          type: string
+          readOnly: true
+          nullable: true
+        assigned_to:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        assigned_to_email:
+          type: string
+          readOnly: true
+          nullable: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        resolved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        resolution_notes:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        activities:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentActivity'
+          readOnly: true
+      required:
+      - activities
+      - assigned_to
+      - assigned_to_email
+      - business
+      - category
+      - created_at
+      - description
+      - device_reference
+      - driver
+      - driver_name
+      - id
+      - latitude
+      - longitude
+      - reference
+      - reported_by
+      - reported_by_email
+      - resolution_notes
+      - resolved_at
+      - route
+      - route_name
+      - severity
+      - source
+      - status
+      - stop
+      - stop_name
+      - title
+      - trip
+      - updated_at
+      - vehicle
+      - vehicle_registration
+    IncidentNote:
+      type: object
+      description: '`POST /incidents/{id}/notes/` body.'
+      properties:
+        note:
+          type: string
+      required:
+      - note
+    IncidentReport:
+      type: object
+      description: |-
+        `POST /incidents/report/` body — the passenger entry point.
+
+        Narrower than the operator's on purpose. No `severity` (a passenger
+        declaring their own report critical would be a one-tap way to ring
+        every operator's bell), no `driver`, no `assigned_to`. `title` is
+        optional and derived from the category when absent.
+
+        `business` may be omitted **only** when a `trip` is given, since the
+        trip names it. A report with neither has nothing to file it against.
+      properties:
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+        description:
+          type: string
+        business:
+          type: string
+          format: uuid
+          nullable: true
+        title:
+          type: string
+          maxLength: 255
+        trip:
+          type: string
+          format: uuid
+          nullable: true
+        route:
+          type: string
+          format: uuid
+          nullable: true
+        vehicle:
+          type: string
+          format: uuid
+          nullable: true
+        stop:
+          type: string
+          format: uuid
+          nullable: true
+        device_reference:
+          type: string
+          maxLength: 64
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+      required:
+      - category
+      - description
+    IncidentStatusEnum:
+      enum:
+      - open
+      - acknowledged
+      - investigating
+      - resolved
+      - closed
+      type: string
+      description: |-
+        * `open` - Open
+        * `acknowledged` - Acknowledged
+        * `investigating` - Investigating
+        * `resolved` - Resolved
+        * `closed` - Closed
+    IncidentTransition:
+      type: object
+      description: '`POST /incidents/{id}/transition/` body.'
+      properties:
+        status:
+          $ref: '#/components/schemas/IncidentStatusEnum'
+        note:
           type: string
       required:
       - status
@@ -4135,11 +6712,27 @@ components:
       - decision
     KybDocument:
       type: object
+      description: |-
+        `director` is a plain UUIDField resolved in `validate_director`
+        below, **not** a `PrimaryKeyRelatedField(queryset=...)`.
+
+        That distinction is load-bearing: DRF's `SerializerMetaclass`
+        collects declared fields at class-body execution time, so a
+        `queryset=Director.objects.all()` here would be evaluated once at
+        import — before any request has set a tenancy contextvar — and
+        freeze to an empty queryset forever, rejecting every real director.
+        `apps.identity`'s `Role` field hit exactly this in Phase 1 Slice 4;
+        resolving the FK inside a `validate_<field>()` method is the
+        established fix.
       properties:
         id:
           type: string
           format: uuid
           readOnly: true
+        director:
+          type: string
+          format: uuid
+          nullable: true
         document_type:
           $ref: '#/components/schemas/DocumentTypeEnum'
         file:
@@ -4266,6 +6859,284 @@ components:
       - id
       - passenger
       - psp_provider
+    LiveEta:
+      type: object
+      properties:
+        next_stop_at:
+          type: string
+          format: date-time
+          nullable: true
+        final_stop_at:
+          type: string
+          format: date-time
+        method:
+          type: string
+        confidence:
+          type: string
+      required:
+      - confidence
+      - final_stop_at
+      - method
+      - next_stop_at
+    LiveOccupancy:
+      type: object
+      properties:
+        boarded:
+          type: integer
+        capacity:
+          type: integer
+          nullable: true
+      required:
+      - boarded
+      - capacity
+    LivePosition:
+      type: object
+      properties:
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+        recorded_at:
+          type: string
+          format: date-time
+        source:
+          $ref: '#/components/schemas/TelemetrySourceEnum'
+        staleness_seconds:
+          type: integer
+      required:
+      - latitude
+      - longitude
+      - recorded_at
+      - source
+      - staleness_seconds
+    LiveProgress:
+      type: object
+      properties:
+        last_stop:
+          type: string
+        next_stop:
+          type: string
+          nullable: true
+        stops_completed:
+          type: integer
+        stops_total:
+          type: integer
+        method:
+          type: string
+      required:
+      - last_stop
+      - method
+      - next_stop
+      - stops_completed
+      - stops_total
+    LivePunctuality:
+      type: object
+      properties:
+        delay_minutes:
+          type: integer
+          nullable: true
+      required:
+      - delay_minutes
+    LiveTrip:
+      type: object
+      description: |-
+        Mirrors `apps.booking.serializers.ManifestTripSerializer`'s shape
+        exactly (both are built from `apps.booking.manifest.trip_summary`) —
+        kept as its own copy per this codebase's small-per-app-serializer
+        convention (see `apps.fleet.serializers.FleetListQuerySerializer`'s
+        own docstring) rather than a cross-app import.
+      properties:
+        id:
+          type: string
+          format: uuid
+        route:
+          type: string
+        trip_class:
+          type: string
+        service_date:
+          type: string
+          format: date
+        scheduled_departure_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        booking_mode:
+          type: string
+        fare_collection_mode:
+          type: string
+        vehicle:
+          type: string
+          nullable: true
+        driver:
+          type: string
+          nullable: true
+      required:
+      - booking_mode
+      - driver
+      - fare_collection_mode
+      - id
+      - route
+      - scheduled_departure_at
+      - service_date
+      - status
+      - trip_class
+      - vehicle
+    ManifestJourneyRow:
+      type: object
+      properties:
+        journey_id:
+          type: string
+          format: uuid
+        passenger_name:
+          type: string
+        board_stop:
+          type: string
+        alight_stop:
+          type: string
+          nullable: true
+        journey_status:
+          type: string
+        fare:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+        boarded_at:
+          type: string
+          format: date-time
+        alighted_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - alight_stop
+      - alighted_at
+      - board_stop
+      - boarded_at
+      - currency
+      - fare
+      - journey_id
+      - journey_status
+      - passenger_name
+    ManifestKindEnum:
+      enum:
+      - prepaid
+      - pay_as_you_go
+      type: string
+      description: |-
+        * `prepaid` - Prepaid
+        * `pay_as_you_go` - Pay as you go
+    ManifestPrepaidRow:
+      type: object
+      properties:
+        ticket_id:
+          type: string
+          format: uuid
+          nullable: true
+        booking_id:
+          type: string
+          format: uuid
+        booking_reference:
+          type: string
+        passenger_name:
+          type: string
+        seat_number:
+          type: string
+          nullable: true
+        ticket_status:
+          type: string
+          nullable: true
+        booking_status:
+          type: string
+        fare:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+        boarded_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_cancelled:
+          type: boolean
+      required:
+      - boarded_at
+      - booking_id
+      - booking_reference
+      - booking_status
+      - currency
+      - fare
+      - is_cancelled
+      - passenger_name
+      - seat_number
+      - ticket_id
+      - ticket_status
+    ManifestRow:
+      oneOf:
+      - $ref: '#/components/schemas/ManifestPrepaidRow'
+      - $ref: '#/components/schemas/ManifestJourneyRow'
+    ManifestTotals:
+      type: object
+      properties:
+        passengers:
+          type: integer
+        boarded:
+          type: integer
+        capacity:
+          type: integer
+          nullable: true
+      required:
+      - boarded
+      - capacity
+      - passengers
+    ManifestTrip:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        route:
+          type: string
+        trip_class:
+          type: string
+        service_date:
+          type: string
+          format: date
+        scheduled_departure_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        booking_mode:
+          type: string
+        fare_collection_mode:
+          type: string
+        vehicle:
+          type: string
+          nullable: true
+        driver:
+          type: string
+          nullable: true
+      required:
+      - booking_mode
+      - driver
+      - fare_collection_mode
+      - id
+      - route
+      - scheduled_departure_at
+      - service_date
+      - status
+      - trip_class
+      - vehicle
     Me:
       type: object
       description: |-
@@ -4329,6 +7200,40 @@ components:
       - last_name
       - permissions
       - role_name
+    MoneyEntry:
+      type: object
+      description: |-
+        One currency's totals. **Always a list, never a scalar** — a
+        Client can run an NGN and a BWP Business at once, and adding those
+        two numbers produces a figure that is not money.
+      properties:
+        currency:
+          type: string
+        revenue:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        gross:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        commission:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        transaction_volume:
+          type: integer
+        average_ticket_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+      required:
+      - average_ticket_value
+      - commission
+      - currency
+      - gross
+      - revenue
+      - transaction_volume
     Notification:
       type: object
       properties:
@@ -4387,6 +7292,8 @@ components:
       - ticket_unused_reminder
       - kyc_document_submitted
       - kyb_document_submitted
+      - incident_reported
+      - incident_escalated
       type: string
       description: |-
         * `license_expiring` - Driver license expiring
@@ -4395,11 +7302,36 @@ components:
         * `ticket_unused_reminder` - Unused ticket reminder
         * `kyc_document_submitted` - New KYC document submitted
         * `kyb_document_submitted` - New KYB document submitted
+        * `incident_reported` - Incident reported
+        * `incident_escalated` - Incident escalated
     NumberingSchemeEnum:
       enum:
       - row_letter
       type: string
       description: '* `row_letter` - row_letter'
+    PaginatedAssignableUserList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssignableUser'
     PaginatedBookingList:
       type: object
       required:
@@ -4515,6 +7447,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ClientKycQueue'
+    PaginatedDirectorList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Director'
     PaginatedDriverList:
       type: object
       required:
@@ -4607,6 +7562,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FareSegmentRule'
+    PaginatedIncidentList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Incident'
     PaginatedJournalEntryList:
       type: object
       required:
@@ -4676,6 +7654,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Notification'
+    PaginatedPassengerIncidentList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PassengerIncident'
     PaginatedPaymentIntentList:
       type: object
       required:
@@ -4883,6 +7884,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TapCredential'
+    PaginatedTelemetryDeviceList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TelemetryDevice'
     PaginatedTicketList:
       type: object
       required:
@@ -4975,6 +7999,84 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/VehicleType'
+    Passenger:
+      type: object
+      description: |-
+        What a counter agent is allowed to see about a passenger they
+        just resolved: enough to confirm the right person and to book for
+        them, and no more.
+
+        `email` is masked (`apps.identity.services.mask_email`) — the agent
+        typed the address to get here, so this withholds nothing they did
+        not already have, while keeping a full address off a screen a queue
+        of other passengers can read.
+      properties:
+        id:
+          type: string
+          format: uuid
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+          description: Masked — e.g. `a••••••@example.com`.
+      required:
+      - email
+      - first_name
+      - id
+      - last_name
+    PassengerIncident:
+      type: object
+      description: |-
+        `GET /incidents/mine/`.
+
+        A **separate class**, not a field-exclusion list on the shared one.
+        An exclusion list is one careless edit away from leaking staff
+        discussion of a safety report to the passenger who filed it; a
+        separate class can only leak a field someone deliberately adds.
+        `assigned_to`, `resolution_notes` and the trail are all absent, and
+        a test asserts their absence by key rather than by shape.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        reference:
+          type: string
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+        category:
+          allOf:
+          - $ref: '#/components/schemas/CategoryEnum'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/IncidentStatusEnum'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        resolved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+      required:
+      - category
+      - created_at
+      - description
+      - id
+      - reference
+      - resolved_at
+      - status
+      - title
     PatchedBusiness:
       type: object
       properties:
@@ -4988,13 +8090,18 @@ components:
           type: string
           maxLength: 255
         currency:
-          type: string
-          maxLength: 8
+          $ref: '#/components/schemas/CurrencyEnum'
         timezone:
           type: string
           maxLength: 64
         booking_mode_default:
           $ref: '#/components/schemas/BookingModeDefaultEnum'
+        fare_collection_mode:
+          $ref: '#/components/schemas/ManifestKindEnum'
+        seat_selection_enabled:
+          type: boolean
+        capacity_enforced:
+          type: boolean
         fare_pricing_mode:
           $ref: '#/components/schemas/FarePricingModeEnum'
         is_active:
@@ -5031,6 +8138,36 @@ components:
         seat_hold_minutes:
           type: integer
           minimum: 1
+    PatchedDirector:
+      type: object
+      description: |-
+        docs/specs/11-kyb-directors.md. `business` is read-only — it comes
+        from the URL (`/businesses/{business_id}/directors/`), never the
+        body, so a director cannot be created against a Business the caller
+        didn't address.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        full_name:
+          type: string
+          maxLength: 255
+        id_type:
+          $ref: '#/components/schemas/IdTypeEnum'
+        id_number:
+          type: string
+          maxLength: 50
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
     PatchedDriver:
       type: object
       properties:
@@ -5090,6 +8227,66 @@ components:
         effective_from:
           type: string
           format: date-time
+    PatchedIncidentUpdate:
+      type: object
+      description: |-
+        `PATCH /incidents/{id}/`.
+
+        `status` is **not declared here**, and that is not the whole
+        enforcement: an undeclared field would simply be dropped, leaving an
+        operator believing they had closed an incident they had not.
+        `apps.incidents.services.update_incident` is handed the raw submitted
+        key set and refuses `status` by name with a 400 that says where to go
+        instead.
+      properties:
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        trip:
+          type: string
+          format: uuid
+          nullable: true
+        route:
+          type: string
+          format: uuid
+          nullable: true
+        vehicle:
+          type: string
+          format: uuid
+          nullable: true
+        driver:
+          type: string
+          format: uuid
+          nullable: true
+        stop:
+          type: string
+          format: uuid
+          nullable: true
+        device_reference:
+          type: string
+          maxLength: 64
+        assigned_to:
+          type: string
+          format: uuid
+          nullable: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        resolution_notes:
+          type: string
     PatchedPaystackAccount:
       type: object
       properties:
@@ -5141,8 +8338,24 @@ components:
           maxLength: 32
         description:
           type: string
-        is_active:
-          type: boolean
+        available_trip_classes:
+          type: array
+          items:
+            type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RouteStatusEnum'
+          readOnly: true
+        distance_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,5}(?:\.\d{0,2})?$
+          nullable: true
+        estimated_duration_minutes:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
         stops:
           type: array
           items:
@@ -5163,6 +8376,9 @@ components:
           type: string
           format: uuid
           readOnly: true
+        route_name:
+          type: string
+          readOnly: true
         business:
           type: string
           format: uuid
@@ -5178,6 +8394,8 @@ components:
           type: string
           format: date
           nullable: true
+        trip_class:
+          $ref: '#/components/schemas/TripClassEnum'
         is_active:
           type: boolean
         created_at:
@@ -5238,6 +8456,19 @@ components:
       properties:
         is_active:
           type: boolean
+    PatchedTelemetryDeviceUpdate:
+      type: object
+      description: |-
+        PATCH /telemetry/devices/{id}/ — revoke (`is_active=False`) and/or
+        reassign (`vehicle=`, nullable to unassign). Both optional so a
+        caller can send just the one field they mean to change.
+      properties:
+        is_active:
+          type: boolean
+        vehicle:
+          type: string
+          format: uuid
+          nullable: true
     PatchedTripAssignment:
       type: object
       description: |-
@@ -5307,6 +8538,8 @@ components:
           type: integer
           maximum: 2147483647
           minimum: 0
+        trip_class:
+          $ref: '#/components/schemas/TripClassEnum'
         is_active:
           type: boolean
         created_at:
@@ -5357,14 +8590,22 @@ components:
       type: object
       description: |-
         POST /payments/ body — exactly one of `booking_id` (pay for a
-        booking via a fresh Paystack charge) or `wallet_topup` (fund the
-        passenger's wallet with no Booking attached). A blend of the two
-        isn't supported — see docs/specs/7-passenger-wallet.md's own
-        non-goals.
+        booking) or `wallet_topup` (fund the passenger's wallet with no
+        Booking attached). `use_wallet_balance` is only meaningful
+        alongside `booking_id`: when set, the wallet's current balance is
+        applied first and only the remainder (if any) is charged via
+        Paystack — see `apps.payments.services.initiate_payment_with_wallet`.
+        This revisits docs/specs/7-passenger-wallet.md's original "a blend
+        of the two isn't supported" non-goal; see that spec's own
+        Implementation note for why the reconciliation risk it named no
+        longer blocks this.
       properties:
         booking_id:
           type: string
           format: uuid
+        use_wallet_balance:
+          type: boolean
+          default: false
         wallet_topup:
           $ref: '#/components/schemas/WalletTopupInitiate'
     PaymentInitiateResponse:
@@ -5426,6 +8667,11 @@ components:
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
           readOnly: true
+        wallet_component_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
         currency:
           type: string
           readOnly: true
@@ -5440,6 +8686,9 @@ components:
           type: string
           readOnly: true
         psp_authorization_url:
+          type: string
+          readOnly: true
+        channel:
           type: string
           readOnly: true
         succeeded_at:
@@ -5463,6 +8712,7 @@ components:
       - amount
       - booking
       - business
+      - channel
       - created_at
       - currency
       - failed_at
@@ -5476,6 +8726,64 @@ components:
       - status
       - succeeded_at
       - wallet_business
+      - wallet_component_amount
+    PaymentSummary:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/Period'
+        counts:
+          $ref: '#/components/schemas/PaymentSummaryCounts'
+        money:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentSummaryMoney'
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChannelBreakdown'
+      required:
+      - channels
+      - counts
+      - money
+      - period
+    PaymentSummaryCounts:
+      type: object
+      properties:
+        total:
+          type: integer
+        succeeded:
+          type: integer
+        pending:
+          type: integer
+        failed:
+          type: integer
+        cancelled:
+          type: integer
+        requires_manual_refund:
+          type: integer
+      required:
+      - cancelled
+      - failed
+      - pending
+      - requires_manual_refund
+      - succeeded
+      - total
+    PaymentSummaryMoney:
+      type: object
+      properties:
+        currency:
+          type: string
+        collected:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        transaction_volume:
+          type: integer
+      required:
+      - collected
+      - currency
+      - transaction_volume
     PaystackAccount:
       type: object
       properties:
@@ -5505,6 +8813,28 @@ components:
       required:
       - id
       - verified_at
+    Period:
+      type: object
+      description: |-
+        Echoed by every endpoint. Without it a screen cannot tell "no
+        revenue in this period" from "no data at all" — the distinction
+        spec 10's availability envelope exists for, applied here.
+      properties:
+        to:
+          type: string
+          format: date
+        timezone:
+          type: string
+        granularity:
+          type: string
+        from:
+          type: string
+          format: date
+      required:
+      - from
+      - granularity
+      - timezone
+      - to
     Readiness:
       type: object
       properties:
@@ -5514,6 +8844,119 @@ components:
           type: string
       required:
       - status
+    RecentIncident:
+      type: object
+      description: |-
+        Was `ListField(child=DictField())` while the list was always
+        empty, which generated as an untyped record in `schema.ts`. Declared
+        properly now that it carries rows the operator UI has to render.
+      properties:
+        id:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        severity:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - category
+      - created_at
+      - id
+      - reference
+      - severity
+      - status
+      - title
+    RecentTransaction:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        business:
+          type: string
+          format: uuid
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        currency:
+          type: string
+        status:
+          type: string
+        channel:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - amount
+      - business
+      - channel
+      - created_at
+      - currency
+      - id
+      - status
+    RevenueReport:
+      type: object
+      properties:
+        period:
+          $ref: '#/components/schemas/Period'
+        money:
+          type: array
+          items:
+            $ref: '#/components/schemas/MoneyEntry'
+        trend:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevenueTrendPoint'
+        by_route:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteRevenue'
+        by_trip_class:
+          type: array
+          items:
+            $ref: '#/components/schemas/TripClassRevenue'
+        by_channel:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChannelBreakdown'
+      required:
+      - by_channel
+      - by_route
+      - by_trip_class
+      - money
+      - period
+      - trend
+    RevenueTrendPoint:
+      type: object
+      description: |-
+        Only buckets with data appear. A zero-revenue day and a day
+        before the Business existed must not render identically, so the
+        client draws gaps rather than zeros.
+      properties:
+        date:
+          type: string
+          format: date
+        currency:
+          type: string
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+      required:
+      - amount
+      - currency
+      - date
     RevokedTicketsResponse:
       type: object
       description: Schema-only shape for `GET /ticketing/revoked/`.
@@ -5568,8 +9011,24 @@ components:
           maxLength: 32
         description:
           type: string
-        is_active:
-          type: boolean
+        available_trip_classes:
+          type: array
+          items:
+            type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RouteStatusEnum'
+          readOnly: true
+        distance_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,5}(?:\.\d{0,2})?$
+          nullable: true
+        estimated_duration_minutes:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
         stops:
           type: array
           items:
@@ -5585,6 +9044,7 @@ components:
       - created_at
       - id
       - name
+      - status
       - stops
     RouteBrowse:
       type: object
@@ -5620,8 +9080,24 @@ components:
           maxLength: 32
         description:
           type: string
-        is_active:
-          type: boolean
+        available_trip_classes:
+          type: array
+          items:
+            type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RouteStatusEnum'
+          readOnly: true
+        distance_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,5}(?:\.\d{0,2})?$
+          nullable: true
+        estimated_duration_minutes:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
         stops:
           type: array
           items:
@@ -5636,6 +9112,7 @@ components:
       - created_at
       - id
       - name
+      - status
       - stops
     RouteBusiness:
       type: object
@@ -5653,6 +9130,16 @@ components:
       required:
       - id
       - name
+    RouteCounts:
+      type: object
+      properties:
+        active:
+          type: integer
+        inactive:
+          type: integer
+      required:
+      - active
+      - inactive
     RouteCreate:
       type: object
       properties:
@@ -5669,9 +9156,158 @@ components:
         description:
           type: string
           default: ''
+        available_trip_classes:
+          type: array
+          items:
+            type: string
       required:
       - business
       - name
+    RouteDetail:
+      type: object
+      description: |-
+        GET /routes/{id}/ — docs/specs/19-route-lifecycle.md. Adds the
+        counts and fare summary an operator needs to judge a single route,
+        which the list/PATCH shape doesn't carry on every row.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        code:
+          type: string
+          maxLength: 32
+        description:
+          type: string
+        available_trip_classes:
+          type: array
+          items:
+            type: string
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RouteStatusEnum'
+          readOnly: true
+        distance_km:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,5}(?:\.\d{0,2})?$
+          nullable: true
+        estimated_duration_minutes:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+        stops:
+          type: array
+          items:
+            $ref: '#/components/schemas/RouteStopEntry'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        stop_count:
+          type: integer
+          readOnly: true
+        schedule_count:
+          type: integer
+          readOnly: true
+        current_fare_summary:
+          allOf:
+          - $ref: '#/components/schemas/RouteFareSummary'
+          readOnly: true
+      required:
+      - business
+      - code
+      - created_at
+      - current_fare_summary
+      - id
+      - name
+      - schedule_count
+      - status
+      - stop_count
+      - stops
+    RouteFareSummary:
+      type: object
+      description: |-
+        Schema-only shape for `RouteDetailSerializer.get_current_fare_summary`
+        — mirrors `RouteBusinessSerializer`'s own {id, name} precedent for why
+        this needs a real Serializer: without one drf-spectacular infers
+        `Any`. Deliberately does not reduce to a single amount: a route can
+        have several currently-effective rules at once (one per trip class,
+        or one per segment), and picking one to call "the" fare would either
+        be arbitrary or silently wrong the moment a Business prices more than
+        one class. `configured` is what the `-> active` guard actually
+        checks; `rule_count` is context, not a promise about what any one
+        journey costs.
+      properties:
+        pricing_mode:
+          $ref: '#/components/schemas/FarePricingModeEnum'
+        configured:
+          type: boolean
+        rule_count:
+          type: integer
+      required:
+      - configured
+      - pricing_mode
+      - rule_count
+    RouteRevenue:
+      type: object
+      properties:
+        route:
+          type: string
+        currency:
+          type: string
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        transaction_volume:
+          type: integer
+      required:
+      - amount
+      - currency
+      - route
+      - transaction_volume
+    RouteStatus:
+      type: object
+      description: |-
+        POST /routes/{id}/status/ body — mirrors
+        apps.scheduling.serializers.TripStatusSerializer's `{status, reason}`
+        shape so operators and code meet the same pattern twice rather than
+        two different ones. Unlike that serializer, transition legality is
+        **not** checked here: docs/specs/19-route-lifecycle.md makes
+        apps.network.services.set_route_status the sole owner of that,
+        because its guards need database queries a serializer shouldn't run.
+        `reason` is accepted for audit-trail symmetry with the Trip endpoint
+        (useful on an archive, say) but no Route transition currently
+        requires one.
+      properties:
+        status:
+          $ref: '#/components/schemas/RouteStatusEnum'
+        reason:
+          type: string
+      required:
+      - status
+    RouteStatusEnum:
+      enum:
+      - draft
+      - active
+      - inactive
+      - archived
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `active` - Active
+        * `inactive` - Inactive
+        * `archived` - Archived
     RouteStopEntry:
       type: object
       description: |-
@@ -5748,6 +9384,9 @@ components:
           type: string
           format: uuid
           readOnly: true
+        route_name:
+          type: string
+          readOnly: true
         business:
           type: string
           format: uuid
@@ -5763,6 +9402,8 @@ components:
           type: string
           format: date
           nullable: true
+        trip_class:
+          $ref: '#/components/schemas/TripClassEnum'
         is_active:
           type: boolean
         created_at:
@@ -5776,6 +9417,7 @@ components:
       - effective_from
       - id
       - route
+      - route_name
     ScheduleCreate:
       type: object
       properties:
@@ -5796,6 +9438,8 @@ components:
           type: string
           format: date
           nullable: true
+        trip_class:
+          $ref: '#/components/schemas/TripClassEnum'
       required:
       - days_of_week
       - departure_time
@@ -5962,6 +9606,18 @@ components:
       - business
       - period_end
       - period_start
+    SeverityEnum:
+      enum:
+      - low
+      - medium
+      - high
+      - critical
+      type: string
+      description: |-
+        * `low` - Low
+        * `medium` - Medium
+        * `high` - High
+        * `critical` - Critical
     SigningKeyEntry:
       type: object
       properties:
@@ -5985,6 +9641,14 @@ components:
             $ref: '#/components/schemas/SigningKeyEntry'
       required:
       - keys
+    SourceEc5Enum:
+      enum:
+      - operator
+      - passenger
+      type: string
+      description: |-
+        * `operator` - Operator
+        * `passenger` - Passenger
     Staff:
       type: object
       properties:
@@ -6014,6 +9678,97 @@ components:
       - id
       - last_name
       - role
+    StaffBooking:
+      type: object
+      description: |-
+        `POST /bookings/staff/`'s response: the booking, and separately
+        what happened to the money.
+
+        Two top-level keys rather than a `payment_status` field on the
+        booking. The booking is a `Booking` and belongs to every other
+        endpoint that returns one; the payment outcome is about *this
+        request*. Flattening them would put a field on the shared shape that
+        only one endpoint ever fills in.
+      properties:
+        booking:
+          $ref: '#/components/schemas/Booking'
+        payment:
+          $ref: '#/components/schemas/StaffBookingPayment'
+      required:
+      - booking
+      - payment
+    StaffBookingCreate:
+      type: object
+      description: |-
+        POST /bookings/staff/ body — docs/specs/18-manifest-and-staff-booking.md
+        slice 2.
+
+        Everything about *what may be booked* is inherited unchanged, which
+        is the point: a pay-as-you-go trip is refused, an open-seating trip
+        wants `passenger_count` rather than `seats`, stops must be on the
+        route and in order. A counter agent gets exactly the rules a
+        passenger gets, because they are booking the same thing.
+
+        Two fields are added — **for whom**, and **who pays now**.
+      properties:
+        trip:
+          type: string
+          format: uuid
+        seats:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingSeatRequest'
+        passenger_count:
+          type: integer
+          minimum: 1
+        from_stop:
+          type: string
+          format: uuid
+        to_stop:
+          type: string
+          format: uuid
+        passenger:
+          type: string
+          format: uuid
+          description: The passenger's id, from `GET /passengers/lookup/`.
+        pay_from_wallet:
+          type: boolean
+          default: false
+          description: Settle immediately from the passenger's wallet. A shortfall
+            leaves the booking `pending_payment` with the seats still held, and is
+            reported in the response's `payment` rather than raised.
+      required:
+      - passenger
+      - trip
+    StaffBookingPayment:
+      type: object
+      description: |-
+        What happened to the money — always present, never left for the
+        caller to infer from the booking's status.
+      properties:
+        status:
+          $ref: '#/components/schemas/StaffBookingPaymentStatusEnum'
+        reason:
+          type: string
+          description: Empty unless something needs explaining.
+        payment_intent:
+          type: string
+          format: uuid
+          nullable: true
+      required:
+      - payment_intent
+      - reason
+      - status
+    StaffBookingPaymentStatusEnum:
+      enum:
+      - not_attempted
+      - succeeded
+      - failed
+      type: string
+      description: |-
+        * `not_attempted` - Not attempted
+        * `succeeded` - Succeeded
+        * `failed` - Failed
     StaffInvitationAccept:
       type: object
       properties:
@@ -6085,6 +9840,20 @@ components:
         * `open` - Open
         * `closed` - Closed
         * `needs_review` - Needs review
+    Status53fEnum:
+      enum:
+      - pending_payment
+      - paid
+      - completed
+      - cancelled
+      - expired
+      type: string
+      description: |-
+        * `pending_payment` - Pending payment
+        * `paid` - Paid
+        * `completed` - Completed
+        * `cancelled` - Cancelled
+        * `expired` - Expired
     Status61dEnum:
       enum:
       - scheduled
@@ -6322,6 +10091,117 @@ components:
       description: |-
         * `board` - Board
         * `alight` - Alight
+    TelemetryDevice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        label:
+          type: string
+          readOnly: true
+        vehicle:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        is_active:
+          type: boolean
+          readOnly: true
+        last_seen_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - created_at
+      - id
+      - is_active
+      - label
+      - last_seen_at
+      - vehicle
+    TelemetryDeviceCreate:
+      type: object
+      description: |-
+        POST /telemetry/devices/ body — request validation only. The view
+        calls `issue_device()` itself and builds the response from
+        `TelemetryDeviceIssuedSerializer`, the same split
+        `apps.tapngo.views.TapCredentialIssueView` uses, because the
+        response needs `token` from context, not from an instance this
+        serializer's own `create()` would produce.
+      properties:
+        business:
+          type: string
+          format: uuid
+        label:
+          type: string
+          maxLength: 100
+        vehicle:
+          type: string
+          format: uuid
+          nullable: true
+      required:
+      - business
+      - label
+    TelemetryDeviceIssued:
+      type: object
+      description: |-
+        Response shape for POST /telemetry/devices/ only — the one place
+        `token` is ever exposed. Not a model field (only `token_hash` is),
+        so it's sourced from serializer context rather than the instance.
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        token:
+          type: string
+          readOnly: true
+        business:
+          type: string
+          format: uuid
+          readOnly: true
+        label:
+          type: string
+          readOnly: true
+        vehicle:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        is_active:
+          type: boolean
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - business
+      - created_at
+      - id
+      - is_active
+      - label
+      - token
+      - vehicle
+    TelemetrySourceEnum:
+      enum:
+      - device
+      - simulated
+      type: string
+      description: |-
+        * `device` - Device
+        * `simulated` - Simulated
     Ticket:
       type: object
       properties:
@@ -6349,6 +10229,9 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+        trip_class:
+          type: string
+          readOnly: true
       required:
       - boarded_at
       - expires_at
@@ -6356,6 +10239,7 @@ components:
       - issued_at
       - signed_payload
       - status
+      - trip_class
     TicketStatusEnum:
       enum:
       - issued
@@ -6374,12 +10258,19 @@ components:
         POST /trips/{trip_id}/tickets/validate/ body — mirrors
         `apps.tapngo.serializers.TapRecordSerializer`'s minimal shape; no FK
         resolution needed here, since everything is resolved from the
-        decoded payload inside `apps.ticketing.services.validate_ticket`.
+        decoded payload (or the credential token) inside
+        `apps.ticketing.services`.
+
+        Exactly one of `payload` and `token` — the two fare media that can
+        board the same Ticket (docs/specs/10-booking-modes.md). Both are
+        optional in the schema and the pairing is enforced here, because
+        DRF has no native "exactly one of" declaration and a required field
+        per media would make each impossible to send without the other.
       properties:
         payload:
           type: string
-      required:
-      - payload
+        token:
+          type: string
     TicketValidationResult:
       type: object
       description: |-
@@ -6393,6 +10284,7 @@ components:
           type: string
         seat_number:
           type: string
+          nullable: true
         from_stop:
           type: string
         to_stop:
@@ -6400,7 +10292,10 @@ components:
         trip_departure_at:
           type: string
           format: date-time
+        booking_status:
+          $ref: '#/components/schemas/BookingStatusEnum'
       required:
+      - booking_status
       - from_stop
       - passenger_name
       - seat_number
@@ -6476,6 +10371,16 @@ components:
           format: date-time
           readOnly: true
           nullable: true
+        actual_departure_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        actual_arrival_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
         vehicle:
           allOf:
           - $ref: '#/components/schemas/TripVehicle'
@@ -6490,6 +10395,14 @@ components:
           allOf:
           - $ref: '#/components/schemas/BookingModeEnum'
           readOnly: true
+        fare_collection_mode:
+          allOf:
+          - $ref: '#/components/schemas/ManifestKindEnum'
+          readOnly: true
+        trip_class:
+          allOf:
+          - $ref: '#/components/schemas/TripClassEnum'
+          readOnly: true
         cancellation_reason:
           type: string
           readOnly: true
@@ -6503,12 +10416,15 @@ components:
           format: date-time
           readOnly: true
       required:
+      - actual_arrival_at
+      - actual_departure_at
       - booking_mode
       - business
       - cancellation_reason
       - compliance_warnings
       - created_at
       - driver
+      - fare_collection_mode
       - id
       - route
       - schedule
@@ -6516,7 +10432,126 @@ components:
       - service_date
       - status
       - status_changed_at
+      - trip_class
       - vehicle
+    TripBookability:
+      type: object
+      description: |-
+        The `GET /trips/{id}/availability/` envelope —
+        docs/specs/10-booking-modes.md.
+
+        Replaced a bare array of seat rows. The array could not distinguish
+        "no vehicle assigned yet" from "every seat taken" — both were `[]` —
+        so the customer app rendered a departure nobody had assigned a bus
+        to as "sold out". `status` is the field that separates them.
+
+        `seats` is always `[]` for open seating, and `capacity_remaining` is
+        always `null` for reservation mode; each mode fills the half that
+        means something for it rather than the API returning two shapes.
+      properties:
+        booking_mode:
+          type: string
+        trip_class:
+          type: string
+        status:
+          type: string
+        seats:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeatAvailability'
+        capacity_remaining:
+          type: integer
+          nullable: true
+        seat_selection_enabled:
+          type: boolean
+      required:
+      - booking_mode
+      - capacity_remaining
+      - seat_selection_enabled
+      - seats
+      - status
+      - trip_class
+    TripCapacity:
+      type: object
+      properties:
+        total_seats:
+          type: integer
+          nullable: true
+        seats_sold:
+          type: integer
+        occupancy_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,3})?$
+          nullable: true
+      required:
+      - occupancy_rate
+      - seats_sold
+      - total_seats
+    TripClass:
+      type: object
+      description: |-
+        POST /trips/{id}/class/ body — docs/specs/15-trip-classes.md.
+
+        Its own endpoint rather than a field on the assignment PATCH: that
+        body's `vehicle` and `driver` both default to None and therefore
+        *clear* on omission, so a class edit that forgot to resend the
+        vehicle would silently unassign it. Mirrors TripStatusSerializer's
+        shape, which is the other guarded single-field Trip mutation.
+      properties:
+        trip_class:
+          $ref: '#/components/schemas/TripClassEnum'
+      required:
+      - trip_class
+    TripClassEnum:
+      enum:
+      - premium
+      - exclusive
+      - standard
+      - mini
+      type: string
+      description: |-
+        * `premium` - Premium
+        * `exclusive` - Exclusive
+        * `standard` - Standard
+        * `mini` - Mini
+    TripClassRevenue:
+      type: object
+      properties:
+        trip_class:
+          type: string
+        currency:
+          type: string
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        transaction_volume:
+          type: integer
+      required:
+      - amount
+      - currency
+      - transaction_volume
+      - trip_class
+    TripCounts:
+      type: object
+      properties:
+        scheduled:
+          type: integer
+        in_progress:
+          type: integer
+        completed:
+          type: integer
+        cancelled:
+          type: integer
+        completed_today:
+          type: integer
+      required:
+      - cancelled
+      - completed
+      - completed_today
+      - in_progress
+      - scheduled
     TripCreate:
       type: object
       description: |-
@@ -6540,6 +10575,8 @@ components:
           type: string
           format: uuid
           nullable: true
+        trip_class:
+          $ref: '#/components/schemas/TripClassEnum'
       required:
       - departure_time
       - route
@@ -6567,6 +10604,182 @@ components:
       required:
       - amount
       - currency
+    TripLiveEnvelope:
+      type: object
+      description: |-
+        One `GET /trips/live/` row, and the whole body of
+        `GET /trips/{id}/live/`. `position`/`progress`/`eta` are `None`
+        together whenever the trip has no telemetry at all — see
+        `apps.telemetry.live.trip_live_envelope`.
+      properties:
+        trip:
+          $ref: '#/components/schemas/LiveTrip'
+        position:
+          allOf:
+          - $ref: '#/components/schemas/LivePosition'
+          nullable: true
+        progress:
+          allOf:
+          - $ref: '#/components/schemas/LiveProgress'
+          nullable: true
+        eta:
+          allOf:
+          - $ref: '#/components/schemas/LiveEta'
+          nullable: true
+        punctuality:
+          $ref: '#/components/schemas/LivePunctuality'
+        occupancy:
+          $ref: '#/components/schemas/LiveOccupancy'
+        incidents_open:
+          type: integer
+      required:
+      - eta
+      - incidents_open
+      - occupancy
+      - position
+      - progress
+      - punctuality
+      - trip
+    TripManifest:
+      type: object
+      description: |-
+        The envelope.
+
+        `kind` is what makes this readable: a pay-as-you-go trip sells no
+        bookings and issues no tickets, so an empty `results` on one would
+        say "nobody is aboard" when the bus is full. `results` is typed as
+        the prepaid row here because a schema needs one shape; the PAYG
+        branch is documented on the endpoint and carries
+        `ManifestJourneyRowSerializer` rows.
+      properties:
+        trip:
+          $ref: '#/components/schemas/ManifestTrip'
+        kind:
+          $ref: '#/components/schemas/ManifestKindEnum'
+        totals:
+          $ref: '#/components/schemas/ManifestTotals'
+        count:
+          type: integer
+        next:
+          type: string
+          nullable: true
+        previous:
+          type: string
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManifestRow'
+          readOnly: true
+      required:
+      - count
+      - kind
+      - next
+      - previous
+      - results
+      - totals
+      - trip
+    TripMoney:
+      type: object
+      properties:
+        currency:
+          type: string
+        revenue:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        gross:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+        revenue_per_seat:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          nullable: true
+      required:
+      - currency
+      - gross
+      - revenue
+      - revenue_per_seat
+    TripPerformance:
+      type: object
+      properties:
+        trip:
+          $ref: '#/components/schemas/TripPerformanceTrip'
+        capacity:
+          $ref: '#/components/schemas/TripCapacity'
+        punctuality:
+          allOf:
+          - $ref: '#/components/schemas/TripPunctuality'
+          nullable: true
+        money:
+          type: array
+          items:
+            $ref: '#/components/schemas/TripMoney'
+        incidents:
+          type: integer
+        cancelled:
+          type: boolean
+      required:
+      - cancelled
+      - capacity
+      - incidents
+      - money
+      - punctuality
+      - trip
+    TripPerformanceTrip:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        route:
+          type: string
+        trip_class:
+          type: string
+        status:
+          type: string
+        booking_mode:
+          type: string
+        service_date:
+          type: string
+          format: date
+      required:
+      - booking_mode
+      - id
+      - route
+      - service_date
+      - status
+      - trip_class
+    TripPunctuality:
+      type: object
+      description: |-
+        Null in full before the trip departs — a trip that has not left
+        is not "0 minutes late". Measured at departure only: no scheduled
+        arrival time exists anywhere in the model, which this spec names as
+        a gap rather than inventing one.
+      properties:
+        scheduled_departure_at:
+          type: string
+          format: date-time
+        actual_departure_at:
+          type: string
+          format: date-time
+        actual_arrival_at:
+          type: string
+          format: date-time
+          nullable: true
+        delay_minutes:
+          type: integer
+        on_time:
+          type: boolean
+      required:
+      - actual_arrival_at
+      - actual_departure_at
+      - delay_minutes
+      - on_time
+      - scheduled_departure_at
     TripRoute:
       type: object
       properties:
@@ -6606,6 +10819,34 @@ components:
       required:
       - id
       - registration_number
+    TripsLiveResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TripLiveEnvelope'
+        poll_interval_seconds:
+          type: integer
+        server_time:
+          type: string
+          format: date-time
+      required:
+      - poll_interval_seconds
+      - results
+      - server_time
+    TypeEnum:
+      enum:
+      - wallet_topup
+      - booking_paid
+      - ticket_boarded
+      - fare_deducted
+      type: string
+      description: |-
+        * `wallet_topup` - wallet_topup
+        * `booking_paid` - booking_paid
+        * `ticket_boarded` - ticket_boarded
+        * `fare_deducted` - fare_deducted
     Vehicle:
       type: object
       properties:
@@ -6692,6 +10933,8 @@ components:
           type: integer
           maximum: 2147483647
           minimum: 0
+        trip_class:
+          $ref: '#/components/schemas/TripClassEnum'
         is_active:
           type: boolean
         created_at:
@@ -6716,6 +10959,8 @@ components:
         capacity:
           type: integer
           minimum: 1
+        trip_class:
+          $ref: '#/components/schemas/TripClassEnum'
       required:
       - business
       - capacity

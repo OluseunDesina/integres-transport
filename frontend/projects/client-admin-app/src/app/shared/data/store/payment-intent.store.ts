@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
 import { ListStore, type Page } from '@shared-data';
 
 export type PaymentIntent = components['schemas']['PaymentIntent'];
@@ -9,6 +8,16 @@ export type PaymentIntent = components['schemas']['PaymentIntent'];
 export interface PaymentIntentQuery {
   business?: string;
   status?: string;
+  /** Server-side match on the PSP reference — spec 14 slice 3b. */
+  search?: string;
+  /** Spec 16 slice 4. `GET /payments/` narrows through the shared
+   * analytics filter module now, so the metrics strip above this table
+   * and the table itself provably describe the same rows. Omitting both
+   * dates lists **every** payment: a paginated list is bounded by its
+   * pagination, not by a rolling window nothing on screen mentions. */
+  date_from?: string;
+  date_to?: string;
+  channel?: string;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -32,7 +41,6 @@ function toErrorMessage(error: unknown): string {
 @Injectable({ providedIn: 'root' })
 export class PaymentIntentStore extends ListStore<PaymentIntent, PaymentIntentQuery> {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   constructor() {
     super({}, 25);
@@ -49,9 +57,12 @@ export class PaymentIntentStore extends ListStore<PaymentIntent, PaymentIntentQu
           offset: page.offset,
           business: query.business,
           status: query.status,
+          search: query.search,
+          date_from: query.date_from,
+          date_to: query.date_to,
+          channel: query.channel,
         },
       },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     if (!data) {
       throw new Error(toErrorMessage(error));

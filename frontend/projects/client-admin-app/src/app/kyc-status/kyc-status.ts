@@ -1,42 +1,51 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnInit, ViewChild, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  ViewChild,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, Select, StatusPill } from '@shared-ui';
+import { Alert, Button, FormSection, PageHeader, Select, StatusPill } from '@shared-ui';
 
 import { DOCUMENT_TYPE_OPTIONS } from '../shared/document-type-options';
 import { FileUploadField } from '../shared/file-upload-field';
 import { documentReviewStatusTone } from '../shared/status-tone';
+import { extractFirstErrorMessage } from '../shared/error-message';
 
 type ClientMe = components['schemas']['ClientMe'];
-
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
 
 @Component({
   selector: 'app-kyc-status',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Alert, Button, Select, StatusPill, FileUploadField],
+  imports: [
+    DatePipe,
+    FormsModule,
+    Alert,
+    Button,
+    FormSection,
+    PageHeader,
+    Select,
+    StatusPill,
+    FileUploadField,
+  ],
   templateUrl: './kyc-status.html',
 })
 export class KycStatus implements OnInit {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   protected readonly documentTypeOptions = DOCUMENT_TYPE_OPTIONS;
+
+  /** The list rendered the raw enum (`proof_of_address`) while the
+   * upload select beside it offered labels ("Proof of address") — the
+   * same value written two ways on one screen. */
+  protected documentTypeLabel(value: string): string {
+    return DOCUMENT_TYPE_OPTIONS.find((option) => option.value === value)?.label ?? value;
+  }
   protected readonly documentReviewStatusTone = documentReviewStatusTone;
 
   protected readonly me = signal<ClientMe | null>(null);
@@ -57,9 +66,7 @@ export class KycStatus implements OnInit {
   private async load(): Promise<void> {
     this.loading.set(true);
     this.loadError.set(null);
-    const { data, error } = await this.api.GET('/api/v1/clients/me/', {
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
-    });
+    const { data, error } = await this.api.GET('/api/v1/clients/me/', {});
     this.loading.set(false);
 
     if (!data) {
@@ -92,13 +99,14 @@ export class KycStatus implements OnInit {
 
     const { data, error } = await this.api.POST('/api/v1/clients/me/kyc-documents/', {
       body: formData as unknown as components['schemas']['KycDocument'],
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     this.uploading.set(false);
 
     if (!data) {
-      this.uploadError.set(extractFirstErrorMessage(error, 'Could not upload this document. Try again.'));
+      this.uploadError.set(
+        extractFirstErrorMessage(error, 'Could not upload this document. Try again.')
+      );
       return;
     }
 

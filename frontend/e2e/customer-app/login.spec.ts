@@ -43,7 +43,10 @@ test.describe('customer-app login', () => {
     await page.getByRole('button', { name: 'Sign in' }).click();
 
     await expect(page).toHaveURL(/\/home$/);
-    await expect(page.getByRole('heading')).toContainText(EMAIL);
+    // Level 1 specifically: the rebuilt home screen (spec 14 slice 5)
+    // has section headings below the greeting, so a bare
+    // `getByRole('heading')` is now a strict-mode violation.
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(EMAIL);
     // The Phase 0 placeholder ("You have customer-app access.") was
     // replaced by the real home screen once the booking flow existed to
     // link to — docs/specs/4-fares-seating-booking-frontend.md §4.1.

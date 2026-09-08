@@ -35,7 +35,7 @@ test.describe.configure({ mode: 'serial' });
  */
 async function openQueueAtSeededRow(page: Page) {
   await page.goto('/kyb-queue');
-  await expect(page.getByRole('heading', { name: 'KYB Queue' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'KYB queue' })).toBeVisible();
   // Wait for the first fetch to land before reading the paginator:
   // `hasNext` is derived from `total()`, which is 0 until it does, so
   // checking too early sees Next disabled and concludes there is only
@@ -57,10 +57,14 @@ async function openQueueAtSeededRow(page: Page) {
 test.describe('super-admin-app KYB queue', () => {
   test('renders an axe-clean KYB queue behind the nav shell', async ({ page }) => {
     await signIn(page);
-    await page.getByRole('link', { name: 'KYB Queue' }).click();
+    // Scoped to the nav and in sentence case: spec 14 slice 6a matched
+    // the labels to their headings, and gave `home` cards linking to the
+    // same four destinations — so an unscoped link lookup now matches
+    // two elements.
+    await page.getByRole('navigation').getByRole('link', { name: 'KYB queue' }).click();
 
     await expect(page).toHaveURL(/\/kyb-queue$/);
-    await expect(page.getByRole('heading', { name: 'KYB Queue' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'KYB queue' })).toBeVisible();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
@@ -74,7 +78,12 @@ test.describe('super-admin-app KYB queue', () => {
     await signIn(page);
     const row = await openQueueAtSeededRow(page);
 
-    await expect(row.getByText(SEEDED_DIRECTOR)).toBeVisible();
+    // `toContainText` on the row, not `getByText` inside it: the
+    // Directors column is hidden below `md` and its value also appears
+    // in the row's responsive sub-line, so it is in the DOM twice by
+    // design and a text locator is ambiguous. "The row shows this" is
+    // what the assertion means.
+    await expect(row).toContainText(SEEDED_DIRECTOR);
   });
 
   test('rejecting requires a reason, and the open dialog is axe-clean', async ({ page }) => {

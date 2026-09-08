@@ -1,10 +1,23 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, EmptyState, Select, Table, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  FormSection,
+  PageHeader,
+  Select,
+  Skeleton,
+  Stat,
+  Table,
+  TextField,
+  applyServerErrors,
+  clearServerErrors,
+  fieldErrorMessage,
+} from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
 import { formatMoney } from '../shared/money';
@@ -18,6 +31,18 @@ const PICK_BUSINESS_OPTION: SelectOption = { value: '', label: 'Select an operat
 // Businesses derived from it — is small and bounded; one unpaginated
 // fetch is correct here, same as trip-search.ts's own MAX_OPTIONS.
 const MAX_OPTIONS = 100;
+
+/**
+ * A decimal amount, optionally with up to two places, and greater than
+ * zero.
+ *
+ * `Validators.min` alone is not enough, because the control's value is a
+ * string: `Number('')` is 0 and `Number('abc')` is NaN, and `NaN >= 0.01`
+ * is false in a way that produces the *right* answer for the wrong
+ * reason. Matching the shape first means the min check only ever sees a
+ * real number.
+ */
+const AMOUNT_PATTERN = /^\d+(\.\d{1,2})?$/;
 
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'detail' in error) {
@@ -41,16 +66,36 @@ function toErrorMessage(error: unknown, fallback: string): string {
  * picker of its own. Sourced from `GET /routes/browse/`, exactly the
  * way `trip-search.ts` already derives its own Business-disambiguation
  * labels, deduped by `business.id` — not a new endpoint.
+ *
+ * **The top-up amount is a validated reactive control** as of spec 14
+ * slice 5. It was a bare string signal whose only gate was "not empty",
+ * so `abc`, `-5` and `0` all reached `POST /payments/` and came back as
+ * whatever DRF said — and the field offered a phone a full QWERTY
+ * keyboard to type a sum of money.
  */
 @Component({
   selector: 'app-wallet',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Alert, Button, EmptyState, Select, Table, TextField],
+  imports: [
+    DatePipe,
+    FormsModule,
+    ReactiveFormsModule,
+    Alert,
+    Button,
+    EmptyState,
+    FormSection,
+    PageHeader,
+    Select,
+    Skeleton,
+    Stat,
+    Table,
+    TextField,
+  ],
   templateUrl: './wallet.html',
 })
 export class WalletScreen implements OnInit {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
+  private readonly fb = inject(FormBuilder);
 
   private readonly routes = signal<RouteBrowse[]>([]);
   protected readonly routesError = signal<string | null>(null);
@@ -61,7 +106,10 @@ export class WalletScreen implements OnInit {
   protected readonly loadingWallet = signal(false);
   protected readonly walletError = signal<string | null>(null);
 
-  protected readonly topupAmount = signal('');
+  protected readonly topupForm = this.fb.nonNullable.group({
+    amount: ['', [Validators.required, Validators.pattern(AMOUNT_PATTERN), Validators.min(0.01)]],
+  });
+
   protected readonly toppingUp = signal(false);
   protected readonly topupError = signal<string | null>(null);
 
@@ -80,7 +128,6 @@ export class WalletScreen implements OnInit {
     this.loadingRoutes.set(true);
     const { data, error } = await this.api.GET('/api/v1/routes/browse/', {
       params: { query: { limit: MAX_OPTIONS, offset: 0 } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.loadingRoutes.set(false);
     if (!data) {
@@ -102,7 +149,6 @@ export class WalletScreen implements OnInit {
     this.loadingWallet.set(true);
     const { data, error } = await this.api.GET('/api/v1/wallet/mine/', {
       params: { query: { business: value } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.loadingWallet.set(false);
     if (!data) {
@@ -112,8 +158,17 @@ export class WalletScreen implements OnInit {
     this.wallet.set(data);
   }
 
-  protected setTopupAmount(value: string): void {
-    this.topupAmount.set(value);
+  protected amountError(): string | null {
+    return fieldErrorMessage(this.topupForm.controls.amount, {
+      messages: {
+        // The generic wordings are wrong here in both directions: a
+        // "pattern" failure is not a format the passenger can be
+        // expected to infer, and "Enter 0.01 or more." is a strange
+        // thing to say about money.
+        pattern: 'Enter an amount like 1500 or 1500.50.',
+        min: 'Enter an amount greater than zero.',
+      },
+    });
   }
 
   protected balanceLabel(): string {
@@ -126,12 +181,20 @@ export class WalletScreen implements OnInit {
   }
 
   protected async topUp(): Promise<void> {
-    const businessId = this.businessId();
-    const amount = this.topupAmount();
-    if (!businessId || !amount || this.toppingUp()) {
+    if (this.toppingUp()) {
+      return;
+    }
+    if (this.topupForm.invalid) {
+      this.topupForm.markAllAsTouched();
       return;
     }
 
+    const businessId = this.businessId();
+    if (!businessId) {
+      return;
+    }
+
+    clearServerErrors(this.topupForm);
     this.topupError.set(null);
     this.toppingUp.set(true);
 
@@ -141,8 +204,10 @@ export class WalletScreen implements OnInit {
       // (the server rejects it paired with wallet_topup) — included
       // as false here only because the generated type isn't optional
       // for a field with a schema-level default.
-      body: { use_wallet_balance: false, wallet_topup: { business_id: businessId, amount } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+      body: {
+        use_wallet_balance: false,
+        wallet_topup: { business_id: businessId, amount: this.topupForm.controls.amount.value },
+      },
     });
 
     this.toppingUp.set(false);
@@ -151,7 +216,12 @@ export class WalletScreen implements OnInit {
       this.redirectToPaystack(data.authorization_url);
       return;
     }
-    this.topupError.set(toErrorMessage(error, 'Could not start top-up. Try again.'));
+    // `wallet_topup.amount` is a real field the server can reject, so
+    // its message belongs under the field rather than flattened into
+    // the page-level alert the way every error here used to be.
+    this.topupError.set(
+      applyServerErrors(this.topupForm, unwrapTopupError(error), 'Could not start top-up. Try again.')
+    );
   }
 
   // Isolated for testability, same seam my-bookings.ts's own
@@ -159,4 +229,29 @@ export class WalletScreen implements OnInit {
   protected redirectToPaystack(url: string): void {
     window.location.href = url;
   }
+}
+
+/**
+ * Lifts `{wallet_topup: {amount: [...]}}` up one level so the `amount`
+ * key matches this form's control name.
+ *
+ * The request nests the amount inside `wallet_topup`, so DRF nests the
+ * error the same way — and `applyServerErrors` matches on top-level
+ * keys, correctly: a helper that walked arbitrarily deep would start
+ * guessing which control a nested name meant. Unwrapping the one shape
+ * this screen actually sends is the honest version. Anything else in the
+ * body passes through untouched and still reaches the page alert.
+ */
+function unwrapTopupError(error: unknown): unknown {
+  if (!error || typeof error !== 'object') {
+    return error;
+  }
+  const body = error as Record<string, unknown>;
+  const nested = body['wallet_topup'];
+  if (!nested || typeof nested !== 'object') {
+    return error;
+  }
+  const rest = { ...body };
+  delete rest['wallet_topup'];
+  return { ...rest, ...(nested as Record<string, unknown>) };
 }

@@ -80,4 +80,38 @@ describe('AuthStore', () => {
 
     expect(restored.isAuthenticated()).toBeFalse();
   });
+
+  // --- Silent refresh (docs/specs/13-session-resilience.md) ---
+
+  it('exposes the refresh token', () => {
+    expect(store.refreshToken()).toBeNull();
+
+    store.setSession('access-token', 'refresh-token', user);
+
+    expect(store.refreshToken()).toBe('refresh-token');
+  });
+
+  it('updateTokens() replaces both tokens, keeps the user, and re-persists', () => {
+    store.setSession('access-1', 'refresh-1', user);
+
+    store.updateTokens('access-2', 'refresh-2');
+
+    expect(store.accessToken()).toBe('access-2');
+    // The rotated refresh token specifically: keeping the old one is the
+    // failure that silently kills a session once it expires.
+    expect(store.refreshToken()).toBe('refresh-2');
+    expect(store.user()).toEqual(user);
+
+    const persisted = JSON.parse(localStorage.getItem('integra.auth.session') as string);
+    expect(persisted.accessToken).toBe('access-2');
+    expect(persisted.refreshToken).toBe('refresh-2');
+    expect(persisted.user).toEqual(user);
+  });
+
+  it('updateTokens() is a no-op with no session', () => {
+    store.updateTokens('access', 'refresh');
+
+    expect(store.isAuthenticated()).toBeFalse();
+    expect(localStorage.getItem('integra.auth.session')).toBeNull();
+  });
 });

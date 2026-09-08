@@ -13,10 +13,19 @@ from .models import Driver, Vehicle, VehicleType
 
 
 def create_vehicle_type(
-    *, business: Business, name: str, capacity: int, created_by: User
+    *,
+    business: Business,
+    name: str,
+    capacity: int,
+    created_by: User,
+    trip_class: str = Business.TripClass.STANDARD,
 ) -> VehicleType:
     vehicle_type = VehicleType.objects.create(
-        client=business.client, business=business, name=name, capacity=capacity
+        client=business.client,
+        business=business,
+        name=name,
+        capacity=capacity,
+        trip_class=trip_class,
     )
     record_audit_event(actor=created_by, action="vehicle_type.created", target=vehicle_type)
     return vehicle_type

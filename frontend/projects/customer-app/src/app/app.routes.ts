@@ -60,6 +60,22 @@ export const routes: Routes = [
         data: CUSTOMER_ACCESS,
       },
       {
+        // Reached from a "Track this trip" row action on `my-bookings`,
+        // never the nav bar — it needs a trip id, the same reason
+        // `my-bookings/:id/tickets` above has none either.
+        path: 'trips/:id/track',
+        loadComponent: () =>
+          import('./trip-tracking/trip-tracking').then((m) => m.TripTracking),
+        canActivate: [permissionGuard],
+        data: CUSTOMER_ACCESS,
+      },
+      {
+        path: 'activity',
+        loadComponent: () => import('./activity/activity-feed').then((m) => m.ActivityFeed),
+        canActivate: [permissionGuard],
+        data: CUSTOMER_ACCESS,
+      },
+      {
         path: 'credentials',
         loadComponent: () =>
           import('./credential/my-credentials').then((m) => m.MyCredentials),
@@ -81,6 +97,18 @@ export const routes: Routes = [
       {
         path: 'wallet',
         loadComponent: () => import('./wallet/wallet').then((m) => m.WalletScreen),
+        canActivate: [permissionGuard],
+        data: CUSTOMER_ACCESS,
+      },
+      {
+        path: 'my-reports',
+        loadComponent: () => import('./reports/my-reports').then((m) => m.MyReports),
+        canActivate: [permissionGuard],
+        data: CUSTOMER_ACCESS,
+      },
+      {
+        path: 'report-issue',
+        loadComponent: () => import('./reports/report-issue').then((m) => m.ReportIssue),
         canActivate: [permissionGuard],
         data: CUSTOMER_ACCESS,
       },

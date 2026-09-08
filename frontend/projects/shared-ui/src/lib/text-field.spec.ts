@@ -12,12 +12,14 @@ import { TextField } from './text-field';
     type="email"
     [formControl]="control"
     [invalid]="invalid"
+    [hint]="hint"
     [errorMessage]="invalid ? 'Enter a valid email address.' : null"
   />`,
 })
 class HostComponent {
   control = new FormControl('', { nonNullable: true });
   invalid = false;
+  hint: string | null = null;
 }
 
 @Component({
@@ -91,5 +93,37 @@ describe('TextField', () => {
     const input = timeFixture.debugElement.query(By.css('input'))
       .nativeElement as HTMLInputElement;
     expect(input.type).toBe('time');
+  });
+  // --- hint (spec 14 slice 4) ---
+
+  it('renders no hint and no aria-describedby when no hint is given', () => {
+    const input = fixture.debugElement.query(By.css('input')).nativeElement as HTMLInputElement;
+    expect(input.getAttribute('aria-describedby')).toBeNull();
+  });
+
+  it('associates a hint with the input via aria-describedby', () => {
+    host.hint = 'A short reference such as LAG-IBD. Optional.';
+    fixture.detectChanges();
+
+    const input = fixture.debugElement.query(By.css('input')).nativeElement as HTMLInputElement;
+    const hint = fixture.debugElement.query(By.css('p')).nativeElement as HTMLElement;
+
+    expect(hint.textContent).toContain('LAG-IBD');
+    expect(input.getAttribute('aria-describedby')).toBe(hint.id);
+  });
+
+  it('describes the input by both hint and error when it is invalid', () => {
+    // Dropping the hint on an invalid field would remove the
+    // explanation exactly when the user most needs it.
+    host.hint = 'A short reference such as LAG-IBD. Optional.';
+    host.invalid = true;
+    fixture.detectChanges();
+
+    const input = fixture.debugElement.query(By.css('input')).nativeElement as HTMLInputElement;
+    const error = fixture.debugElement.query(By.css('[role="alert"]')).nativeElement as HTMLElement;
+    const describedBy = input.getAttribute('aria-describedby')?.split(' ') ?? [];
+
+    expect(describedBy.length).toBe(2);
+    expect(describedBy).toContain(error.id);
   });
 });

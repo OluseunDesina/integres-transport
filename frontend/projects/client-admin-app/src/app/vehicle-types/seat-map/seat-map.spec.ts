@@ -1,3 +1,4 @@
+import { Dialog } from '@angular/cdk/dialog';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap, provideRouter } from '@angular/router';
@@ -5,6 +6,8 @@ import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
 import { AuthStore } from '@auth';
 import type { AuthUser } from '@auth';
+import type { ConfirmDialogData } from '@shared-ui';
+import { Subject } from 'rxjs';
 
 import { SeatMap } from './seat-map';
 import { VehicleTypeStore, type VehicleType } from '../../shared/data/store/vehicle-type.store';
@@ -71,6 +74,9 @@ async function setup(paramId: string | null, existingVehicleTypes: VehicleType[]
   apiClient.GET.and.resolveTo({ data: [] });
   const store = new FakeVehicleTypeStore();
   store.items.set(existingVehicleTypes);
+  const closed = new Subject<boolean | undefined>();
+  const dialog = jasmine.createSpyObj<Dialog>('Dialog', ['open']);
+  dialog.open.and.returnValue({ closed: closed.asObservable() } as ReturnType<Dialog['open']>);
 
   await TestBed.configureTestingModule({
     imports: [SeatMap],
@@ -78,6 +84,7 @@ async function setup(paramId: string | null, existingVehicleTypes: VehicleType[]
       provideRouter([]),
       { provide: API_CLIENT, useValue: apiClient },
       { provide: VehicleTypeStore, useValue: store },
+      { provide: Dialog, useValue: dialog },
       {
         provide: ActivatedRoute,
         useValue: { snapshot: { paramMap: convertToParamMap(paramId ? { id: paramId } : {}) } },
@@ -89,7 +96,7 @@ async function setup(paramId: string | null, existingVehicleTypes: VehicleType[]
   authStore.setSession('a', 'r', makeUser());
 
   const fixture = TestBed.createComponent(SeatMap);
-  return { fixture, apiClient, store, authStore };
+  return { dialog, fixture, apiClient, store, authStore };
 }
 
 describe('SeatMap', () => {
@@ -122,7 +129,7 @@ describe('SeatMap', () => {
       await fixture.whenStable();
       fixture.detectChanges();
 
-      expect(fixture.nativeElement.textContent).toContain('2 seat(s) configured');
+      expect(fixture.nativeElement.textContent).toContain('2 seats configured');
       expect(fixture.nativeElement.textContent).toContain('1A');
       expect(fixture.nativeElement.textContent).toContain('1B');
     });
@@ -250,4 +257,74 @@ describe('SeatMap', () => {
       expect(fixture.componentInstance['generateError']()).toContain("can't be regenerated");
     });
   });
+  });
+
+  // --- docs/specs/14 slice 4: generation is destructive ---
+
+  describe('confirmation', () => {
+    async function ready(seats: Seat[]) {
+      // `setup` configures a TestBed of its own, so each call needs a
+      // clean module — the sibling describe builds one in `beforeEach`.
+      TestBed.resetTestingModule();
+      const result = await setup('vt-1', [makeVehicleType()]);
+      result.apiClient.GET.and.resolveTo({ data: seats });
+      result.fixture.detectChanges();
+      await result.fixture.whenStable();
+      // Within the fixture vehicle type's capacity of 6, so
+      // `canGenerate()` holds — the default 4x4 would exceed it.
+      result.fixture.componentInstance['setRowsInput']('1');
+      result.fixture.componentInstance['setColumnsInput']('2');
+      result.fixture.detectChanges();
+      return result;
+    }
+
+    function dialogData(dialog: jasmine.SpyObj<Dialog>): ConfirmDialogData {
+      return dialog.open.calls.mostRecent().args[1]!.data as ConfirmDialogData;
+    }
+
+    it('writes nothing until the dialog is confirmed', async () => {
+      // The backend hard-deletes every existing Seat, and SeatReservation
+      // points at Seat. This used to fire on one click.
+      const { fixture, apiClient, dialog } = await ready([
+        makeSeat({ id: 's1', seat_number: '1A', row: 1, column: 1 }),
+      ]);
+
+      fixture.componentInstance['confirmGenerate']();
+
+      expect(dialog.open).toHaveBeenCalled();
+      expect(apiClient.POST).not.toHaveBeenCalled();
+    });
+
+    it('posts once the dialog confirms', async () => {
+      const { fixture, apiClient, dialog } = await ready([]);
+      apiClient.POST.and.resolveTo({ data: [] });
+
+      fixture.componentInstance['confirmGenerate']();
+      const result = await dialogData(dialog).onConfirm();
+
+      expect(apiClient.POST).toHaveBeenCalled();
+      expect(result).toEqual({ ok: true });
+    });
+
+    it('keeps the dialog open with the server message when generation fails', async () => {
+      const { fixture, apiClient, dialog } = await ready([]);
+      apiClient.POST.and.resolveTo({ error: { detail: 'Seats are already reserved.' } });
+
+      fixture.componentInstance['confirmGenerate']();
+      const result = await dialogData(dialog).onConfirm();
+
+      expect(result).toEqual({ ok: false, error: 'Seats are already reserved.' });
+    });
+
+    it('is destructive only when there is a layout to destroy', async () => {
+      const { fixture, dialog } = await ready([]);
+      fixture.componentInstance['confirmGenerate']();
+      expect(dialogData(dialog).danger()).toBeFalse();
+      expect(dialogData(dialog).confirmLabel()).toBe('Generate layout');
+
+      const replacing = await ready([makeSeat({ id: 's1', seat_number: '1A', row: 1, column: 1 })]);
+      replacing.fixture.componentInstance['confirmGenerate']();
+      expect(dialogData(replacing.dialog).danger()).toBeTrue();
+      expect(dialogData(replacing.dialog).confirmLabel()).toBe('Replace layout');
+    });
 });

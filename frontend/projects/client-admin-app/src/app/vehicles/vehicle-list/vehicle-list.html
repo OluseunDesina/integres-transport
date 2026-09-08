@@ -1,80 +1,195 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Vehicles</h1>
-    <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewVehicle()">New vehicle</ui-button>
-  </div>
+  <ui-page-header
+    title="Vehicles"
+    description="Every vehicle registered against the active business, and whether it is currently in service."
+  >
+    <ui-button actions *appHasPermission="'fleet.manage'" (pressed)="goToNewVehicle()"
+      >New vehicle</ui-button
+    >
+  </ui-page-header>
 
   <!-- A failed activate/deactivate is transient and must not replace the
-       table — the row it came from still needs to be visible, and its
-       switch has already rolled back. A load error still does replace it. -->
+       table — the row it came from still needs to be visible. A load
+       error still does replace it. -->
   @if (activeError(); as message) {
     <ui-alert>{{ message }}</ui-alert>
   }
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state
-      title="No vehicles yet"
-      description="Add a vehicle type first, then register your vehicles against it."
-    >
-      <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewVehicle()">New vehicle</ui-button>
-    </ui-empty-state>
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Registration</th>
-          <th class="px-4 py-2">Compliance</th>
-          <th class="px-4 py-2">Active</th>
-          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (vehicle of store.items(); track vehicle.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ vehicle.registration_number }}</td>
-            <td class="px-4 py-2">
-              @if (vehicle.compliance_warnings.length > 0) {
-                <ui-status-pill
-                  tone="negative"
-                  [label]="vehicle.compliance_warnings.length + ' warning(s)'"
-                  [title]="vehicle.compliance_warnings.join('; ')"
-                />
-              } @else {
-                <ui-status-pill tone="positive" label="Compliant" />
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search vehicles"
+        placeholder="Search by registration number…"
+        ariaLabel="Vehicle filters"
+        [chips]="filters.chips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      >
+        <div filters class="w-44">
+          <ui-select
+            label="Status"
+            [options]="activeFilterOptions"
+            [ngModel]="filters.activeFilter()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onActiveFilterChange($event)"
+          />
+        </div>
+      </ui-filter-bar>
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No vehicles yet"
+        description="Add a vehicle type first, then register your vehicles against it."
+      >
+        <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewVehicle()"
+          >New vehicle</ui-button
+        >
+      </ui-empty-state>
+    } @else {
+      <!-- aria-busy carries the loading announcement for the whole region.
+         The skeleton rows themselves are aria-hidden — one wait is one
+         announcement, not one per placeholder. -->
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Vehicles"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No vehicles match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Registration</th>
+              <th class="hidden py-2 md:table-cell">Compliance</th>
+              <th class="py-2">Status</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="8rem" /></td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="4rem" /></td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.75rem" /></td>
+                </tr>
               }
-            </td>
-            <td class="px-4 py-2">
-              <!-- The switch is a write, so it's gated like the Edit
-                   link — but a viewer without manage permission still
-                   needs to see the state, hence the read-only pill.
-                   `?? true` mirrors the model default. -->
-              @if (canManage()) {
-                <ui-toggle
-                  [checked]="vehicle.is_active ?? true"
-                  [pending]="pendingId() === vehicle.id"
-                  [label]="((vehicle.is_active ?? true) ? 'Deactivate ' : 'Activate ') + vehicle.registration_number"
-                  (toggled)="onToggleActive(vehicle, $event)"
-                />
-              } @else if (vehicle.is_active ?? true) {
-                <ui-status-pill tone="positive" label="Active" />
-              } @else {
-                <ui-status-pill tone="neutral" label="Inactive" />
+            } @else {
+              @for (vehicle of store.items(); track vehicle.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    {{ vehicle.registration_number }}
+                    <!-- The Compliance column, hidden below `md`. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ summaryLine(vehicle) }}
+                    </span>
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    @if (vehicle.compliance_warnings.length > 0) {
+                      <ui-status-pill
+                        tone="negative"
+                        [label]="vehicle.compliance_warnings.length + ' warning(s)'"
+                      />
+                    } @else {
+                      <ui-status-pill tone="positive" label="Compliant" />
+                    }
+                  </td>
+                  <td [class]="cellClass()">
+                    <!-- Read-only for everyone. Changing it is an explicit
+                       action in the row menu, behind a confirmation —
+                       docs/specs/14's one behavioural change. -->
+                    @if (isActive(vehicle)) {
+                      <ui-status-pill tone="positive" label="Active" />
+                    } @else {
+                      <ui-status-pill tone="neutral" label="Inactive" />
+                    }
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    <ui-action-menu
+                      [items]="menuItems(vehicle)"
+                      [label]="'Actions for ' + vehicle.registration_number"
+                      (selected)="onMenuSelected(vehicle, $event)"
+                    />
+                  </td>
+                </tr>
               }
-            </td>
-            <td class="px-4 py-2 text-right">
-              <a
-                *appHasPermission="'fleet.manage'"
-                [routerLink]="['/vehicles', vehicle.id, 'edit']"
-                class="text-sm font-medium text-slate-700 hover:text-slate-900"
-                >Edit</a
-              >
-            </td>
-          </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
+
+<!-- The compliance warnings used to live in a `title` tooltip on the
+     pill: invisible on touch, and not reliably announced. Here they are
+     real text. -->
+<ng-template #detailBody>
+  @if (selected(); as vehicle) {
+    <dl class="flex flex-col gap-4 text-sm">
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Status</dt>
+        <dd>
+          @if (isActive(vehicle)) {
+            <ui-status-pill tone="positive" label="Active" />
+          } @else {
+            <ui-status-pill tone="neutral" label="Inactive" />
+          }
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Insurance expires</dt>
+        <dd class="text-default">
+          {{ vehicle.insurance_expires_at ?? 'Not recorded' }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Roadworthiness expires</dt>
+        <dd class="text-default">
+          {{ vehicle.roadworthiness_expires_at ?? 'Not recorded' }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Compliance</dt>
+        <dd class="text-default">
+          @if (vehicle.compliance_warnings.length === 0) {
+            No outstanding warnings.
+          } @else {
+            <ul class="list-disc pl-5">
+              @for (warning of vehicle.compliance_warnings; track warning) {
+                <li>{{ warning }}</li>
+              }
+            </ul>
+          }
+        </dd>
+      </div>
+    </dl>
+  }
+</ng-template>
+
+<ng-template #confirmBody>
+  @if (selected(); as vehicle) {
+    <p class="text-sm text-default">
+      @if (isActive(vehicle)) {
+        {{ vehicle.registration_number }} will stop being available for new trip assignments. Trips
+        it is already assigned to are not changed.
+      } @else {
+        {{ vehicle.registration_number }} will become available for trip assignment again.
+      }
+    </p>
+  }
+</ng-template>

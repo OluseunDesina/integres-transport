@@ -157,6 +157,7 @@ Status is one of **verified** (executed, artifact attached), **failed**, **not a
 
 Then, separately:
 
+0. **The previous report's open findings**, re-verified against current code — each one **closed** (with what closed it), **still open**, or **deliberately carried** (with why). This comes first because it is the half most easily skipped, and open findings rot in both directions: one stayed recorded as a known-red for four specs after it was fixed, while three others sat untouched for months because no later report mentioned them. A finding that nobody re-reads is a finding nobody owns.
 1. **Findings**, ordered by severity, each with file, line, why it matters, and proposed fix. **Do not fix anything yet** — the list comes first. The only exception is the visual iteration loop in §10.6, where UI defects are fixed in-loop and reported.
 1a. **The visual iteration log** — how many iterations ran, what was fixed each round, and whether the exit was on criteria or on the cap.
 2. **Deviations from the brief** — anywhere implementation differs from the agreed architecture or conventions, deliberate or accidental.

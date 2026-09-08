@@ -1,10 +1,10 @@
 <div class="flex flex-col gap-6">
-  <div>
-    <h1 class="text-lg font-semibold text-slate-900">Search trips</h1>
-    <p class="mt-1 text-sm text-slate-500">
-      Choose where you are travelling from and to, then pick a departure.
-    </p>
-  </div>
+  <app-booking-steps current="search" />
+
+  <ui-page-header
+    title="Search trips"
+    description="Choose where you are travelling from and to, then pick a departure."
+  />
 
   @if (routesError(); as message) {
     <ui-alert>
@@ -13,43 +13,59 @@
     </ui-alert>
   }
 
-  <div class="grid gap-4 sm:grid-cols-2">
-    <ui-select
-      label="Route"
-      class="sm:col-span-2"
-      [options]="routeOptions()"
-      [ngModel]="routeId()"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onRouteChange($event)"
-    />
-    <ui-select
-      label="From"
-      [options]="fromStopOptions()"
-      [ngModel]="fromStopId()"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onFromStopChange($event)"
-    />
-    <ui-select
-      label="To"
-      [options]="toStopOptions()"
-      [ngModel]="toStopId()"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onToStopChange($event)"
-    />
-    <ui-text-field
-      label="Travel date"
-      type="date"
-      [ngModel]="serviceDate()"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onServiceDateChange($event)"
-    />
-  </div>
+  <section class="rounded-xl border border-border bg-surface p-5 shadow-sm">
+    <div class="grid gap-4 sm:grid-cols-2">
+      <ui-select
+        label="Route"
+        class="sm:col-span-2"
+        [options]="routeOptions()"
+        [ngModel]="routeId()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="onRouteChange($event)"
+      />
+      <ui-select
+        label="From"
+        [options]="fromStopOptions()"
+        [ngModel]="fromStopId()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="onFromStopChange($event)"
+      />
+      <ui-select
+        label="To"
+        [options]="toStopOptions()"
+        [ngModel]="toStopId()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="onToStopChange($event)"
+      />
+      <ui-text-field
+        label="Travel date"
+        type="date"
+        [ngModel]="serviceDate()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="onServiceDateChange($event)"
+      />
+      <!-- Options are narrowed to what the chosen route runs, so a
+           passenger can never filter to a class that produces an empty
+           result reading as "sold out" rather than "not offered here".
+           The hint says what the classes are for; the option labels
+           alone ("Premium", "Mini") do not, and ui-select renders a
+           loose <p> beside it to sighted users only. -->
+      <ui-select
+        label="Class"
+        hint="Operators run different service levels at different prices."
+        [options]="tripClassOptions()"
+        [ngModel]="tripClass()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="onTripClassChange($event)"
+      />
+    </div>
 
-  <div>
-    <ui-button [disabled]="!canSearch()" [loading]="searching()" (pressed)="search()">
-      Search
-    </ui-button>
-  </div>
+    <div class="mt-5">
+      <ui-button [disabled]="!canSearch()" [loading]="searching()" (pressed)="search()">
+        Search
+      </ui-button>
+    </div>
+  </section>
 
   @if (searchError(); as message) {
     <ui-alert>
@@ -58,7 +74,16 @@
     </ui-alert>
   }
 
-  @if (trips(); as results) {
+  @if (searching()) {
+    <!-- aria-busy on the region, not a label on each placeholder:
+         ui-skeleton is aria-hidden by design, so three of them would
+         otherwise be three announcements of one wait. -->
+    <div class="flex flex-col gap-3" role="status" aria-busy="true" aria-label="Searching departures">
+      @for (placeholder of [1, 2, 3]; track placeholder) {
+        <ui-skeleton variant="block" height="5.5rem" />
+      }
+    </div>
+  } @else if (trips(); as results) {
     @if (results.length === 0) {
       <ui-empty-state
         title="No departures found"
@@ -66,24 +91,53 @@
       />
     } @else {
       <section class="flex flex-col gap-3">
-        <h2 class="text-sm font-medium text-slate-700">
-          {{ results.length }} departure(s) available
+        <h2 class="text-sm font-medium uppercase tracking-wide text-muted">
+          {{ departureCountLabel() }}
         </h2>
-        <ul class="flex flex-col gap-2">
+        <ul class="flex flex-col gap-3">
           @for (trip of results; track trip.id) {
+            <!-- A card per departure rather than a bordered row: on a
+                 phone this is the list a passenger actually chooses
+                 from, and the departure time is the thing they scan
+                 for. It leads, in the largest type on the card. -->
             <li
-              class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white p-4"
+              class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-surface p-4 shadow-xs"
             >
               <div class="min-w-0">
-                <p class="text-sm font-medium text-slate-900">{{ trip.route.name }}</p>
-                <p class="text-sm text-slate-500">
-                  Departs {{ trip.scheduled_departure_at | date: 'short' }}
+                <p class="text-lg font-semibold text-strong">
+                  {{ trip.scheduled_departure_at | date: 'shortTime' }}
                 </p>
-                @if (trip.vehicle) {
-                  <p class="text-xs text-slate-500">{{ trip.vehicle.registration_number }}</p>
-                }
+                <p class="flex flex-wrap items-center gap-2 text-default">
+                  <span class="truncate">{{ trip.route.name }}</span>
+                  <!-- Neutral tone, label only (spec 15 slice 2's
+                       ruling): ui-status-pill's other tones are
+                       semantic, and a Mini is not negative. Colour
+                       carries no meaning here, which is also why the
+                       label alone satisfies the a11y bar. -->
+                  @if (classLabel(trip.trip_class); as serviceClass) {
+                    <ui-status-pill tone="neutral" [label]="serviceClass" />
+                  }
+                </p>
+                <p class="text-sm text-muted">
+                  {{ trip.scheduled_departure_at | date: 'EEE d MMM' }}
+                  @if (trip.vehicle) {
+                    · {{ trip.vehicle.registration_number }}
+                  }
+                </p>
               </div>
-              <ui-button (pressed)="selectTrip(trip)">Choose seats</ui-button>
+              <!-- "Continue", not "Choose seats". This screen cannot
+                   know whether the next one will ask for seats or for a
+                   number of passengers: open seating always buys
+                   places, and a reservation-mode trip does too when its
+                   Business has seat_selection_enabled off (quick book,
+                   docs/specs/10-booking-modes.md) — which is decided by
+                   the availability envelope on the next screen, not by
+                   anything on Trip. The old label was simply wrong on
+                   every open-seating departure, and open-seating.spec.ts
+                   clicked it. -->
+              <ui-button [ariaLabel]="chooseLabel(trip)" (pressed)="selectTrip(trip)">
+                Continue
+              </ui-button>
             </li>
           }
         </ul>

@@ -1,10 +1,21 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, EmptyState, Paginator, StatusPill, Table, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  PageHeader,
+  Paginator,
+  StatusPill,
+  Table,
+  TextField,
+  applyServerErrors,
+  clearServerErrors,
+  fieldErrorMessage,
+} from '@shared-ui';
 import type { StatusPillTone } from '@shared-ui';
 
 import {
@@ -29,24 +40,6 @@ const STATUS_LABEL: Record<RunStatus, string> = {
   failed: 'Failed',
 };
 
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    const detail = (error as { detail?: unknown }).detail;
-    if (typeof detail === 'string') {
-      return detail;
-    }
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
-
 /**
  * Settlement runs for one Business (`GET`/`POST /settlement-runs/`) —
  * Phase 5 frontend Slice C. `SettlementRun` is otherwise invisible
@@ -66,6 +59,7 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
     Alert,
     Button,
     EmptyState,
+    PageHeader,
     Paginator,
     StatusPill,
     Table,
@@ -77,7 +71,6 @@ export class SettlementRuns implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly businessStore = inject(BusinessSuperAdminStore);
   protected readonly store = inject(SettlementRunStore);
 
@@ -96,6 +89,19 @@ export class SettlementRuns implements OnInit {
     period_start: ['', Validators.required],
     period_end: ['', Validators.required],
   });
+
+  protected readonly heading = computed(() => {
+    const business = this.business();
+    return business ? `Settlement runs — ${business.name}` : 'Settlement runs';
+  });
+
+  /** Both dates are required and neither bound an error input, so an
+   * empty submit did nothing and said nothing — spec 11's trap. */
+  protected fieldError(field: 'period_start' | 'period_end'): string | null {
+    return fieldErrorMessage(this.form.controls[field], {
+      label: field === 'period_start' ? 'Period start' : 'Period end',
+    });
+  }
 
   async ngOnInit(): Promise<void> {
     const id = this.route.snapshot.paramMap.get('id');
@@ -129,11 +135,11 @@ export class SettlementRuns implements OnInit {
     this.triggering.set(true);
     this.triggerError.set(null);
     this.payoutNotConfigured.set(false);
+    clearServerErrors(this.form);
     const { period_start, period_end } = this.form.getRawValue();
 
     const { data, error, response } = await this.api.POST('/api/v1/settlement-runs/', {
       body: { business: this.businessId(), period_start, period_end },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     this.triggering.set(false);
@@ -142,8 +148,10 @@ export class SettlementRuns implements OnInit {
       if (response.status === 404) {
         this.payoutNotConfigured.set(true);
       }
+      // A rejected period lands on the date it belongs to; anything
+      // else (including the 404 above) still reaches the page alert.
       this.triggerError.set(
-        extractFirstErrorMessage(error, 'Could not trigger a settlement run.')
+        applyServerErrors(this.form, error, 'Could not trigger a settlement run.')
       );
       return;
     }

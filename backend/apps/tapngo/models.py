@@ -32,7 +32,7 @@ class TapCredential(BaseModel):
     """A passenger-held bearer credential. Only `token_hash` (SHA-256)
     is ever stored — the raw token is returned once, at issuance
     (`apps.tapngo.services.issue_credential`), and never again. `channel`
-    is informational only; resolution logic (`apps.tapngo.services._resolve_credential`)
+    is informational only; resolution logic (`apps.tapngo.services.resolve_credential`)
     never branches on it, since the backend never learns whether a token
     was decoded from a QR scan or an NFC read."""
 

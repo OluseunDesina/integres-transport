@@ -33,8 +33,14 @@ test.describe('super-admin-app login', () => {
     await page.getByRole('button', { name: 'Sign in' }).click();
 
     await expect(page).toHaveURL(/\/home$/);
-    await expect(page.getByRole('heading')).toContainText(EMAIL);
-    await expect(page.getByText('You have super-admin-app access.')).toBeVisible();
+    // Level 1: the rebuilt home screen has section headings below the
+    // greeting, so a bare heading lookup is a strict-mode violation.
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(EMAIL);
+    // The Phase 0 placeholder ("You have super-admin-app access.", plus
+    // `Platform staff: true`) is gone — spec 14 slice 6a made this a
+    // real landing page. What proves the screen loaded is that its
+    // destinations are reachable from it.
+    await expect(page.getByRole('link', { name: 'KYC queue' }).last()).toBeVisible();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);

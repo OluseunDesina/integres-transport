@@ -151,9 +151,15 @@ describe('VehicleForm', () => {
       await fixture.componentInstance['onSubmit']();
       fixture.detectChanges();
 
-      expect(fixture.componentInstance['errorMessage']()).toBe(
+      // Rendered under the select the server named, not stored in a
+      // page-level alert that says nothing about which field is wrong.
+      const error = (fixture.nativeElement as HTMLElement).querySelector(
+        'ui-select [role="alert"]',
+      );
+      expect(error?.textContent?.trim()).toBe(
         'This vehicle type belongs to a different Business.',
       );
+      expect(fixture.componentInstance['errorMessage']()).toBeNull();
     });
   });
 

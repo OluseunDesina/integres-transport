@@ -2,8 +2,9 @@
 
 Status: **Accepted** (2026-08-18). All three open questions below are
 now resolved; this unblocks the Phase 6 (ticketing) spec, per the rule
-in CLAUDE.md's Known Phase 0 limitations section that names this ADR
-as the one still gating it.
+in `docs/status.md`'s Known Phase 0 limitations section that names this
+ADR as the one still gating it (that section lived in CLAUDE.md until
+that file was trimmed to rules-only).
 
 ## Context
 
@@ -42,3 +43,37 @@ As defense-in-depth on top of the expiry bound, not a replacement for it, issuan
 Phase 6's ticket-issuance code is written once against this scheme rather than needing a migration of already-issued tickets: a CBOR-encoded, binary-UUID payload; `TICKET_SIGNING_KEYS`/`TICKET_SIGNING_ACTIVE_KID` as the key-storage setting names; and two new read endpoints (`GET /ticketing/signing-keys/`, `GET /ticketing/revoked/`) the validator syncs against whenever it has connectivity. The revocation-vs-offline tension the original version of this ADR left open is now resolved, not deferred: a short expiry bounds the exposure, a synced revocation list narrows it further when connectivity allows, and the residual gap — an offline validator that hasn't synced recently — is named rather than hidden.
 
 Phase 6's spec still owns: whether a dedicated `Ticket` model exists beyond reusing `SeatReservation`'s own id (e.g. for a richer issuance/void audit trail), the actual expiry-window and revocation-sync-cadence values, and the Dart-side implementation against `pointycastle`/`cryptography` already named above.
+
+---
+
+## Amendment (2026-08-28): the payload identifies a ticket by `ticket_id`
+
+`docs/specs/10-booking-modes.md` adds `open_seating`, in which a
+passenger buys a place on a departure and is never assigned a seat. The
+payload shape changes; **the signing scheme does not** — still Ed25519
+over CBOR with binary-packed UUIDs, still the same key storage and
+rotation, still the same two sync endpoints.
+
+| Claim | Before | Now |
+|---|---|---|
+| `ticket_id` | — | **added, required.** The identifier a validator resolves the row by |
+| `seat_reservation_id` | required, and the lookup key | optional, informational |
+| `seat_id` | required | optional, informational |
+
+The lookup key had to move. `validate_ticket` resolved a ticket by
+`seat_reservation_id`, and an open-seating ticket has no seat
+reservation — so the old key cannot identify one at all. Branching on
+mode inside the validator was the alternative and was rejected: one
+key that works in both modes is simpler and leaves the device with a
+single code path.
+
+The two seat claims stay in the payload rather than being dropped so a
+validator can display which seat was sold without a round trip. Nothing
+resolves a ticket by them any more.
+
+**No dual-read compatibility window is needed, because no tickets exist
+in production.** That is stated here explicitly rather than left
+implied — it is exactly the kind of assumption that becomes dangerous
+the moment it silently stops being true. Any future payload change made
+*after* real tickets exist will need a genuine migration path, and this
+amendment is not a precedent for skipping one.

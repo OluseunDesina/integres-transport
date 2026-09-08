@@ -7,7 +7,12 @@ const PASSWORD = 'e2e-test-password-123';
 test.describe('validator-app login', () => {
   test('renders an axe-clean login screen', async ({ page }) => {
     await page.goto('/login');
-    await expect(page.getByRole('heading', { name: 'Integra Validator' })).toBeVisible();
+    // The heading is "Sign in" now; the app's identity moved to the
+    // brand mark above it — the operator's logo where the host resolves
+    // to one, plus a "Validator" wordmark so a conductor can tell this
+    // app from the passenger one (spec 14 slice 6b).
+    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    await expect(page.getByText('Validator', { exact: true })).toBeVisible();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);

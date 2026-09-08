@@ -4,6 +4,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { API_CLIENT } from '@api-client';
 import { AuthStore } from '@auth';
+import { expectColumnVisibilityParity } from '@shared-ui';
 import type { ConfirmDialogData } from '@shared-ui';
 import { Subject } from 'rxjs';
 
@@ -169,5 +170,58 @@ describe('KycQueue', () => {
     const result = await data.onConfirm();
 
     expect(result).toEqual({ ok: false, error: 'A reason is required when rejecting.' });
+  });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makeClient()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'kyc-queue');
+  });
+
+
+  /**
+   * The reason box was a hand-rolled `<textarea>` with
+   * `border border-slate-300` — the input border slice 1 measured at
+   * 1.48:1 and replaced everywhere else — no label association beyond a
+   * hand-written `for`, and no way to render an error. It is
+   * `ui-textarea` now, and the requirement is *shown* rather than only
+   * enforced by a disabled button.
+   */
+  it('says why confirm is disabled once the reviewer has engaged with the reason', () => {
+    expect(fixture.componentInstance['reasonError']()).toBeNull();
+
+    fixture.componentInstance['setDecision']('reject');
+    // Untouched: the disabled button is the signal, not a red field.
+    expect(fixture.componentInstance['reasonError']()).toBeNull();
+
+    fixture.componentInstance['setReason']('Missing documents.');
+    fixture.componentInstance['setReason']('');
+
+    expect(fixture.componentInstance['reasonError']()).toContain('Give a reason');
+  });
+
+  it('resets the reason and its touched state between reviews', () => {
+    store.items.set([makeClient()]);
+    fixture.detectChanges();
+    fixture.componentInstance['setDecision']('reject');
+    fixture.componentInstance['setReason']('');
+    expect(fixture.componentInstance['reasonError']()).not.toBeNull();
+
+    fixture.debugElement.query(By.css('button')).nativeElement.click();
+
+    expect(fixture.componentInstance['reasonError']()).toBeNull();
+    expect(fixture.componentInstance['decision']()).toBe('approve');
+  });
+
+  it('offers both decisions as one real radio group', () => {
+    store.items.set([makeClient()]);
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance['decisionOptions'].map((o) => o.value)).toEqual([
+      'approve',
+      'reject',
+    ]);
   });
 });

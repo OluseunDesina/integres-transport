@@ -81,13 +81,16 @@ def decide_client_kyc(*, client: Client, decision: str, reason: str, decided_by:
     produce an inconsistent kyc_status/kyc_decided_by pair."""
     with transaction.atomic():
         client = Client.objects.select_for_update().get(pk=client.pk)
+        now = timezone.now()
         if decision == "approve":
             client.kyc_status = Client.KycStatus.APPROVED
             client.kyc_rejection_reason = ""
+            document_status = KycDocument.Status.APPROVED
         else:
             client.kyc_status = Client.KycStatus.REJECTED
             client.kyc_rejection_reason = reason
-        client.kyc_decided_at = timezone.now()
+            document_status = KycDocument.Status.REJECTED
+        client.kyc_decided_at = now
         client.kyc_decided_by = decided_by
         client.save(
             update_fields=[
@@ -96,6 +99,18 @@ def decide_client_kyc(*, client: Client, decision: str, reason: str, decided_by:
                 "kyc_decided_at",
                 "kyc_decided_by",
             ]
+        )
+        # A decision on the client is a decision on the document bundle
+        # that earned it — only the still-`pending` ones, so a document
+        # from an earlier rejected round keeps recording that rejection
+        # rather than being silently relabelled by a later approval.
+        KycDocument.all_objects.filter(
+            client=client, status=KycDocument.Status.PENDING
+        ).update(
+            status=document_status,
+            reviewed_by=decided_by,
+            reviewed_at=now,
+            rejection_reason=reason if decision != "approve" else "",
         )
     record_audit_event(
         actor=decided_by,

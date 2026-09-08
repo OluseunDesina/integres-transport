@@ -8,15 +8,15 @@ export type StatusPillTone = 'neutral' | 'positive' | 'warning' | 'negative';
   host: { class: 'inline-block' },
   template: `
     <span
-      class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium"
-      [class.bg-slate-100]="tone() === 'neutral'"
-      [class.text-slate-700]="tone() === 'neutral'"
-      [class.bg-emerald-100]="tone() === 'positive'"
-      [class.text-emerald-700]="tone() === 'positive'"
-      [class.bg-amber-100]="tone() === 'warning'"
-      [class.text-amber-700]="tone() === 'warning'"
-      [class.bg-red-100]="tone() === 'negative'"
-      [class.text-red-700]="tone() === 'negative'"
+      class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium whitespace-nowrap"
+      [class.bg-surface-sunken]="tone() === 'neutral'"
+      [class.text-default]="tone() === 'neutral'"
+      [class.bg-success-surface]="tone() === 'positive'"
+      [class.text-success]="tone() === 'positive'"
+      [class.bg-warning-surface]="tone() === 'warning'"
+      [class.text-warning]="tone() === 'warning'"
+      [class.bg-danger-surface]="tone() === 'negative'"
+      [class.text-danger]="tone() === 'negative'"
     >
       {{ label() }}
     </span>

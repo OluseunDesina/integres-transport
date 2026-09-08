@@ -17,5 +17,11 @@ class BookingFactory(factory.django.DjangoModelFactory):
         "apps.identity.tests.factories.PassengerUserFactory",
         client=factory.SelfAttribute("..client"),
     )
+    # A sequence, not a random draw: `unique_booking_reference_per_business`
+    # is real, so two factory bookings in one Business would collide on
+    # the blank default. The production path draws a random reference
+    # through `apps.booking.services._create_booking_row`; a test only
+    # needs distinctness, and a predictable one is easier to assert on.
+    reference = factory.Sequence(lambda n: f"BKG-T{n:05d}")
     total_amount = "500.00"
     currency = factory.LazyAttribute(lambda o: o.business.currency)

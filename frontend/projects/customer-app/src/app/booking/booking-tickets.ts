@@ -3,10 +3,11 @@ import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@ang
 import { ActivatedRoute, Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, EmptyState, StatusPill } from '@shared-ui';
+import { Alert, Button, EmptyState, PageHeader, Skeleton, StatusPill } from '@shared-ui';
 import type { StatusPillTone } from '@shared-ui';
 import { toDataURL } from 'qrcode';
+
+import { tripClassLabel } from '../shared/trip-class';
 
 export type Ticket = components['schemas']['Ticket'];
 
@@ -56,14 +57,13 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-booking-tickets',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, Alert, Button, EmptyState, StatusPill],
+  imports: [DatePipe, Alert, Button, EmptyState, PageHeader, Skeleton, StatusPill],
   templateUrl: './booking-tickets.html',
 })
 export class BookingTickets implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   protected readonly loading = signal(true);
   protected readonly error = signal<string | null>(null);
@@ -77,7 +77,6 @@ export class BookingTickets implements OnInit {
     const bookingId = this.route.snapshot.paramMap.get('id') ?? '';
     const { data, error } = await this.api.GET('/api/v1/bookings/{booking_id}/tickets/', {
       params: { path: { booking_id: bookingId } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     this.loading.set(false);
@@ -94,6 +93,15 @@ export class BookingTickets implements OnInit {
       )
     );
     this.qrDataUrls.set(Object.fromEntries(entries));
+  }
+
+  /** The service class this ticket is for
+   * (docs/specs/15-trip-classes.md slice 3). Comes from the API rather
+   * than from router state, because this screen is deep-linkable by
+   * design — spec 6 made it a routed param precisely so it survives a
+   * refresh, which router state does not. */
+  protected serviceClass(ticket: Ticket): string {
+    return tripClassLabel(ticket.trip_class);
   }
 
   protected async backToBookings(): Promise<void> {

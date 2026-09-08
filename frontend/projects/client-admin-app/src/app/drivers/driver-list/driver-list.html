@@ -1,79 +1,196 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Drivers</h1>
-    <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewDriver()">New driver</ui-button>
-  </div>
+  <ui-page-header
+    title="Drivers"
+    description="Who can be assigned to a trip, and whether their licence is still valid."
+  >
+    <ui-button actions *appHasPermission="'fleet.manage'" (pressed)="goToNewDriver()"
+      >New driver</ui-button
+    >
+  </ui-page-header>
 
   <!-- A failed activate/deactivate is transient and must not replace the
-       table — the row it came from still needs to be visible, and its
-       switch has already rolled back. A load error still does replace it. -->
+       table — the row it came from still needs to be visible. -->
   @if (activeError(); as message) {
     <ui-alert>{{ message }}</ui-alert>
   }
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state title="No drivers yet" description="Add your first driver.">
-      <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewDriver()">New driver</ui-button>
-    </ui-empty-state>
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Name</th>
-          <th class="px-4 py-2">License</th>
-          <th class="px-4 py-2">Compliance</th>
-          <th class="px-4 py-2">Active</th>
-          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (driver of store.items(); track driver.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ driver.name }}</td>
-            <td class="px-4 py-2">{{ driver.license_number }}</td>
-            <td class="px-4 py-2">
-              @if (driver.compliance_warnings.length > 0) {
-                <ui-status-pill
-                  tone="negative"
-                  [label]="driver.compliance_warnings.length + ' warning(s)'"
-                  [title]="driver.compliance_warnings.join('; ')"
-                />
-              } @else {
-                <ui-status-pill tone="positive" label="Compliant" />
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search drivers"
+        placeholder="Search by name, phone or licence…"
+        ariaLabel="Driver filters"
+        [chips]="filters.chips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      >
+        <div filters class="w-44">
+          <ui-select
+            label="Status"
+            [options]="activeFilterOptions"
+            [ngModel]="filters.activeFilter()"
+            [ngModelOptions]="{ standalone: true }"
+            (ngModelChange)="onActiveFilterChange($event)"
+          />
+        </div>
+      </ui-filter-bar>
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No drivers yet"
+        description="Add your drivers so they can be assigned to trips."
+      >
+        <ui-button *appHasPermission="'fleet.manage'" (pressed)="goToNewDriver()"
+          >New driver</ui-button
+        >
+      </ui-empty-state>
+    } @else {
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Drivers"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No drivers match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Name</th>
+              <th class="hidden py-2 md:table-cell">Licence</th>
+              <th class="hidden py-2 md:table-cell">Compliance</th>
+              <th class="py-2">Status</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="9rem" /></td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="4rem" /></td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
               }
-            </td>
-            <td class="px-4 py-2">
-              <!-- The switch is a write, so it's gated like the Edit
-                   link — but a viewer without manage permission still
-                   needs to see the state, hence the read-only pill.
-                   `?? true` mirrors the model default. -->
-              @if (canManage()) {
-                <ui-toggle
-                  [checked]="driver.is_active ?? true"
-                  [pending]="pendingId() === driver.id"
-                  [label]="((driver.is_active ?? true) ? 'Deactivate ' : 'Activate ') + driver.name"
-                  (toggled)="onToggleActive(driver, $event)"
-                />
-              } @else if (driver.is_active ?? true) {
-                <ui-status-pill tone="positive" label="Active" />
-              } @else {
-                <ui-status-pill tone="neutral" label="Inactive" />
+            } @else {
+              @for (driver of store.items(); track driver.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    {{ driver.name }}
+                    <!-- The columns hidden below `md`, re-flowed. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ summaryLine(driver) }}
+                    </span>
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ driver.license_number }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    @if (driver.compliance_warnings.length > 0) {
+                      <ui-status-pill
+                        tone="negative"
+                        [label]="driver.compliance_warnings.length + ' warning(s)'"
+                      />
+                    } @else {
+                      <ui-status-pill tone="positive" label="Compliant" />
+                    }
+                  </td>
+                  <td [class]="cellClass()">
+                    @if (isActive(driver)) {
+                      <ui-status-pill tone="positive" label="Active" />
+                    } @else {
+                      <ui-status-pill tone="neutral" label="Inactive" />
+                    }
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    <ui-action-menu
+                      [items]="menuItems(driver)"
+                      [label]="'Actions for ' + driver.name"
+                      (selected)="onMenuSelected(driver, $event)"
+                    />
+                  </td>
+                </tr>
               }
-            </td>
-            <td class="px-4 py-2 text-right">
-              <a
-                *appHasPermission="'fleet.manage'"
-                [routerLink]="['/drivers', driver.id, 'edit']"
-                class="text-sm font-medium text-slate-700 hover:text-slate-900"
-                >Edit</a
-              >
-            </td>
-          </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
+
+<!-- The compliance warnings used to live in a `title` tooltip on the
+     pill: invisible on touch, and not reliably announced. -->
+<ng-template #detailBody>
+  @if (selected(); as driver) {
+    <dl class="flex flex-col gap-4 text-sm">
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Status</dt>
+        <dd>
+          @if (isActive(driver)) {
+            <ui-status-pill tone="positive" label="Active" />
+          } @else {
+            <ui-status-pill tone="neutral" label="Inactive" />
+          }
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Licence number</dt>
+        <dd class="text-default">{{ driver.license_number }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Licence expires</dt>
+        <dd class="text-default">
+          {{ driver.license_expires_at ?? 'Not recorded' }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Phone</dt>
+        <dd class="text-default">{{ driver.phone || 'Not recorded' }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Compliance</dt>
+        <dd class="text-default">
+          @if (driver.compliance_warnings.length === 0) {
+            No outstanding warnings.
+          } @else {
+            <ul class="list-disc pl-5">
+              @for (warning of driver.compliance_warnings; track warning) {
+                <li>{{ warning }}</li>
+              }
+            </ul>
+          }
+        </dd>
+      </div>
+    </dl>
+  }
+</ng-template>
+
+<ng-template #confirmBody>
+  @if (selected(); as driver) {
+    <p class="text-sm text-default">
+      @if (isActive(driver)) {
+        {{ driver.name }} will stop being offered for new trip assignments. Trips they are already
+        assigned to are not changed.
+      } @else {
+        {{ driver.name }} will be available for trip assignment again.
+      }
+    </p>
+  }
+</ng-template>

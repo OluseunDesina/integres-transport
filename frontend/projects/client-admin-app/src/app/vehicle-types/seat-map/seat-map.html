@@ -1,37 +1,45 @@
 <div class="flex flex-col gap-6">
   @if (notFound()) {
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       That vehicle type couldn't be found.
-      <a routerLink="/vehicle-types" class="font-medium text-slate-900 underline"
+      <a routerLink="/vehicle-types" class="font-medium text-strong underline"
         >Back to vehicle types</a
       >
     </p>
   } @else if (vehicleType(); as vt) {
-    <div>
-      <h1 class="text-lg font-semibold text-slate-900">Seat map — {{ vt.name }}</h1>
-      <p class="mt-1 text-sm text-slate-500">Capacity: {{ vt.capacity }} seat(s)</p>
-    </div>
+    <ui-page-header
+      title="Seat map"
+      [description]="
+        vt.name + ' — capacity ' + vt.capacity + ' seats. Every vehicle of this type shares it.'
+      "
+    >
+      <a
+        actions
+        routerLink="/vehicle-types"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
+        >Back to vehicle types</a
+      >
+    </ui-page-header>
 
-    <section>
-      <h2 class="mb-2 text-sm font-semibold text-slate-700">Current layout</h2>
+    <ui-form-section title="Current layout" description="What this vehicle type has today.">
       @if (seatsError(); as message) {
         <ui-alert>{{ message }}</ui-alert>
       } @else if (loadingSeats()) {
-        <p class="text-sm text-slate-500">Loading…</p>
+        <p class="text-sm text-muted">Loading…</p>
       } @else if (existingSeats().length === 0) {
         <ui-empty-state
           title="No seats configured yet"
           description="Generate a layout below to get started."
         />
       } @else {
-        <div class="flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-4">
+        <div class="flex flex-col gap-2 rounded-md border border-border bg-surface p-4">
           @for (row of existingGridRows(); track row.row) {
             <div class="flex flex-wrap items-center gap-6">
               @for (segment of row.segments; track $index) {
                 <div class="flex flex-wrap gap-2">
                   @for (seat of segment; track seat.seatNumber) {
                     <span
-                      class="inline-flex min-h-9 min-w-9 items-center justify-center rounded border border-slate-300 bg-white px-2 text-sm font-medium text-slate-900"
+                      class="inline-flex min-h-9 min-w-9 items-center justify-center rounded border border-control bg-surface px-2 text-sm font-medium text-strong"
                     >
                       {{ seat.seatNumber }}
                     </span>
@@ -41,20 +49,15 @@
             </div>
           }
         </div>
-        <p class="mt-2 text-sm text-slate-500">{{ existingSeats().length }} seat(s) configured.</p>
+        <p class="text-sm text-muted">{{ seatCountLabel() }} configured.</p>
       }
-    </section>
+    </ui-form-section>
 
-    <section
+    <ui-form-section
       *appHasPermission="'seating.manage'"
-      class="flex flex-col gap-4 rounded-md border border-slate-200 bg-white p-4"
+      title="Generate a layout"
+      description="Rows by columns, with an optional aisle. Generating replaces the whole layout — it is confirmed before anything is written."
     >
-      <div>
-        <h2 class="text-sm font-semibold text-slate-700">Generate a new layout</h2>
-        <p class="mt-1 text-sm text-slate-500">
-          Regenerating replaces the vehicle type's entire current layout.
-        </p>
-      </div>
 
       @if (generateError(); as message) {
         <ui-alert>{{ message }}</ui-alert>
@@ -74,7 +77,8 @@
           (ngModelChange)="setColumnsInput($event)"
         />
         <ui-text-field
-          label="Aisle after column (optional)"
+          label="Aisle after column"
+          hint="Optional."
           [ngModel]="aisleInput()"
           [ngModelOptions]="{ standalone: true }"
           (ngModelChange)="setAisleInput($event)"
@@ -82,26 +86,25 @@
       </div>
 
       @if (exceedsCapacity()) {
-        <p class="text-sm text-red-600">
-          {{ totalSeats() }} seat(s) would exceed this vehicle type's capacity of
-          {{ vt.capacity }}.
+        <p class="text-sm text-danger">
+          {{ totalSeatsLabel() }} would exceed this vehicle type's capacity of {{ vt.capacity }}.
         </p>
       }
       @if (invalidAislePosition()) {
-        <p class="text-sm text-red-600">The aisle column must be less than the number of columns.</p>
+        <p class="text-sm text-danger">The aisle column must be less than the number of columns.</p>
       }
 
       @if (rows() >= 1 && columns() >= 1) {
         <div>
-          <p class="mb-2 text-sm font-medium text-slate-700">Preview</p>
-          <div class="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 p-4">
+          <p class="mb-2 text-sm font-medium text-default">Preview</p>
+          <div class="flex flex-col gap-2 rounded-md border border-border bg-surface-muted p-4">
             @for (row of previewRows(); track row.row) {
               <div class="flex flex-wrap items-center gap-6">
                 @for (segment of row.segments; track $index) {
                   <div class="flex flex-wrap gap-2">
                     @for (seat of segment; track seat.seatNumber) {
                       <span
-                        class="inline-flex min-h-9 min-w-9 items-center justify-center rounded border border-slate-300 bg-white px-2 text-sm font-medium text-slate-900"
+                        class="inline-flex min-h-9 min-w-9 items-center justify-center rounded border border-control bg-surface px-2 text-sm font-medium text-strong"
                       >
                         {{ seat.seatNumber }}
                       </span>
@@ -115,14 +118,26 @@
       }
 
       <div>
-        <ui-button [loading]="generating()" [disabled]="!canGenerate()" (pressed)="generate()">
-          Generate
+        <ui-button
+          [loading]="generating()"
+          [disabled]="!canGenerate()"
+          (pressed)="confirmGenerate()"
+        >
+          {{ existingSeats().length > 0 ? 'Replace layout' : 'Generate layout' }}
         </ui-button>
       </div>
-    </section>
-
-    <a routerLink="/vehicle-types" class="text-sm font-medium text-slate-700 hover:text-slate-900"
-      >Back to vehicle types</a
-    >
+    </ui-form-section>
   }
 </div>
+
+<ng-template #confirmBody>
+  <p class="text-sm text-default">
+    @if (existingSeats().length > 0) {
+      This replaces all {{ existingSeats().length }} of this vehicle type's current seats with
+      {{ totalSeats() }} new ones. Existing seats are deleted, not renumbered — any reservation
+      held against one goes with it. Every vehicle of this type is affected.
+    } @else {
+      This creates {{ totalSeats() }} seats for every vehicle of this type.
+    }
+  </p>
+</ng-template>

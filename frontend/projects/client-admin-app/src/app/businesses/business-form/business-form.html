@@ -1,119 +1,135 @@
-<div class="mx-auto max-w-lg">
+<div class="mx-auto max-w-2xl">
   @if (notFound()) {
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       That business couldn't be found.
-      <a routerLink="/businesses" class="font-medium text-slate-900 underline">Back to businesses</a>
+      <a routerLink="/businesses" class="font-medium text-strong underline">Back to businesses</a>
     </p>
   } @else {
-    <h1 class="mb-6 text-lg font-semibold text-slate-900">
-      {{ editing() ? 'Edit business' : 'New business' }}
-    </h1>
+    <ui-page-header
+      class="mb-6"
+      [title]="editing() ? 'Edit business' : 'New business'"
+      description="One operation under this client — its currency, timezone, and how it sells and collects fares."
+    />
 
     @if (errorMessage(); as message) {
       <ui-alert class="mb-4">{{ message }}</ui-alert>
     }
 
     @if (existingBusiness(); as business) {
-      <div class="mb-4">
+      <div class="mb-6">
         <ui-status-pill [label]="business.kyb_status" [tone]="kybStatusTone(business.kyb_status)" />
       </div>
     }
 
-    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-select
-        label="Vertical"
-        [options]="verticalOptions"
-        formControlName="vertical"
-        [invalid]="!!fieldError('vertical')"
-        [errorMessage]="fieldError('vertical')"
-      />
-      <ui-text-field
-        label="Business name"
-        formControlName="name"
-        [invalid]="!!fieldError('name')"
-        [errorMessage]="fieldError('name')"
-      />
-      <ui-select
-        label="Currency"
-        [options]="currencyOptions"
-        formControlName="currency"
-        [invalid]="!!fieldError('currency')"
-        [errorMessage]="fieldError('currency')"
-      />
-      <ui-select
-        label="Timezone"
-        [options]="timezoneOptions"
-        formControlName="timezone"
-        [invalid]="!!fieldError('timezone')"
-        [errorMessage]="fieldError('timezone')"
-      />
-      <ui-select
-        label="Booking mode"
-        [options]="bookingModeOptions"
-        formControlName="booking_mode_default"
-        [invalid]="!!fieldError('booking_mode_default')"
-        [errorMessage]="fieldError('booking_mode_default')"
-      />
-      <!-- Only one of the two switches is meaningful in a given booking
-           mode, so only one is shown. Neither is reset or disabled when
-           hidden: the backend stores both regardless, so a Business
-           that switches mode and back finds its old setting intact
-           (docs/specs/10-booking-modes.md). -->
-      @if (isOpenSeating()) {
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-sm font-medium text-slate-700">Enforce vehicle capacity</p>
-            <p id="capacity-enforced-hint" class="mt-1 text-sm text-slate-500">
-              {{ capacityEnforcedHint }}
-            </p>
-          </div>
-          <ui-toggle
-            label="Enforce vehicle capacity"
-            describedBy="capacity-enforced-hint"
-            [checked]="flag('capacity_enforced')"
-            (toggled)="setFlag('capacity_enforced', $event)"
-          />
-        </div>
-      } @else {
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="text-sm font-medium text-slate-700">Let passengers choose their seat</p>
-            <p id="seat-selection-hint" class="mt-1 text-sm text-slate-500">
-              {{ seatSelectionHint }}
-            </p>
-          </div>
-          <ui-toggle
-            label="Let passengers choose their seat"
-            describedBy="seat-selection-hint"
-            [checked]="flag('seat_selection_enabled')"
-            (toggled)="setFlag('seat_selection_enabled', $event)"
-          />
-        </div>
-      }
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      <ui-form-section title="Identity" description="What this business is and where it operates.">
+        <ui-select
+          label="Vertical"
+          [options]="verticalOptions"
+          formControlName="vertical"
+          [invalid]="!!fieldError('vertical')"
+          [errorMessage]="fieldError('vertical')"
+        />
+        <ui-text-field
+          label="Business name"
+          formControlName="name"
+          [invalid]="!!fieldError('name')"
+          [errorMessage]="fieldError('name')"
+        />
+        <ui-select
+          label="Currency"
+          [options]="currencyOptions"
+          formControlName="currency"
+          [invalid]="!!fieldError('currency')"
+          [errorMessage]="fieldError('currency')"
+        />
+        <ui-select
+          label="Timezone"
+          [options]="timezoneOptions"
+          formControlName="timezone"
+          [invalid]="!!fieldError('timezone')"
+          [errorMessage]="fieldError('timezone')"
+        />
+      </ui-form-section>
 
-      <ui-select
-        label="Fare collection mode"
-        [options]="fareCollectionModeOptions"
-        [hint]="fareCollectionModeHint"
-        formControlName="fare_collection_mode"
-        [invalid]="!!fieldError('fare_collection_mode')"
-        [errorMessage]="fieldError('fare_collection_mode')"
-      />
-      <ui-select
-        label="Fare pricing mode"
-        [options]="farePricingModeOptions"
-        [hint]="farePricingModeHint"
-        formControlName="fare_pricing_mode"
-        [invalid]="!!fieldError('fare_pricing_mode')"
-        [errorMessage]="fieldError('fare_pricing_mode')"
-      />
-      <div class="mt-2 flex gap-3">
+      <ui-form-section
+        title="How seats are sold"
+        description="Fixed for the life of each trip — a trip snapshots this when it is created, so changing it here affects only future trips."
+      >
+        <ui-select
+          label="Booking mode"
+          [options]="bookingModeOptions"
+          formControlName="booking_mode_default"
+          [invalid]="!!fieldError('booking_mode_default')"
+          [errorMessage]="fieldError('booking_mode_default')"
+        />
+        <!-- Only one of the two switches is meaningful in a given booking
+             mode, so only one is shown. Neither is reset or disabled when
+             hidden: the backend stores both regardless, so a Business
+             that switches mode and back finds its old setting intact
+             (docs/specs/10-booking-modes.md). -->
+        @if (isOpenSeating()) {
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-default">Enforce vehicle capacity</p>
+              <p id="capacity-enforced-hint" class="mt-1 text-sm text-muted">
+                {{ capacityEnforcedHint }}
+              </p>
+            </div>
+            <ui-toggle
+              label="Enforce vehicle capacity"
+              describedBy="capacity-enforced-hint"
+              [checked]="flag('capacity_enforced')"
+              (toggled)="setFlag('capacity_enforced', $event)"
+            />
+          </div>
+        } @else {
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-default">Let passengers choose their seat</p>
+              <p id="seat-selection-hint" class="mt-1 text-sm text-muted">
+                {{ seatSelectionHint }}
+              </p>
+            </div>
+            <ui-toggle
+              label="Let passengers choose their seat"
+              describedBy="seat-selection-hint"
+              [checked]="flag('seat_selection_enabled')"
+              (toggled)="setFlag('seat_selection_enabled', $event)"
+            />
+          </div>
+        }
+      </ui-form-section>
+
+      <ui-form-section
+        title="How fares work"
+        description="When passengers pay, and how the price is worked out."
+      >
+        <ui-select
+          label="Fare collection mode"
+          [options]="fareCollectionModeOptions"
+          [hint]="fareCollectionModeHint"
+          formControlName="fare_collection_mode"
+          [invalid]="!!fieldError('fare_collection_mode')"
+          [errorMessage]="fieldError('fare_collection_mode')"
+        />
+        <ui-select
+          label="Fare pricing mode"
+          [options]="farePricingModeOptions"
+          [hint]="farePricingModeHint"
+          formControlName="fare_pricing_mode"
+          [invalid]="!!fieldError('fare_pricing_mode')"
+          [errorMessage]="fieldError('fare_pricing_mode')"
+        />
+      </ui-form-section>
+
+      <div class="flex gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
           {{ editing() ? 'Save changes' : 'Create business' }}
         </ui-button>
         <a
           routerLink="/businesses"
-          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
           >Cancel</a
         >
       </div>
@@ -125,14 +141,14 @@
            with no way to see what had already been supplied, no guidance
            on what a valid document looks like, and nowhere at all to
            record director identity — see docs/specs/11-kyb-directors.md. -->
-      <div class="mt-10 border-t border-slate-200 pt-6">
-        <h2 class="mb-1 text-sm font-medium text-slate-700">Business verification (KYB)</h2>
-        <p class="mb-4 text-sm text-slate-500">
+      <div class="mt-10 border-t border-border pt-6">
+        <h2 class="mb-1 text-sm font-semibold text-strong">Business verification (KYB)</h2>
+        <p class="mb-4 text-sm text-muted">
           Add directors and supply the documents needed to verify this business.
         </p>
         <a
           [routerLink]="['/businesses', business.id, 'kyb']"
-          class="inline-flex min-h-11 items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center rounded-md border border-control px-4 py-2 text-sm font-medium text-default hover:bg-surface-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           Open verification
         </a>

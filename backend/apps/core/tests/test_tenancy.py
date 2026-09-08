@@ -130,3 +130,49 @@ def test_middleware_leaves_no_active_client_for_invalid_token(rf) -> None:  # ty
     middleware(request)
 
     assert seen["client_id"] is None
+
+
+def test_nested_tenant_context_restores_the_outer_rls_session_on_exit() -> None:
+    """A helper that opens its own `tenant_context` must not leave the
+    caller's block without one.
+
+    `tenant_context` used to blank the Postgres session variables on
+    exit rather than restoring them, so an inner block returning left
+    `app.current_client_id` NULL while the outer `with` was still open.
+    The Python contextvars were restored correctly the whole time, which
+    is what made it hard to see: `.objects` reads kept working and only
+    *writes* failed, as `new row violates row-level security policy`.
+
+    This asserts the write, not the contextvar, because the contextvar
+    was never the broken half.
+    """
+    client = ClientFactory()
+
+    with tenant_context(str(client.id)):
+        with tenant_context(str(client.id)):
+            TenancyProbe.all_objects.create(client=client, label="inner")
+
+        # The outer block is still open, so this must still be a valid
+        # RLS write. Before the fix it raised InsufficientPrivilege.
+        TenancyProbe.all_objects.create(client=client, label="after-inner")
+
+        assert set(TenancyProbe.objects.values_list("label", flat=True)) == {
+            "inner",
+            "after-inner",
+        }
+
+
+def test_nested_tenant_context_restores_a_different_outer_client() -> None:
+    """The restore reads the contextvar back rather than remembering a
+    value, so it is correct even when the inner block scopes to a
+    *different* Client than the outer one."""
+    outer = ClientFactory()
+    inner = ClientFactory()
+
+    with tenant_context(str(outer.id)):
+        with tenant_context(str(inner.id)):
+            TenancyProbe.all_objects.create(client=inner, label="inner")
+
+        TenancyProbe.all_objects.create(client=outer, label="outer")
+        # Scoped back to `outer`, so the inner Client's row is invisible.
+        assert set(TenancyProbe.objects.values_list("label", flat=True)) == {"outer"}

@@ -2,21 +2,36 @@ import { DatePipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
+  TemplateRef,
   computed,
   effect,
   inject,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, EmptyState, Paginator, Select, Stat, Table } from '@shared-ui';
-import type { SelectOption } from '@shared-ui';
+import {
+  ActionMenu,
+  Alert,
+  DensityToggle,
+  DrawerService,
+  FilterBar,
+  EmptyState,
+  PageHeader,
+  Paginator,
+  Select,
+  Skeleton,
+  Stat,
+  Table,
+} from '@shared-ui';
+import type { ActionMenuItem, Density, SelectOption } from '@shared-ui';
 
 import { LedgerEntryStore, type JournalEntry } from '../../shared/data/store/ledger-entry.store';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
+import { TableDensityStore } from '../../shared/data/store/table-density.store';
 
 type LedgerAccount = components['schemas']['LedgerAccount'];
 
@@ -63,16 +78,56 @@ function accountLabel(account: LedgerAccount): string {
 @Component({
   selector: 'app-ledger-overview',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Alert, EmptyState, Paginator, Select, Stat, Table],
+  imports: [
+    DatePipe,
+    FormsModule,
+    ActionMenu,
+    Alert,
+    DensityToggle,
+    FilterBar,
+    EmptyState,
+    PageHeader,
+    Paginator,
+    Select,
+    Skeleton,
+    Stat,
+    Table,
+  ],
   templateUrl: './ledger-overview.html',
 })
 export class LedgerOverview {
   protected readonly store = inject(LedgerEntryStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
+  private readonly densityStore = inject(TableDensityStore);
+
+  protected readonly density = this.densityStore.density;
+  protected readonly cellClass = computed(() =>
+    this.density() === 'compact' ? 'py-1' : 'py-3'
+  );
+  protected readonly skeletonRows = [0, 1, 2, 3, 4];
 
   protected readonly entryTypeLabel = ENTRY_TYPE_LABEL;
+
+  private readonly drawers = inject(DrawerService);
+  private readonly detailBody = viewChild.required<TemplateRef<unknown>>('detailBody');
+
+  /** The entry the detail drawer is showing. Its memo is hidden below
+   * `md` and its journal lines below `lg`, and this is where both stay
+   * reachable — see `ui-table`'s note on the responsive-column tiers. */
+  protected readonly selected = signal<JournalEntry | null>(null);
+  protected readonly menuItems: ActionMenuItem[] = [
+    { id: 'details', label: 'View details', icon: 'book-open' },
+  ];
+
+  protected onMenuSelected(entry: JournalEntry): void {
+    this.selected.set(entry);
+    this.drawers.open({
+      title: this.entryTypeLabel[entry.entry_type],
+      description: 'The full journal entry, and every line it posted.',
+      bodyTemplate: this.detailBody(),
+    });
+  }
   protected readonly accountLabel = accountLabel;
 
   private readonly accounts = signal<LedgerAccount[]>([]);
@@ -94,7 +149,10 @@ export class LedgerOverview {
 
   protected readonly accountFilterOptions = computed<SelectOption[]>(() => [
     ALL_ACCOUNTS_OPTION,
-    ...this.accounts().map((account) => ({ value: account.id, label: accountLabel(account) })),
+    ...this.accounts().map((account) => ({
+      value: account.id,
+      label: accountLabel(account),
+    })),
   ]);
 
   private readonly accountsById = computed(
@@ -110,13 +168,20 @@ export class LedgerOverview {
       const businessId = this.selectedBusinessStore.selectedBusinessId();
       if (businessId) {
         untracked(() => {
-          void this.store.updateQuery({ business: businessId, account: undefined });
+          void this.store.updateQuery({
+            business: businessId,
+            account: undefined,
+          });
           void this.loadAccounts(businessId);
         });
       }
     },
     { allowSignalWrites: true }
   );
+
+  protected onDensityChange(next: Density): void {
+    this.densityStore.set(next);
+  }
 
   protected onPageChange(offset: number): void {
     void this.store.changePage(offset);
@@ -141,7 +206,6 @@ export class LedgerOverview {
     this.accountsLoading.set(true);
     const { data } = await this.api.GET('/api/v1/ledger/accounts/', {
       params: { query: { business: businessId, limit: 100, offset: 0 } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.accounts.set(data?.results ?? []);
     this.accountsLoading.set(false);

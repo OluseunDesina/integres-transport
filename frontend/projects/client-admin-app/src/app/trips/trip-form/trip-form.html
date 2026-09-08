@@ -1,53 +1,88 @@
-<div class="mx-auto max-w-lg">
-  <h1 class="mb-6 text-lg font-semibold text-slate-900">New trip</h1>
+<div class="mx-auto max-w-2xl">
+  <ui-page-header
+    class="mb-6"
+    title="New trip"
+    description="A one-off departure. Scheduled trips are generated nightly — this is for the ones that are not."
+  />
 
   @if (errorMessage(); as message) {
     <ui-alert class="mb-4">{{ message }}</ui-alert>
   }
 
-  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-    <ui-select
-      label="Route"
-      [options]="routeOptionsList()"
-      formControlName="route"
-      [invalid]="!!fieldError('route')"
-      [errorMessage]="fieldError('route')"
-    />
-
-    <div class="grid grid-cols-2 gap-4">
-      <ui-text-field
-        label="Service date"
-        type="date"
-        formControlName="service_date"
-        [invalid]="!!fieldError('service_date')"
-        [errorMessage]="fieldError('service_date')"
+  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+    <ui-form-section title="When it runs" description="Which route departs, and at what time.">
+      <ui-select
+        label="Route"
+        [options]="routeOptionsList()"
+        formControlName="route"
+        [invalid]="!!fieldError('route')"
+        [errorMessage]="fieldError('route')"
       />
-      <ui-text-field
-        label="Departure time"
-        type="time"
-        formControlName="departure_time"
-        [invalid]="!!fieldError('departure_time')"
-        [errorMessage]="fieldError('departure_time')"
-      />
-    </div>
 
-    <ui-select label="Vehicle" [options]="vehicleOptionsList()" formControlName="vehicle" />
-    <ui-select label="Driver" [options]="driverOptionsList()" formControlName="driver" />
+      <!-- Narrowed to what the chosen route allows. A vehicle assigned
+           below must match this class, so it is asked before assignment
+           rather than after. -->
+      <ui-select
+        label="Service class"
+        hint="What this departure is sold as. Only a vehicle of the same class can be assigned to it."
+        [options]="tripClassOptions()"
+        formControlName="trip_class"
+        [invalid]="!!fieldError('trip_class')"
+        [errorMessage]="fieldError('trip_class')"
+      />
+
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <ui-text-field
+          label="Service date"
+          type="date"
+          formControlName="service_date"
+          [invalid]="!!fieldError('service_date')"
+          [errorMessage]="fieldError('service_date')"
+        />
+        <ui-text-field
+          label="Departure time"
+          type="time"
+          formControlName="departure_time"
+          [invalid]="!!fieldError('departure_time')"
+          [errorMessage]="fieldError('departure_time')"
+        />
+      </div>
+    </ui-form-section>
+
+    <ui-form-section
+      title="Assignment"
+      description="Optional now — a vehicle and driver can be assigned later from the trips list."
+    >
+      <ui-select
+        label="Vehicle"
+        [options]="vehicleOptionsList()"
+        formControlName="vehicle"
+        [invalid]="!!fieldError('vehicle')"
+        [errorMessage]="fieldError('vehicle')"
+      />
+      <ui-select
+        label="Driver"
+        [options]="driverOptionsList()"
+        formControlName="driver"
+        [invalid]="!!fieldError('driver')"
+        [errorMessage]="fieldError('driver')"
+      />
+    </ui-form-section>
 
     @if (bookingModeLabel(); as mode) {
-      <p class="text-sm text-slate-500">
-        Booking mode: <span class="font-medium text-slate-700">{{ mode }}</span> — taken from this
-        business's default and fixed for the life of the trip.
-      </p>
+      <ui-alert variant="warning">
+        Booking mode: <span class="font-medium">{{ mode }}</span> — taken from this business's
+        default and fixed for the life of the trip.
+      </ui-alert>
     }
 
-    <div class="mt-2 flex gap-3">
+    <div class="flex gap-3">
       <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
         Create trip
       </ui-button>
       <a
         routerLink="/trips"
-        class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
         >Cancel</a
       >
     </div>

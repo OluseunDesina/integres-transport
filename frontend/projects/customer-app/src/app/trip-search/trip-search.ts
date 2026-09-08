@@ -4,11 +4,22 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, EmptyState, Select, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  PageHeader,
+  Select,
+  Skeleton,
+  StatusPill,
+  TextField,
+} from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
+import { plural } from '@shared-ui';
 
+import { BookingSteps } from '../shared/booking-steps';
 import type { SeatPickerRequest } from '../shared/booking-draft';
+import { ALL_TRIP_CLASSES, tripClassFilterOptions, tripClassLabel } from '../shared/trip-class';
 
 type RouteBrowse = components['schemas']['RouteBrowse'];
 type RouteStopEntry = components['schemas']['RouteStopEntry'];
@@ -45,12 +56,23 @@ function toErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-trip-search',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Alert, Button, EmptyState, Select, TextField],
+  imports: [
+    DatePipe,
+    FormsModule,
+    BookingSteps,
+    Alert,
+    Button,
+    EmptyState,
+    PageHeader,
+    Select,
+    Skeleton,
+    StatusPill,
+    TextField,
+  ],
   templateUrl: './trip-search.html',
 })
 export class TripSearch implements OnInit {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly router = inject(Router);
 
   private readonly routes = signal<RouteBrowse[]>([]);
@@ -61,6 +83,7 @@ export class TripSearch implements OnInit {
   protected readonly fromStopId = signal('');
   protected readonly toStopId = signal('');
   protected readonly serviceDate = signal('');
+  protected readonly tripClass = signal(ALL_TRIP_CLASSES);
 
   protected readonly trips = signal<Trip[] | null>(null);
   protected readonly searchError = signal<string | null>(null);
@@ -109,6 +132,27 @@ export class TripSearch implements OnInit {
     ];
   });
 
+  /**
+   * The class filter, narrowed to what the chosen route actually runs
+   * — `available_trip_classes` is already in the browse response
+   * (`RouteBrowseSerializer` extends `RouteSerializer`), so this costs
+   * no request. An empty allow-list means no restriction, so a route
+   * predating spec 15 still offers all four.
+   *
+   * Narrowing without reconciling is the trap spec 15 slice 2 recorded:
+   * a control still holding `premium` against a Standard-only route
+   * renders a `<select>` with no matching `<option>` — it looks empty,
+   * keeps its value, and searches for departures that cannot exist.
+   * Here the class is cleared in `onRouteChange` alongside the stops,
+   * for exactly the reason they are: they belong to the route that was
+   * just replaced. That is simpler than slice 2's reconciliation
+   * `effect` and sufficient, because a route change is the only thing
+   * that narrows this list.
+   */
+  protected readonly tripClassOptions = computed<SelectOption[]>(() =>
+    tripClassFilterOptions(this.selectedRoute()?.available_trip_classes ?? [])
+  );
+
   protected readonly canSearch = computed(
     () =>
       this.routeId() !== '' &&
@@ -121,13 +165,54 @@ export class TripSearch implements OnInit {
     await this.loadRoutes();
   }
 
+  protected departureCountLabel(): string {
+    const results = this.trips() ?? [];
+    return `${plural(results.length, 'departure')} available`;
+  }
+
+  /**
+   * The accessible name for a row's Continue button.
+   *
+   * Every card renders the same visible word, so without this a screen
+   * reader announces "Continue, button" a dozen times with nothing to
+   * tell them apart — the same defect `ui-button.ariaLabel` was added
+   * for on the KYB screen's six Upload buttons. Starts with "Continue"
+   * so the visible label is the first thing announced, and so a
+   * `getByRole('button', { name: 'Continue' })` still matches it.
+   */
+  protected chooseLabel(trip: Trip): string {
+    const time = new Date(trip.scheduled_departure_at).toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    // The class is in the name because it is a real differentiator
+    // between two rows of this list: one route can run a Premium and a
+    // Standard departure minutes apart at different prices, and the
+    // pill that says so is not part of this button's accessible name.
+    const serviceClass = tripClassLabel(trip.trip_class);
+    const service = serviceClass ? `${serviceClass} ` : '';
+    return `Continue with the ${time} ${service}${trip.route.name} departure`;
+  }
+
   protected onRouteChange(value: string): void {
     this.routeId.set(value);
     // Stops belong to the Route that was just replaced — keeping them
-    // would leave a segment pointing at another Route's stops.
+    // would leave a segment pointing at another Route's stops. The
+    // class goes with them for the same reason: the new route may not
+    // run it (see `tripClassOptions`).
     this.fromStopId.set('');
     this.toStopId.set('');
+    this.tripClass.set(ALL_TRIP_CLASSES);
     this.trips.set(null);
+  }
+
+  protected onTripClassChange(value: string): void {
+    this.tripClass.set(value);
+    this.trips.set(null);
+  }
+
+  protected classLabel(value: string | undefined): string {
+    return tripClassLabel(value);
   }
 
   protected onFromStopChange(value: string): void {
@@ -153,7 +238,6 @@ export class TripSearch implements OnInit {
     this.routesError.set(null);
     const { data, error } = await this.api.GET('/api/v1/routes/browse/', {
       params: { query: { limit: MAX_OPTIONS, offset: 0 } },
-      headers: this.authHeader(),
     });
     this.loadingRoutes.set(false);
     if (!data) {
@@ -169,16 +253,20 @@ export class TripSearch implements OnInit {
     }
     this.searching.set(true);
     this.searchError.set(null);
+    const tripClass = this.tripClass();
     const { data, error } = await this.api.GET('/api/v1/trips/search/', {
       params: {
         query: {
           route: this.routeId(),
           service_date: this.serviceDate(),
+          // Omitted rather than sent empty when the passenger has not
+          // narrowed: `trip_class` is a ChoiceField, so `''` is a 400,
+          // not "no filter".
+          ...(tripClass ? { trip_class: tripClass } : {}),
           limit: MAX_OPTIONS,
           offset: 0,
         },
       },
-      headers: this.authHeader(),
     });
     this.searching.set(false);
     if (!data) {
@@ -202,12 +290,9 @@ export class TripSearch implements OnInit {
       scheduledDepartureAt: trip.scheduled_departure_at,
       fromStop: { id: fromStop.id, name: fromStop.name },
       toStop: { id: toStop.id, name: toStop.name },
+      tripClass: trip.trip_class,
     };
     await this.router.navigate(['/search/seats'], { state });
-  }
-
-  private authHeader(): Record<string, string> {
-    return { Authorization: `Bearer ${this.authStore.accessToken()}` };
   }
 }
 

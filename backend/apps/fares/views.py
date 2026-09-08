@@ -9,11 +9,23 @@ from rest_framework.serializers import BaseSerializer
 from rest_framework.views import APIView
 
 from apps.core.permissions import HasPermission
+from apps.identity.models import User
+from apps.network.models import Route
 from apps.scheduling.models import Trip
 
+from .matrix import (
+    FarePricingModeMismatch,
+    UnknownSegment,
+    get_fare_matrix,
+    save_fare_matrix,
+)
 from .models import FareRule, FareSegmentRule
 from .serializers import (
     FareListQuerySerializer,
+    FareMatrixQuerySerializer,
+    FareMatrixSaveResultSerializer,
+    FareMatrixSerializer,
+    FareMatrixWriteSerializer,
     FareRuleCreateSerializer,
     FareRuleSerializer,
     FareRuleSupersedeSerializer,
@@ -23,7 +35,7 @@ from .serializers import (
     TripFareQuerySerializer,
     TripFareQuoteSerializer,
 )
-from .services import FareNotConfigured, get_fare
+from .services import FareNotConfigured, FareOverlap, FareRuleClosed, get_fare
 
 # get_queryset() isn't schema-introspected by drf-spectacular for query
 # params — see apps.network.views's own _BUSINESS_QUERY_PARAM comment
@@ -185,4 +197,130 @@ class TripFareView(APIView):
             return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
         return Response(
             TripFareQuoteSerializer({"amount": quote.amount, "currency": quote.currency}).data
+        )
+
+
+_TRIP_CLASS_MATRIX_PARAM = OpenApiParameter(
+    "trip_class",
+    str,
+    OpenApiParameter.QUERY,
+    required=True,
+    description="Which class's grid to read or write. The empty string "
+    "is the wildcard grid, whose prices apply to any class with no grid "
+    "of its own. Required — see docs/specs/15-trip-classes.md for why "
+    "this is not defaulted.",
+)
+
+
+@extend_schema_view(
+    get=extend_schema(parameters=[_TRIP_CLASS_MATRIX_PARAM], responses=FareMatrixSerializer),
+    put=extend_schema(
+        parameters=[_TRIP_CLASS_MATRIX_PARAM],
+        request=FareMatrixWriteSerializer,
+        responses=FareMatrixSaveResultSerializer,
+    ),
+)
+class RouteFareMatrixView(APIView):
+    """The stop-pair fare grid for one Route —
+    docs/specs/12-fare-matrix.md.
+
+    Per-stop-pair pricing has existed end to end since Phase 4; it was
+    unreachable and, once reached, unusable at scale — a 10-stop route
+    is 45 forward pairs, entered one create flow at a time. This is the
+    bulk read/write that makes it tractable.
+
+    The view orchestrates and never writes: `apps.fares.matrix` calls
+    the existing service functions, which own the versioning. See that
+    module's docstring for why that separation is load-bearing.
+    """
+
+    http_method_names = ["get", "put"]
+
+    def get_permissions(self) -> list[BasePermission]:
+        codename = "fares.manage" if self.request.method == "PUT" else "fares.view"
+        return [HasPermission(codename)()]
+
+    def _get_route(self, pk: str) -> Route:
+        # `Route.objects`, the tenant-scoped manager — a route belonging
+        # to another Client must 404 here, not 403, matching every other
+        # cross-client lookup in this codebase.
+        return get_object_or_404(Route.objects.select_related("business"), pk=pk)
+
+    def _get_trip_class(self, request: Request) -> str:
+        query = FareMatrixQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        return str(query.validated_data["trip_class"])
+
+    def get(self, request: Request, pk: str) -> Response:
+        route = self._get_route(pk)
+        trip_class = self._get_trip_class(request)
+        matrix = get_fare_matrix(route=route, trip_class=trip_class)
+        sequence_by_stop = {str(stop.id): i + 1 for i, stop in enumerate(matrix.stops)}
+        payload = {
+            "route": str(matrix.route.id),
+            "currency": matrix.business.currency,
+            "fare_pricing_mode": matrix.business.fare_pricing_mode,
+            "trip_class": matrix.trip_class,
+            "stops": [
+                {"id": str(stop.id), "name": stop.name, "sequence": sequence_by_stop[str(stop.id)]}
+                for stop in matrix.stops
+            ],
+            "cells": [
+                {
+                    "from_stop": str(cell.from_stop.id),
+                    "to_stop": str(cell.to_stop.id),
+                    "amount": cell.amount,
+                    "fare_segment_rule": (
+                        str(cell.fare_segment_rule.id) if cell.fare_segment_rule else None
+                    ),
+                }
+                for cell in matrix.cells
+            ],
+        }
+        return Response(FareMatrixSerializer(payload).data)
+
+    def put(self, request: Request, pk: str) -> Response:
+        # Narrowed for mypy the same way apps.identity.views does — the
+        # permission class has already rejected anonymous requests, so
+        # this can only be a real User by the time it runs.
+        assert isinstance(request.user, User)
+        route = self._get_route(pk)
+        trip_class = self._get_trip_class(request)
+        serializer = FareMatrixWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            result = save_fare_matrix(
+                route=route,
+                cells=serializer.validated_data["cells"],
+                updated_by=request.user,
+                trip_class=trip_class,
+                effective_from=serializer.validated_data.get("effective_from"),
+            )
+        except FarePricingModeMismatch as exc:
+            # 409, not 400: the submission is well-formed, the *business
+            # configuration* is what refuses it, and the operator's next
+            # action is a different screen.
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except UnknownSegment as exc:
+            return Response(
+                {"detail": str(exc), "segments": exc.pairs},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except (FareRuleClosed, FareOverlap) as exc:
+            # A concurrent save moved the tip this one was superseding.
+            # The GiST exclusion constraint is the real backstop; this is
+            # how it surfaces. 409 so the grid can tell the operator to
+            # reload rather than silently re-applying stale prices.
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        return Response(
+            FareMatrixSaveResultSerializer(
+                {
+                    "created": result.created,
+                    "superseded": result.superseded,
+                    "closed": result.closed,
+                    "unchanged": result.unchanged,
+                }
+            ).data
         )

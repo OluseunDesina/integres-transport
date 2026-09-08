@@ -12,8 +12,12 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
-    <main class="flex min-h-screen items-center justify-center bg-slate-50 px-4 py-12">
-      <div class="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+    <!-- Tokens, not slate-* literals (spec 14 slice 5). The values are
+         identical — surface-muted is ink-50 is slate-50 — so no app's
+         login screen moves; what changes is that a future palette edit
+         reaches this shell like everything else. -->
+    <main class="flex min-h-screen items-center justify-center bg-surface-muted px-4 py-12">
+      <div class="w-full max-w-sm rounded-lg border border-border bg-surface p-8 shadow-sm">
         <ng-content />
       </div>
     </main>

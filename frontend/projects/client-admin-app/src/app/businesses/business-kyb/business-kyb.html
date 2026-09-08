@@ -1,42 +1,45 @@
 <div class="mx-auto max-w-2xl">
   @if (notFound()) {
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       That business couldn't be found.
-      <a routerLink="/businesses" class="font-medium text-slate-900 underline">Back to businesses</a>
+      <a routerLink="/businesses" class="font-medium text-strong underline">Back to businesses</a>
     </p>
   } @else if (loading()) {
-    <p class="text-sm text-slate-500">Loading…</p>
+    <p class="text-sm text-muted">Loading…</p>
   } @else {
-    <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h1 class="text-lg font-semibold text-slate-900">
-          Business verification (KYB)
-        </h1>
-        @if (business(); as b) {
-          <p class="mt-1 text-sm text-slate-500">{{ b.name }}</p>
-        }
-      </div>
+    <ui-page-header
+      class="mb-6"
+      title="Business verification (KYB)"
+      [description]="
+        business()?.name
+          ? business()!.name +
+            ' — supply the documents below so we can verify this business. Uploading after approval adds to the record without changing the decision.'
+          : 'Supply the documents below so we can verify this business.'
+      "
+    >
       @if (business(); as b) {
-        <ui-status-pill [label]="b.kyb_status" [tone]="kybStatusTone(b.kyb_status)" />
+        <ui-status-pill actions [label]="b.kyb_status" [tone]="kybStatusTone(b.kyb_status)" />
       }
-    </div>
-
-    <p class="mb-6 text-sm text-slate-600">
-      Supply the documents below so we can verify this business. You can come back at any time —
-      each section shows what has already been supplied. Uploading a document after approval adds
-      it to the record without changing the decision.
-    </p>
+    </ui-page-header>
 
     @if (errorMessage(); as message) {
       <ui-alert class="mb-4">{{ message }}</ui-alert>
     }
 
+    <ui-tabs
+      class="mb-6 block"
+      [tabs]="tabs"
+      [activeId]="activeTab()"
+      ariaLabel="Verification sections"
+      (activeIdChange)="setActiveTab($event)"
+    >
+
     <!-- 1. Directors ------------------------------------------------------ -->
-    <section class="mb-10">
-      <h2 class="mb-1 text-sm font-semibold text-slate-900">Directors</h2>
-      <p class="mb-4 text-sm text-slate-500">
-        Add every director named on the business's CAC filing, then upload each one's ID.
-      </p>
+    @if (activeTab() === 'directors') {
+    <ui-form-section
+      title="Directors"
+      description="Add every director named on the business's CAC filing, then upload each one's ID."
+    >
 
       @if (activeDirectors().length === 0) {
         <!-- `ui-empty-state`, not a hand-rolled dashed box: this screen
@@ -50,15 +53,15 @@
       } @else {
         <ul class="mb-4 flex flex-col gap-3">
           @for (director of activeDirectors(); track director.id) {
-            <li class="rounded-md border border-slate-200 p-4">
+            <li class="rounded-md border border-border p-4">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <!-- `min-w-0 flex-1`: without it a long name wrapped the
                      Remove button onto its own line for some directors and
                      not others, so a list of four rendered four different
                      header layouts. -->
                 <div class="min-w-0 flex-1 wrap-anywhere">
-                  <p class="text-sm font-medium text-slate-900">{{ director.full_name }}</p>
-                  <p class="text-sm text-slate-500">
+                  <p class="text-sm font-medium text-strong">{{ director.full_name }}</p>
+                  <p class="text-sm text-muted">
                     {{ idTypeLabel(director.id_type)
                     }}{{ director.id_number ? ' · ' + director.id_number : '' }}
                   </p>
@@ -76,14 +79,14 @@
               @if (documentsForDirector(director.id).length > 0) {
                 <ul class="mt-3 flex flex-col gap-1">
                   @for (doc of documentsForDirector(director.id); track doc.id) {
-                    <li class="flex items-center gap-2 text-sm text-slate-600">
+                    <li class="flex items-center gap-2 text-sm text-default">
                       <ui-status-pill [label]="doc.status" [tone]="kybStatusTone(doc.status)" />
                       <span>{{ fileName(doc) }}</span>
                     </li>
                   }
                 </ul>
               } @else {
-                <p class="mt-3 text-sm text-amber-700">No ID uploaded yet.</p>
+                <p class="mt-3 text-sm text-warning">No ID uploaded yet.</p>
               }
 
               <div *appHasPermission="'kyb.submit'" class="mt-3 flex flex-wrap items-end gap-3">
@@ -98,7 +101,7 @@
                 <div class="flex min-w-0 flex-1 flex-col gap-1 sm:max-w-sm">
                   <label
                     [attr.for]="'director-file-' + director.id"
-                    class="wrap-anywhere text-sm font-medium text-slate-700"
+                    class="wrap-anywhere text-sm font-medium text-default"
                   >
                     {{ director.full_name }}'s ID document
                   </label>
@@ -107,7 +110,7 @@
                     type="file"
                     accept="application/pdf,image/*"
                     (change)="onFileSelected('director:' + director.id, $event)"
-                    class="min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+                    class="min-h-11 w-full rounded-md border border-control px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-surface-muted file:px-3 file:py-1.5 file:text-sm file:font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   />
                 </div>
                 <ui-button
@@ -124,15 +127,15 @@
         </ul>
       }
 
-      <!-- `bg-slate-50`: the add form and a director row were the same
+      <!-- A sunken ground: the add form and a director row were the same
            border, radius and padding on the same white ground, so the
            form read as one more entry in the list rather than as the
            control that creates them. -->
       <div
         *appHasPermission="'business.manage'"
-        class="rounded-md border border-slate-200 bg-slate-50 p-4"
+        class="rounded-md border border-border bg-surface-muted p-4"
       >
-        <h3 class="mb-3 text-sm font-medium text-slate-700">Add a director</h3>
+        <h3 class="mb-3 text-sm font-medium text-default">Add a director</h3>
         <form [formGroup]="directorForm" (ngSubmit)="addDirector()" class="flex flex-col gap-4" novalidate>
           <ui-text-field
             label="Full name"
@@ -140,17 +143,24 @@
             [invalid]="!!fieldError('full_name')"
             [errorMessage]="fieldError('full_name')"
           />
+          <!-- The guidance was a loose <p> under the select, which
+               reaches sighted users only. `hint` wires it through
+               aria-describedby. -->
           <ui-select
             label="ID type"
             [options]="idTypeOptions"
+            [hint]="idGuidance() ? idGuidance() + ' ' + idGeneralGuidance : null"
             formControlName="id_type"
             [invalid]="!!fieldError('id_type')"
             [errorMessage]="fieldError('id_type')"
           />
-          @if (idGuidance(); as guidance) {
-            <p class="-mt-2 text-sm text-slate-500">{{ guidance }} {{ idGeneralGuidance }}</p>
-          }
-          <ui-text-field label="ID number (optional)" formControlName="id_number" />
+          <ui-text-field
+            label="ID number"
+            hint="Optional."
+            formControlName="id_number"
+            [invalid]="!!fieldError('id_number')"
+            [errorMessage]="fieldError('id_number')"
+          />
           <div>
             <ui-button type="submit" [loading]="addingDirector()" [disabled]="addingDirector()">
               Add director
@@ -158,25 +168,26 @@
           </div>
         </form>
       </div>
-    </section>
+    </ui-form-section>
+    }
 
     <!-- 2-5. Company-level documents -------------------------------------- -->
+    @if (activeTab() === 'documents') {
+    <div class="flex flex-col gap-8">
     @for (section of companySections; track section.type) {
-      <section class="mb-8 border-t border-slate-200 pt-6">
-        <h2 class="mb-1 text-sm font-semibold text-slate-900">{{ section.title }}</h2>
-        <p class="mb-3 text-sm text-slate-500">{{ section.guidance }}</p>
+      <ui-form-section [title]="section.title" [description]="section.guidance">
 
         @if (documentsFor(section.type).length > 0) {
           <ul class="mb-3 flex flex-col gap-1">
             @for (doc of documentsFor(section.type); track doc.id) {
-              <li class="flex items-center gap-2 text-sm text-slate-600">
+              <li class="flex items-center gap-2 text-sm text-default">
                 <ui-status-pill [label]="doc.status" [tone]="kybStatusTone(doc.status)" />
                 <span>{{ fileName(doc) }}</span>
               </li>
             }
           </ul>
         } @else {
-          <p class="mb-3 text-sm text-amber-700">Not supplied yet.</p>
+          <p class="mb-3 text-sm text-warning">Not supplied yet.</p>
         }
 
         <div *appHasPermission="'kyb.submit'" class="flex flex-wrap items-end gap-3">
@@ -195,7 +206,7 @@
               type="file"
               accept="application/pdf,image/*"
               (change)="onFileSelected(section.type, $event)"
-              class="min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
+              class="min-h-11 w-full rounded-md border border-control px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-surface-muted file:px-3 file:py-1.5 file:text-sm file:font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             />
           </div>
           <ui-button
@@ -207,13 +218,16 @@
             Upload
           </ui-button>
         </div>
-      </section>
+      </ui-form-section>
     }
+    </div>
+    }
+    </ui-tabs>
 
-    <div class="mt-8 border-t border-slate-200 pt-6">
+    <div class="mt-8 border-t border-border pt-6">
       <a
         routerLink="/businesses"
-        class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+        class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
         >Back to businesses</a
       >
     </div>

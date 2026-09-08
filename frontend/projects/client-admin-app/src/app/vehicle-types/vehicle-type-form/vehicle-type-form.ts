@@ -9,25 +9,19 @@ import {
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  FormSection,
+  PageHeader,
+  Select,
+  TextField,
+} from '@shared-ui';
 
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 import { VehicleTypeStore } from '../../shared/data/store/vehicle-type.store';
-
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
+import { applyServerErrors, clearServerErrors, fieldErrorMessage } from '../../shared/form-errors';
+import { TRIP_CLASS_OPTIONS, type TripClass } from '../../shared/trip-class';
 
 /**
  * One component for create (`vehicle-types/new`) and edit
@@ -39,7 +33,9 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-vehicle-type-form',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, RouterLink, Alert, Button, TextField],
+  imports: [ReactiveFormsModule, RouterLink, Alert,
+    FormSection,
+    PageHeader, Button, Select, TextField],
   templateUrl: './vehicle-type-form.html',
 })
 export class VehicleTypeForm implements OnInit {
@@ -47,7 +43,6 @@ export class VehicleTypeForm implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   protected readonly store = inject(VehicleTypeStore);
 
@@ -64,10 +59,16 @@ export class VehicleTypeForm implements OnInit {
   // and let a user create a record under a Business other than the one
   // every other screen was showing them. The control stays purely as
   // the value carrier for create.
+  protected readonly tripClassOptions = TRIP_CLASS_OPTIONS;
+
   protected readonly form = this.fb.nonNullable.group({
     business: ['', Validators.required],
     name: ['', Validators.required],
     capacity: [1, [Validators.required, Validators.min(1)]],
+    // docs/specs/15-trip-classes.md. Defaults to `standard` — the class
+    // every vehicle type created before spec 15 backfilled to — so a
+    // form submitted without touching this keeps behaving as it did.
+    trip_class: ['standard' as TripClass, Validators.required],
   });
 
   async ngOnInit(): Promise<void> {
@@ -98,6 +99,14 @@ export class VehicleTypeForm implements OnInit {
       business: vehicleType.business,
       name: vehicleType.name,
       capacity: vehicleType.capacity,
+      // `?? 'standard'` is load-bearing, not defensive noise. The
+      // generated type marks this optional (the model field has a
+      // default, so DRF marks it not-required), and `patchValue`
+      // *applies* an explicit `undefined` rather than skipping it —
+      // which would blank a required control and make the form silently
+      // unsubmittable. Standard is the value the backend would have
+      // sent anyway.
+      trip_class: vehicleType.trip_class ?? 'standard',
     });
     this.form.controls.business.disable();
   }
@@ -110,35 +119,37 @@ export class VehicleTypeForm implements OnInit {
 
     this.submitting.set(true);
     this.errorMessage.set(null);
+    clearServerErrors(this.form);
     const values = this.form.getRawValue();
-    const authHeader = {
-      Authorization: `Bearer ${this.authStore.accessToken()}`,
-    };
     const id = this.vehicleTypeId();
 
     const { data, error } = id
       ? await this.api.PATCH('/api/v1/vehicle-types/{id}/', {
           params: { path: { id } },
-          body: { name: values.name, capacity: values.capacity },
-          headers: authHeader,
+          body: {
+            name: values.name,
+            capacity: values.capacity,
+            trip_class: values.trip_class,
+          },
         })
       : await this.api.POST('/api/v1/vehicle-types/', {
           body: {
             business: values.business,
             name: values.name,
             capacity: values.capacity,
+            trip_class: values.trip_class,
           },
-          headers: authHeader,
         });
 
     this.submitting.set(false);
 
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(
+        applyServerErrors(
+          this.form,
           error,
-          'Could not save this vehicle type. Check your details and try again.',
-        ),
+          'Could not save this vehicle type. Check your details and try again.'
+        )
       );
       return;
     }
@@ -146,11 +157,10 @@ export class VehicleTypeForm implements OnInit {
     await this.router.navigate(['/vehicle-types']);
   }
 
-  protected fieldError(field: 'business' | 'name' | 'capacity'): string | null {
-    const control = this.form.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+  /** Every field, not just those with a validator: any of them can
+   * come back rejected by the server, and `fieldErrorMessage`
+   * surfaces that the same way it surfaces a client-side failure. */
+  protected fieldError(field: 'business' | 'name' | 'capacity' | 'trip_class'): string | null {
+    return fieldErrorMessage(this.form.controls[field]);
   }
 }

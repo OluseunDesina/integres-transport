@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, request, test, type Page } from '@playwright/test';
 
-import { findVehicleByRegistration } from '../fixture-lookup';
+import { findBrowseRouteByName, findVehicleByRegistration } from '../fixture-lookup';
 
 const STAFF_EMAIL = 'e2e-client-staff@example.com';
 const PASSENGER_EMAIL = 'e2e-passenger@example.com';
@@ -53,12 +53,11 @@ async function seedBooking(): Promise<SeededBooking> {
       ).json()
     ).access as string;
 
-    const routes = await (
-      await api.get(`${BACKEND_URL}/api/v1/routes/browse/`, {
-        headers: { Authorization: `Bearer ${passengerToken}` },
-      })
-    ).json();
-    const route = routes.results.find((r: { name: string }) => r.name === ROUTE_NAME);
+    // Paged, not page 1 plus `.find()` — accumulated e2e routes pushed
+    // the fixture past the first page, which surfaced as
+    // `Cannot read properties of undefined (reading 'stops')` and is the
+    // known-red recorded against this spec.
+    const route = await findBrowseRouteByName(api, passengerToken, ROUTE_NAME);
     const fromStop = route.stops[0];
     const toStop = route.stops[route.stops.length - 1];
 
@@ -139,33 +138,42 @@ test.describe('client-admin-app bookings', () => {
     await expect(row).toBeVisible();
     await expect(row.getByText('Pending payment')).toBeVisible();
 
-    // Staff have ops visibility only — booking.view carries no cancel
-    // codename, so this table must offer nothing to click on a row.
-    await expect(row.getByRole('button')).toHaveCount(0);
+    // Staff have ops visibility only — `booking.view` carries no cancel
+    // codename. Slice 3b gave the row a menu, but it offers reading and
+    // nothing else.
+    await row.getByRole('button', { name: new RegExp('^Actions for') }).click();
+    await expect(page.getByRole('menuitem')).toHaveText(['View details']);
+    await page.keyboard.press('Escape');
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
   });
 
-  test('filters by trip and by status', async ({ page }) => {
-    const seeded = await seedBooking();
+  test('filters by search and by status', async ({ page }) => {
+    // The trip dropdown this test used to drive is gone. It fetched
+    // `limit=100` against ascending Trip ordering, so a Business with
+    // more than 100 trips was offered its *oldest* hundred and no recent
+    // one was selectable — the known-red recorded in
+    // docs/self-check-2026-08-26-spec11.md. Server-side search replaces
+    // it, which is why this test is green rather than merely different.
+    await seedBooking();
 
     await signIn(page);
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await page.goto('/bookings');
 
-    await page.getByLabel('Trip', { exact: true }).selectOption({ value: seeded.tripId });
+    await page.getByLabel('Search bookings').fill(ROUTE_NAME);
     const row = page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first();
     await expect(row).toBeVisible();
 
-    await page.getByLabel('Status').selectOption({ label: 'Cancelled' });
+    await page.getByLabel('Status', { exact: true }).selectOption({ label: 'Cancelled' });
     await expect(row).not.toBeVisible();
 
-    await page.getByLabel('Status').selectOption({ label: 'Pending payment' });
+    await page.getByLabel('Status', { exact: true }).selectOption({ label: 'Pending payment' });
     await expect(row).toBeVisible();
 
-    await page.getByLabel('Trip', { exact: true }).selectOption({ label: 'All trips' });
-    await page.getByLabel('Status').selectOption({ label: 'All statuses' });
+    // Clear-all empties search and status together.
+    await page.getByRole('button', { name: 'Clear all' }).click();
     await expect(page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first()).toBeVisible();
   });
 });

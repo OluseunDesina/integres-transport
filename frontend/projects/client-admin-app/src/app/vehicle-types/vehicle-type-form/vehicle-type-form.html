@@ -1,46 +1,63 @@
-<div class="mx-auto max-w-lg">
+<div class="mx-auto max-w-2xl">
   @if (notFound()) {
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       That vehicle type couldn't be found.
-      <a routerLink="/vehicle-types" class="font-medium text-slate-900 underline"
+      <a routerLink="/vehicle-types" class="font-medium text-strong underline"
         >Back to vehicle types</a
       >
     </p>
   } @else {
-    <h1 class="mb-6 text-lg font-semibold text-slate-900">
-      {{ editing() ? 'Edit vehicle type' : 'New vehicle type' }}
-    </h1>
+    <ui-page-header
+      class="mb-6"
+      [title]="editing() ? 'Edit vehicle type' : 'New vehicle type'"
+      description="A class of vehicle. Its seat map is generated once and inherited by every vehicle of this type."
+    />
 
     @if (errorMessage(); as message) {
       <ui-alert class="mb-4">{{ message }}</ui-alert>
     }
 
-    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-text-field
-        label="Name"
-        formControlName="name"
-        [invalid]="!!fieldError('name')"
-        [errorMessage]="fieldError('name')"
-      />
-      <ui-text-field
-        label="Capacity (seats)"
-        formControlName="capacity"
-        [invalid]="!!fieldError('capacity')"
-        [errorMessage]="fieldError('capacity')"
-      />
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      <ui-form-section
+        title="Identity"
+        description="How this class of vehicle is referred to when registering vehicles."
+      >
+        <ui-text-field
+          label="Name"
+          hint="Something an operator would recognise, such as '33-seater coaster'."
+          formControlName="name"
+          [invalid]="!!fieldError('name')"
+          [errorMessage]="fieldError('name')"
+        />
+        <ui-text-field
+          label="Capacity (seats)"
+          formControlName="capacity"
+          [invalid]="!!fieldError('capacity')"
+          [errorMessage]="fieldError('capacity')"
+        />
+        <ui-select
+          label="Service class"
+          hint="A vehicle of this type can only be assigned to trips of the same class."
+          [options]="tripClassOptions"
+          formControlName="trip_class"
+          [invalid]="!!fieldError('trip_class')"
+          [errorMessage]="fieldError('trip_class')"
+        />
+      </ui-form-section>
 
-      <!-- No Active checkbox: activating/deactivating is a one-click
-           switch on the list table now. `is_active` is not sent from
-           this form at all, so a details-only save can't clobber a
-           toggle made elsewhere in the meantime. -->
+      <!-- No Active control: activating or deactivating a vehicle type is
+           an explicit, confirmed action in the list's row menu
+           (docs/specs/14's one behavioural change). `is_active` is not
+           sent from this form at all, so a details-only save cannot
+           clobber a status change made elsewhere in the meantime. -->
 
-      <div class="mt-2 flex gap-3">
+      <div class="flex gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
           {{ editing() ? 'Save changes' : 'Create vehicle type' }}
         </ui-button>
         <a
           routerLink="/vehicle-types"
-          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
           >Cancel</a
         >
       </div>

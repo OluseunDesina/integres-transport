@@ -31,13 +31,21 @@ from .services import (
     OpenJourneyExists,
     StopNotOnRoute,
     TripNotOpenForTaps,
-    TripNotTapAndGo,
+    TripNotPayAsYouGo,
     UnknownToken,
     issue_credential,
     record_tap,
     revoke_credential,
 )
 
+_BUSINESS_QUERY_PARAM = OpenApiParameter(
+    "business",
+    str,
+    OpenApiParameter.QUERY,
+    required=False,
+    description="Filter to a single Business's journeys, through their Trip. "
+    "An unknown or another Client's Business id returns 400.",
+)
 _TRIP_QUERY_PARAM = OpenApiParameter(
     "trip", str, OpenApiParameter.QUERY, required=False, description="Filter to a single Trip."
 )
@@ -174,7 +182,7 @@ class TapRecordView(generics.GenericAPIView[Trip]):
             return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
         except CredentialInactive as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
-        except (TripNotTapAndGo, TripNotOpenForTaps, StopNotOnRoute, InvalidAlightStop) as exc:
+        except (TripNotPayAsYouGo, TripNotOpenForTaps, StopNotOnRoute, InvalidAlightStop) as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except OpenJourneyExists as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
@@ -188,7 +196,11 @@ class TapRecordView(generics.GenericAPIView[Trip]):
 # --- Fare journeys -----------------------------------------------------
 
 
-@extend_schema_view(get=extend_schema(parameters=[_TRIP_QUERY_PARAM, _STATUS_QUERY_PARAM]))
+@extend_schema_view(
+    get=extend_schema(
+        parameters=[_BUSINESS_QUERY_PARAM, _TRIP_QUERY_PARAM, _STATUS_QUERY_PARAM]
+    )
+)
 class FareJourneyListView(generics.ListAPIView[FareJourney]):
     """GET /fare-journeys/ — staff read-only visibility, gated on
     `tapngo.view`. No staff-side mutation of a journey exists this
@@ -202,14 +214,23 @@ class FareJourneyListView(generics.ListAPIView[FareJourney]):
         queryset = FareJourney.objects.select_related(
             "trip__route", "board_stop", "alight_stop", "passenger"
         ).all()
-        query = FareJourneyListQuerySerializer(data=self.request.query_params)
+        query = FareJourneyListQuerySerializer(data=self.request.query_params.dict())
         query.is_valid(raise_exception=True)
+
+        # A FareJourney has no business of its own — it belongs to one
+        # through its Trip, which is where the scoping has to reach.
+        business = query.validated_data.get("business")
+        if business is not None:
+            queryset = queryset.filter(trip__business=business)
+
         trip = query.validated_data.get("trip")
-        status_filter = query.validated_data.get("status")
         if trip is not None:
             queryset = queryset.filter(trip=trip)
+
+        status_filter = query.validated_data.get("status")
         if status_filter is not None:
             queryset = queryset.filter(status=status_filter)
+
         return queryset
 
 

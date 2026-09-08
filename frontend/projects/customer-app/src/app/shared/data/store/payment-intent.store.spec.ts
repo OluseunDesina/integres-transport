@@ -15,6 +15,9 @@ function makePaymentIntent(overrides: Record<string, unknown> = {}) {
     psp_provider: 'paystack',
     psp_reference: 'ref-1',
     psp_authorization_url: '',
+    // docs/specs/16-operational-analytics.md slice 1 — blank is
+    // what every intent that never succeeded carries.
+    channel: '',
     succeeded_at: '2026-08-10T00:00:00Z',
     failed_at: null,
     requires_manual_refund: false,

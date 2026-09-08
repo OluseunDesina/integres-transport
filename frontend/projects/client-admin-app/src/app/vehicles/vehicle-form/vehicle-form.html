@@ -1,57 +1,68 @@
-<div class="mx-auto max-w-lg">
+<div class="mx-auto max-w-2xl">
   @if (notFound()) {
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       That vehicle couldn't be found.
-      <a routerLink="/vehicles" class="font-medium text-slate-900 underline">Back to vehicles</a>
+      <a routerLink="/vehicles" class="font-medium text-strong underline">Back to vehicles</a>
     </p>
   } @else {
-    <h1 class="mb-6 text-lg font-semibold text-slate-900">
-      {{ editing() ? 'Edit vehicle' : 'New vehicle' }}
-    </h1>
+    <ui-page-header
+      class="mb-6"
+      [title]="editing() ? 'Edit vehicle' : 'New vehicle'"
+      description="Vehicle type cannot be changed after creation — it fixes the seat map."
+    />
 
     @if (errorMessage(); as message) {
       <ui-alert class="mb-4">{{ message }}</ui-alert>
     }
 
-    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-select
-        label="Vehicle type"
-        [options]="vehicleTypeOptionsList()"
-        formControlName="vehicle_type"
-        [invalid]="!!fieldError('vehicle_type')"
-        [errorMessage]="fieldError('vehicle_type')"
-      />
-      <ui-text-field
-        label="Registration number"
-        formControlName="registration_number"
-        [invalid]="!!fieldError('registration_number')"
-        [errorMessage]="fieldError('registration_number')"
-      />
-      <div class="grid grid-cols-2 gap-4">
-        <ui-text-field
-          label="Insurance expires"
-          type="date"
-          formControlName="insurance_expires_at"
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      <ui-form-section title="Identity" description="How this vehicle is recognised on the road.">
+        <ui-select
+          label="Vehicle type"
+          [options]="vehicleTypeOptionsList()"
+          formControlName="vehicle_type"
+          [invalid]="!!fieldError('vehicle_type')"
+          [errorMessage]="fieldError('vehicle_type')"
         />
         <ui-text-field
-          label="Roadworthiness expires"
-          type="date"
-          formControlName="roadworthiness_expires_at"
+          label="Registration number"
+          formControlName="registration_number"
+          [invalid]="!!fieldError('registration_number')"
+          [errorMessage]="fieldError('registration_number')"
         />
-      </div>
+      </ui-form-section>
 
-      <!-- No Active checkbox: activating/deactivating is a one-click
-           switch on the list table now. `is_active` is not sent from
-           this form at all, so a details-only save can't clobber a
-           toggle made elsewhere in the meantime. -->
+      <ui-form-section
+        title="Compliance"
+        description="Leave a date blank if it is not recorded. An expired date raises a warning on the vehicles list."
+      >
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <ui-text-field
+            label="Insurance expires"
+            type="date"
+            formControlName="insurance_expires_at"
+          />
+          <ui-text-field
+            label="Roadworthiness expires"
+            type="date"
+            formControlName="roadworthiness_expires_at"
+          />
+        </div>
+      </ui-form-section>
 
-      <div class="mt-2 flex gap-3">
+      <!-- No Active checkbox: activating/deactivating is an explicit,
+           confirmed action in the list's row menu (docs/specs/14's one
+           behavioural change). `is_active` is not sent from this form at
+           all, so a details-only save can't clobber a status change made
+           elsewhere in the meantime. -->
+
+      <div class="flex gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
           {{ editing() ? 'Save changes' : 'Create vehicle' }}
         </ui-button>
         <a
           routerLink="/vehicles"
-          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
           >Cancel</a
         >
       </div>

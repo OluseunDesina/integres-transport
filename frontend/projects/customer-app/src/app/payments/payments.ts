@@ -1,6 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
-import { Alert, EmptyState, Paginator, StatusPill, Table } from '@shared-ui';
+import { Alert, EmptyState, PageHeader, Paginator, StatusPill, Table } from '@shared-ui';
 import type { StatusPillTone } from '@shared-ui';
 
 import { PaymentIntentStore, type PaymentIntent } from '../shared/data/store/payment-intent.store';
@@ -33,7 +33,7 @@ const STATUS_LABEL: Record<PaymentStatus, string> = {
 @Component({
   selector: 'app-payments',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, Alert, EmptyState, Paginator, StatusPill, Table],
+  imports: [DatePipe, Alert, EmptyState, PageHeader, Paginator, StatusPill, Table],
   templateUrl: './payments.html',
 })
 export class Payments implements OnInit {

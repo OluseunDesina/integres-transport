@@ -5,6 +5,7 @@ from typing import Any
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from apps.businesses.models import Business
 from apps.network.models import Stop
 from apps.scheduling.models import Trip
 
@@ -175,8 +176,24 @@ class FareJourneySerializer(serializers.ModelSerializer[FareJourney]):
 
 
 class FareJourneyListQuerySerializer(serializers.Serializer):
+    """`business` was missing until spec 14 slice 3b, so client-admin's
+    journey list spanned every Business under the Client while the
+    header switcher claimed one was active — the same gap
+    `BookingListQuerySerializer` and `TripListQuerySerializer` each
+    record having had."""
+
+    business = serializers.UUIDField(required=False)
     trip = serializers.UUIDField(required=False)
     status = serializers.ChoiceField(choices=FareJourney.Status.choices, required=False)
+
+    def validate_business(self, value: Any) -> Business:
+        # Same unknown-or-foreign-id-→400 convention as every sibling.
+        try:
+            return Business.objects.get(pk=value)
+        except Business.DoesNotExist:
+            raise serializers.ValidationError(
+                "Unknown business.", code="unknown_business"
+            ) from None
 
     def validate_trip(self, value: Any) -> Trip:
         return _resolve_trip(value)

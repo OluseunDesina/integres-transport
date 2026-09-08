@@ -1,1 +1,23 @@
-@import "tailwindcss";
+/* Self-hosted Inter, latin subsets only — no external font request, and
+   no Cyrillic/Greek weight this UI never renders. */
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
+
+@import 'tailwindcss';
+
+/* Design tokens — must come after the Tailwind import so its `@theme`
+   block extends the default theme rather than being overwritten by it.
+   See docs/specs/14-design-system-and-ui-rebuild.md. */
+@import '../../shared-ui/src/theme.css';
+
+/* `ui-map` (spec 20 slice 3) — Leaflet's own layout/positioning rules
+   for tiles and panes. Self-hosted via npm, not a CDN script, per this
+   file's own "no external dependency" rule above; only the *tiles*
+   fetch over the network at runtime, which is the spec's own accepted
+   tradeoff (docs/specs/20-live-operations.md's "Mapping library"
+   section). Markers are custom `L.divIcon`s styled from this app's own
+   tokens, so Leaflet's default marker image assets are never
+   referenced. */
+@import 'leaflet/dist/leaflet.css';

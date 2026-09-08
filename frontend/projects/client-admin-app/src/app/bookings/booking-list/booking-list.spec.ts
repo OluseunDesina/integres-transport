@@ -3,6 +3,8 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 
+import { expectColumnVisibilityParity } from '@shared-ui';
+
 import { BookingList } from './booking-list';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 
@@ -26,8 +28,22 @@ function makeBooking(overrides: Record<string, unknown> = {}) {
     currency: 'NGN',
     cancellation_reason: '',
     seats: [
-      { id: 'r1', seat: '1A', from_stop: 'Ikeja', to_stop: 'CMS', status: 'held', held_until: '' },
-      { id: 'r2', seat: '1B', from_stop: 'Ikeja', to_stop: 'CMS', status: 'held', held_until: '' },
+      {
+        id: 'r1',
+        seat: '1A',
+        from_stop: 'Ikeja',
+        to_stop: 'CMS',
+        status: 'held',
+        held_until: '',
+      },
+      {
+        id: 'r2',
+        seat: '1B',
+        from_stop: 'Ikeja',
+        to_stop: 'CMS',
+        status: 'held',
+        held_until: '',
+      },
     ],
     created_at: '2026-08-10T09:00:00Z',
     ...overrides,
@@ -57,13 +73,15 @@ describe('BookingList', () => {
 
   beforeEach(() => {
     apiClient = {
-      GET: jasmine.createSpy('GET').and.callFake((path: string) =>
-        Promise.resolve(
-          path === '/api/v1/trips/'
-            ? { data: { count: 1, results: [makeTrip()] } }
-            : { data: { count: 1, results: [makeBooking()] } }
-        )
-      ),
+      GET: jasmine
+        .createSpy('GET')
+        .and.callFake((path: string) =>
+          Promise.resolve(
+            path === '/api/v1/trips/'
+              ? { data: { count: 1, results: [makeTrip()] } }
+              : { data: { count: 1, results: [makeBooking()] } }
+          )
+        ),
     };
 
     TestBed.configureTestingModule({
@@ -71,7 +89,10 @@ describe('BookingList', () => {
       providers: [
         provideRouter([]),
         { provide: API_CLIENT, useValue: apiClient },
-        { provide: SelectedBusinessStore, useValue: new FakeSelectedBusinessStore() },
+        {
+          provide: SelectedBusinessStore,
+          useValue: new FakeSelectedBusinessStore(),
+        },
       ],
     });
   });
@@ -89,7 +110,9 @@ describe('BookingList', () => {
     const cells = Array.from(
       (fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr td')
     ).map((td) => td.textContent?.trim());
-    expect(cells[0]).toBe('Ikeja → CMS');
+    // The route cell now carries the responsive sub-line as well, so it
+    // is asserted by its parts rather than by exact equality.
+    expect(cells[0]).toContain('Ikeja → CMS');
     expect(cells[1]).toBe('2026-09-01');
     expect(cells[3]).toBe('1A, 1B');
     expect(cells[4]).toBe('NGN 1500.00');
@@ -99,14 +122,18 @@ describe('BookingList', () => {
   // passenger's own action, so any action affordance here would be one
   // the server refuses.
   it('offers no cancel or edit affordance', async () => {
+    // `booking.manage` does not exist: cancelling is the passenger's own
+    // action, so any write affordance here would be one the server
+    // refuses. Slice 3b added a row menu, but it carries "View details"
+    // and nothing else — asserting on the absence of the word "Cancel"
+    // would be wrong, since `Cancelled` is a legitimate status label.
     await createComponent();
 
-    const host = fixture.nativeElement as HTMLElement;
-    // Nothing interactive in the body at all, and no actions column to
-    // put it in. Asserting on the absence of the word "Cancel" would
-    // be wrong here: `Cancelled` is a legitimate status label.
-    expect(host.querySelectorAll('tbody button, tbody a, tbody input').length).toBe(0);
-    expect(host.querySelector('thead')?.textContent).not.toContain('Actions');
+    const menuItems = (fixture.nativeElement as HTMLElement).querySelectorAll(
+      'tbody a, tbody input'
+    );
+    expect(menuItems.length).toBe(0);
+    expect(component['menuItems'].map((item) => item.id)).toEqual(['details']);
   });
 
   // A column of passenger UUIDs helps nobody; nesting an email is a
@@ -117,40 +144,50 @@ describe('BookingList', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('user-1');
   });
 
-  it('builds trip filter options from the trips endpoint', async () => {
-    await createComponent();
+  // --- docs/specs/14 slice 3b ---
 
-    expect(component['tripFilterOptions']()).toEqual([
-      { value: '', label: 'All trips' },
-      { value: 'trip-1', label: 'Ikeja → CMS — 2026-09-01' },
-    ]);
-  });
-
-  it('scopes the trip filter to the selected business', async () => {
-    // Every other filter dropdown in this app is business-scoped. This
-    // one was not, because `GET /trips/` had no `business` param when it
-    // was written — it does now, and without this the dropdown offered
-    // every Trip under the Client regardless of the header selection.
+  it('scopes the list to the active Business', async () => {
+    // `GET /bookings/` had no `business` param, so this screen listed
+    // every Business under the Client while the header switcher claimed
+    // one was active.
     await createComponent();
 
     expect(apiClient.GET).toHaveBeenCalledWith(
-      '/api/v1/trips/',
+      '/api/v1/bookings/',
       jasmine.objectContaining({
-        params: { query: { limit: 100, offset: 0, business: 'biz-1' } },
+        params: jasmine.objectContaining({
+          query: jasmine.objectContaining({ business: 'biz-1' }),
+        }),
       })
     );
   });
 
-  it('refetches with the trip filter applied', async () => {
+  it('fetches no trip list at all', async () => {
+    // The trip dropdown is gone. It fetched `limit=100` against
+    // ascending Trip ordering, so a Business with more than 100 trips
+    // was offered its *oldest* hundred — the known-red recorded in
+    // docs/self-check-2026-08-26-spec11.md. Search replaces it.
     await createComponent();
 
-    component['onTripFilterChange']('trip-1');
+    const paths = apiClient.GET.calls.allArgs().map((args) => args[0]);
+    expect(paths).not.toContain('/api/v1/trips/');
+  });
+
+  it('searches server-side, keeping the Business scope', async () => {
+    await createComponent();
+
+    component['onSearchChange']('ada@example.com');
     await fixture.whenStable();
 
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/bookings/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, trip: 'trip-1', status: undefined } },
+        params: jasmine.objectContaining({
+          query: jasmine.objectContaining({
+            business: 'biz-1',
+            search: 'ada@example.com',
+          }),
+        }),
       })
     );
   });
@@ -164,11 +201,30 @@ describe('BookingList', () => {
     expect(component['store'].query().status).toBeUndefined();
   });
 
+  it('renders a chip naming the status filter readably', async () => {
+    await createComponent();
+
+    component['onStatusFilterChange']('cancelled');
+    fixture.detectChanges();
+
+    const chip = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find(
+      (el) => el.getAttribute('aria-label')?.startsWith('Remove filter')
+    );
+    expect(chip?.textContent).toContain('Status: Cancelled');
+  });
+
   it('shows an empty state when nothing has been booked', async () => {
     apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
 
     await createComponent();
 
     expect((fixture.nativeElement as HTMLElement).querySelector('ui-empty-state')).toBeTruthy();
+  });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', async () => {
+    await createComponent();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'booking-list rows');
   });
 });

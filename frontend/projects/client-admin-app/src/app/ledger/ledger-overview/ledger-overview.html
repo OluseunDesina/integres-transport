@@ -1,7 +1,8 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Ledger</h1>
-  </div>
+  <ui-page-header
+    title="Ledger"
+    description="Every journal entry posted for this business — payments, commission, refunds and concessions."
+  />
 
   <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
     @if (clearingAccount(); as account) {
@@ -9,20 +10,29 @@
         {{ businessCurrency() }} {{ account.cached_balance ?? '0.00' }}
       </ui-stat>
     } @else if (!accountsLoading()) {
-      <ui-stat label="Business clearing balance" hint="No clearing account exists yet for this business.">
+      <ui-stat
+        label="Business clearing balance"
+        hint="No clearing account exists yet for this business."
+      >
         —
       </ui-stat>
     }
   </div>
 
-  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-    <ui-select
-      label="Account"
-      [options]="accountFilterOptions()"
-      [ngModel]="store.query().account ?? ''"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onAccountFilterChange($event)"
-    />
+  <div class="flex flex-wrap items-end justify-between gap-3">
+    <!-- `showSearch` off: GET /ledger/entries/ has no free-text filter. -->
+    <ui-filter-bar class="flex-1" [showSearch]="false" ariaLabel="Ledger filters">
+      <div filters class="w-64">
+        <ui-select
+          label="Account"
+          [options]="accountFilterOptions()"
+          [ngModel]="store.query().account ?? ''"
+          [ngModelOptions]="{ standalone: true }"
+          (ngModelChange)="onAccountFilterChange($event)"
+        />
+      </div>
+    </ui-filter-bar>
+    <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
   </div>
 
   @if (store.error()) {
@@ -33,34 +43,113 @@
       description="Journal entries posted for this business — payments, refunds, and concessions — will appear here."
     />
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Created</th>
-          <th class="px-4 py-2">Type</th>
-          <th class="px-4 py-2">Memo</th>
-          <th class="px-4 py-2">Lines</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (entry of store.items(); track entry.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2">{{ entry.created_at | date: 'short' }}</td>
-            <td class="px-4 py-2">{{ entryTypeLabel[entry.entry_type] }}</td>
-            <td class="px-4 py-2">{{ entry.memo || '—' }}</td>
-            <td class="px-4 py-2">
-              <ul class="flex flex-col gap-0.5">
-                @for (line of entry.lines; track line.id) {
-                  <li class="whitespace-nowrap font-mono text-xs text-slate-600">
-                    {{ lineLabel(line) }} → {{ line.amount }} {{ line.currency }}
-                  </li>
-                }
-              </ul>
-            </td>
+    <div [attr.aria-busy]="store.loading()">
+      <ui-table
+        label="Journal entries"
+        [stickyHeader]="true"
+      >
+        <thead>
+          <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+            <th class="py-2">Created</th>
+            <th class="py-2 whitespace-nowrap">Type</th>
+            <th class="hidden py-2 md:table-cell">Memo</th>
+            <th class="hidden py-2 lg:table-cell">Lines</th>
+            <th class="py-2"><span class="sr-only">Actions</span></th>
           </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+        </thead>
+        <tbody>
+          @if (store.loading()) {
+            @for (row of skeletonRows; track row) {
+              <tr class="border-b border-border last:border-0">
+                <td [class]="cellClass()"><ui-skeleton width="8rem" /></td>
+                <td [class]="cellClass() + ' whitespace-nowrap'">
+                  <ui-skeleton width="7rem" />
+                </td>
+                <td [class]="cellClass() + ' hidden md:table-cell'">
+                  <ui-skeleton width="10rem" />
+                </td>
+                <td [class]="cellClass() + ' hidden lg:table-cell'">
+                  <ui-skeleton width="14rem" />
+                </td>
+                <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+              </tr>
+            }
+          } @else {
+            @for (entry of store.items(); track entry.id) {
+              <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                <td [class]="cellClass() + ' font-medium text-strong'">
+                  {{ entry.created_at | date: 'short' }}
+                  <!-- The Memo column, hidden below `md`. The journal lines
+                   are tier 3 and stay in the table from `lg` up. -->
+                  <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                    {{ entry.memo }}
+                  </span>
+                </td>
+                <!-- `nowrap` because this is a short fixed label, not free
+                     text: `ui-table` breaks long values anywhere so a
+                     table can fit a phone, and left to itself that
+                     rendered "Wallet top-up" as three stacked
+                     fragments. -->
+                <td [class]="cellClass() + ' whitespace-nowrap'">
+                  {{ entryTypeLabel[entry.entry_type] }}
+                </td>
+                <td [class]="cellClass() + ' hidden md:table-cell'">
+                  {{ entry.memo || '—' }}
+                </td>
+                <td [class]="cellClass() + ' hidden lg:table-cell'">
+                  <ul class="flex flex-col gap-0.5">
+                    @for (line of entry.lines; track line.id) {
+                      <li class="font-mono text-xs whitespace-nowrap text-default">
+                        {{ lineLabel(line) }} → {{ line.amount }}
+                        {{ line.currency }}
+                      </li>
+                    }
+                  </ul>
+                </td>
+                <td [class]="cellClass() + ' text-right'">
+                  <ui-action-menu
+                    [items]="menuItems"
+                    [label]="'Actions for the ' + entryTypeLabel[entry.entry_type] + ' entry'"
+                    (selected)="onMenuSelected(entry)"
+                  />
+                </td>
+              </tr>
+            }
+          }
+        </tbody>
+      </ui-table>
+    </div>
+    <ui-paginator
+      [total]="store.total()"
+      [page]="store.page()"
+      (pageChange)="onPageChange($event)"
+    />
   }
 </div>
+
+<ng-template #detailBody>
+  @if (selected(); as entry) {
+    <dl class="flex flex-col gap-4 text-sm">
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Posted</dt>
+        <dd class="text-default">{{ entry.created_at | date: 'medium' }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Memo</dt>
+        <dd class="text-default">{{ entry.memo || 'No memo recorded.' }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Lines</dt>
+        <dd>
+          <ul class="flex flex-col gap-1">
+            @for (line of entry.lines; track line.id) {
+              <li class="font-mono text-xs text-default">
+                {{ lineLabel(line) }} → {{ line.amount }} {{ line.currency }}
+              </li>
+            }
+          </ul>
+        </dd>
+      </div>
+    </dl>
+  }
+</ng-template>

@@ -27,7 +27,7 @@ from ..services import (
     OpenJourneyExists,
     StopNotOnRoute,
     TripNotOpenForTaps,
-    TripNotTapAndGo,
+    TripNotPayAsYouGo,
     UnknownToken,
     issue_credential,
     record_tap,
@@ -43,7 +43,7 @@ def _auth_client(user: User) -> APIClient:
     return client
 
 
-def _tap_and_go_trip_with_three_stops(client: object):  # type: ignore[no-untyped-def]
+def _pay_as_you_go_trip_with_three_stops(client: object):  # type: ignore[no-untyped-def]
     with tenant_context(str(client.id)):  # type: ignore[attr-defined]
         route = RouteFactory(client=client)
         stop_1 = StopFactory(client=client, business=route.business)
@@ -56,7 +56,8 @@ def _tap_and_go_trip_with_three_stops(client: object):  # type: ignore[no-untype
             client=client,
             route=route,
             business=route.business,
-            booking_mode=Business.BookingMode.TAP_AND_GO,
+            booking_mode=Business.BookingMode.OPEN_SEATING,
+            fare_collection_mode=Business.FareCollectionMode.PAY_AS_YOU_GO,
         )
     return trip, stop_1, stop_2, stop_3
 
@@ -66,7 +67,7 @@ def _tap_and_go_trip_with_three_stops(client: object):  # type: ignore[no-untype
 
 def test_record_tap_board_opens_a_journey_and_records_the_tap() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -86,7 +87,7 @@ def test_record_tap_board_opens_a_journey_and_records_the_tap() -> None:
 
 def test_record_tap_board_rejects_a_second_open_journey_for_the_same_passenger() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -98,7 +99,7 @@ def test_record_tap_board_rejects_a_second_open_journey_for_the_same_passenger()
 
 def test_record_tap_board_rejects_an_unknown_token() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)), pytest.raises(UnknownToken):
         record_tap(
             trip=trip, token="not-a-real-token", tap_type="board", stop=stop_1, idempotency_key="x"
@@ -107,7 +108,7 @@ def test_record_tap_board_rejects_an_unknown_token() -> None:
 
 def test_record_tap_board_rejects_a_revoked_credential() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -118,22 +119,52 @@ def test_record_tap_board_rejects_a_revoked_credential() -> None:
             record_tap(trip=trip, token=token, tap_type="board", stop=stop_1, idempotency_key="x")
 
 
-def test_record_tap_rejects_a_reservation_mode_trip() -> None:
+def test_record_tap_rejects_a_prepaid_trip() -> None:
+    """The gate is `fare_collection_mode`, not `booking_mode`.
+
+    Board/alight taps determine a fare *after* travel, so what makes
+    them invalid is that the passenger already paid — not that the trip
+    has assigned seats. Before docs/specs/10-booking-modes.md these were
+    the same condition; they are now independent, and this asserts the
+    one that actually matters.
+    """
     client = ClientFactory()
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
-        trip.booking_mode = Business.BookingMode.RESERVATION
-        trip.save(update_fields=["booking_mode"])
+        trip.fare_collection_mode = Business.FareCollectionMode.PREPAID
+        trip.save(update_fields=["fare_collection_mode"])
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
         )
-        with pytest.raises(TripNotTapAndGo):
+        with pytest.raises(TripNotPayAsYouGo):
             record_tap(trip=trip, token=token, tap_type="board", stop=stop_1, idempotency_key="x")
+
+
+def test_record_tap_allows_a_reservation_trip_that_is_pay_as_you_go() -> None:
+    """The other half of the split: `booking_mode` no longer gates taps
+    at all. A reservation-mode trip collecting fares on board is an
+    unusual but coherent combination, and must not be refused for the
+    wrong reason."""
+    client = ClientFactory()
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
+    with tenant_context(str(client.id)):
+        trip.booking_mode = Business.BookingMode.RESERVATION
+        trip.save(update_fields=["booking_mode"])
+        _credential, token = issue_credential(
+            passenger=PassengerUserFactory(client=client), channel="qr", label=""
+        )
+        tap_event = record_tap(
+            trip=trip, token=token, tap_type="board", stop=stop_1, idempotency_key="x"
+        )
+        journey = FareJourney.objects.get(pk=tap_event.journey_id)
+
+    assert journey.status == FareJourney.Status.OPEN
+    assert journey.board_stop_id == stop_1.id
 
 
 def test_record_tap_rejects_a_completed_trip() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         trip.status = Trip.Status.COMPLETED
         trip.save(update_fields=["status"])
@@ -146,7 +177,7 @@ def test_record_tap_rejects_a_completed_trip() -> None:
 
 def test_record_tap_board_rejects_a_stop_not_on_the_route() -> None:
     client = ClientFactory()
-    trip, _stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, _stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         foreign_stop = StopFactory(client=client, business=trip.business)
         credential, token = issue_credential(
@@ -163,7 +194,7 @@ def test_record_tap_board_rejects_a_stop_not_on_the_route() -> None:
 
 def test_record_tap_alight_closes_the_journey_with_the_flat_fare() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="150.00")
         credential, token = issue_credential(
@@ -185,7 +216,7 @@ def test_record_tap_alight_closes_the_journey_with_the_flat_fare() -> None:
 
 def test_record_tap_alight_closes_the_journey_with_the_per_segment_fare() -> None:
     client = ClientFactory()
-    trip, stop_1, stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         business = Business.objects.get(pk=trip.business_id)
         business.fare_pricing_mode = Business.FarePricingMode.PER_SEGMENT
@@ -219,7 +250,7 @@ def test_record_tap_alight_with_no_fare_configured_flags_needs_review_but_persis
     None
 ):
     client = ClientFactory()
-    trip, stop_1, _stop_2, stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -242,7 +273,7 @@ def test_record_tap_alight_with_no_fare_configured_flags_needs_review_but_persis
 
 def test_record_tap_alight_rejects_the_same_stop_as_boarding_without_persisting_a_tap() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -260,7 +291,7 @@ def test_record_tap_alight_rejects_the_same_stop_as_boarding_without_persisting_
 
 def test_record_tap_alight_rejects_a_stop_earlier_than_boarding() -> None:
     client = ClientFactory()
-    trip, _stop_1, stop_2, stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, _stop_1, stop_2, stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -276,7 +307,7 @@ def test_record_tap_alight_rejects_a_stop_earlier_than_boarding() -> None:
 
 def test_record_tap_alight_with_no_open_journey_raises_and_persists_nothing() -> None:
     client = ClientFactory()
-    trip, _stop_1, _stop_2, stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, _stop_1, _stop_2, stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -294,7 +325,7 @@ def test_record_tap_alight_with_no_open_journey_raises_and_persists_nothing() ->
 
 def test_record_tap_replay_with_the_same_key_and_body_returns_the_original() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -311,7 +342,7 @@ def test_record_tap_replay_with_the_same_key_and_body_returns_the_original() -> 
 
 def test_record_tap_raises_conflict_when_the_same_key_is_reused_for_a_different_request() -> None:
     client = ClientFactory()
-    trip, stop_1, stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -328,7 +359,7 @@ def test_record_tap_raises_conflict_when_the_same_key_is_reused_for_a_different_
 
 def test_tap_record_endpoint_requires_the_tapngo_record_permission() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     passenger = PassengerUserFactory(client=client)
 
     response = _auth_client(passenger).post(
@@ -344,7 +375,7 @@ def test_tap_record_endpoint_requires_the_idempotency_key_header() -> None:
     client = ClientFactory()
     roles = create_default_roles(client)
     staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
 
     response = _auth_client(staff).post(
         reverse("tap-record", kwargs={"trip_id": str(trip.id)}),
@@ -358,7 +389,7 @@ def test_staff_can_record_a_full_board_and_alight_flow_via_the_endpoint() -> Non
     client = ClientFactory()
     roles = create_default_roles(client)
     staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
-    trip, stop_1, _stop_2, stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="60.00")
         _credential, token = issue_credential(
@@ -390,7 +421,7 @@ def test_tap_record_endpoint_returns_404_for_an_unknown_token() -> None:
     client = ClientFactory()
     roles = create_default_roles(client)
     staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
 
     response = _auth_client(staff).post(
         reverse("tap-record", kwargs={"trip_id": str(trip.id)}),
@@ -405,7 +436,7 @@ def test_tap_record_endpoint_returns_409_for_a_second_open_journey() -> None:
     client = ClientFactory()
     roles = create_default_roles(client)
     staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
-    trip, stop_1, _stop_2, _stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, _stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         _credential, token = issue_credential(
             passenger=PassengerUserFactory(client=client), channel="qr", label=""
@@ -442,8 +473,8 @@ def test_staff_with_tapngo_view_can_list_journeys_filtered_by_trip_and_status() 
     client = ClientFactory()
     roles = create_default_roles(client)
     staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
-    trip, stop_1, _stop_2, stop_3 = _tap_and_go_trip_with_three_stops(client)
-    other_trip, other_1, _other_2, other_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, stop_3 = _pay_as_you_go_trip_with_three_stops(client)
+    other_trip, other_1, _other_2, other_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
         FareRuleFactory(
@@ -478,7 +509,7 @@ def test_fare_journey_list_query_count_does_not_scale_with_journey_count(
     client = ClientFactory()
     roles = create_default_roles(client)
     staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
-    trip, stop_1, _stop_2, stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     with tenant_context(str(client.id)):
         FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
         for index in range(5):
@@ -511,7 +542,7 @@ def test_fare_journey_list_query_count_does_not_scale_with_journey_count(
 
 def test_fare_journeys_mine_lists_only_the_callers_own_journeys() -> None:
     client = ClientFactory()
-    trip, stop_1, _stop_2, stop_3 = _tap_and_go_trip_with_three_stops(client)
+    trip, stop_1, _stop_2, stop_3 = _pay_as_you_go_trip_with_three_stops(client)
     passenger_a = PassengerUserFactory(client=client)
     passenger_b = PassengerUserFactory(client=client)
     with tenant_context(str(client.id)):
@@ -529,3 +560,69 @@ def test_fare_journeys_mine_lists_only_the_callers_own_journeys() -> None:
 
     assert response.status_code == status.HTTP_200_OK
     assert [row["id"] for row in response.data["results"]] == [str(own.journey_id)]
+
+
+# --- ?business= on GET /fare-journeys/ ---------------------------------
+# docs/specs/14-design-system-and-ui-rebuild.md slice 3b. The param was
+# missing entirely, so client-admin's journey list spanned every Business
+# under the Client while its header switcher claimed one was active.
+
+
+def test_fare_journey_list_filters_by_business_query_param() -> None:
+    client = ClientFactory()
+    roles = create_default_roles(client)
+    staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
+    trip, stop_1, _stop_2, stop_3 = _pay_as_you_go_trip_with_three_stops(client)
+    other_trip, other_1, _other_2, other_3 = _pay_as_you_go_trip_with_three_stops(client)
+
+    with tenant_context(str(client.id)):
+        FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
+        FareRuleFactory(
+            client=client, route=other_trip.route, business=other_trip.business, amount="50.00"
+        )
+        _credential_a, token_a = issue_credential(
+            passenger=PassengerUserFactory(client=client), channel="qr", label=""
+        )
+        _credential_b, token_b = issue_credential(
+            passenger=PassengerUserFactory(client=client), channel="qr", label=""
+        )
+        record_tap(trip=trip, token=token_a, tap_type="board", stop=stop_1, idempotency_key="c1")
+        mine = record_tap(
+            trip=trip, token=token_a, tap_type="alight", stop=stop_3, idempotency_key="c2"
+        )
+        record_tap(
+            trip=other_trip, token=token_b, tap_type="board", stop=other_1, idempotency_key="d1"
+        )
+
+    response = _auth_client(staff).get(
+        reverse("fare-journey-list"), {"business": str(trip.business_id)}
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["id"] for row in response.data["results"]] == [str(mine.journey_id)]
+
+
+def test_fare_journey_list_rejects_an_unknown_business_query_param() -> None:
+    client = ClientFactory()
+    roles = create_default_roles(client)
+    staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
+
+    response = _auth_client(staff).get(
+        reverse("fare-journey-list"), {"business": "00000000-0000-0000-0000-000000000000"}
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_fare_journey_list_rejects_another_clients_business_query_param() -> None:
+    client_a = ClientFactory()
+    client_b = ClientFactory()
+    roles = create_default_roles(client_a)
+    staff_a = ClientStaffUserFactory(client=client_a, role=roles["Owner"])
+    other_trip, _s1, _s2, _s3 = _pay_as_you_go_trip_with_three_stops(client_b)
+
+    response = _auth_client(staff_a).get(
+        reverse("fare-journey-list"), {"business": str(other_trip.business_id)}
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST

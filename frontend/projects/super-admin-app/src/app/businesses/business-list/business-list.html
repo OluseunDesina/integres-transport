@@ -1,72 +1,95 @@
 <div class="flex flex-col gap-6">
-  <h1 class="text-lg font-semibold text-slate-900">Businesses</h1>
+  <ui-page-header
+    title="Businesses"
+    description="Every business across every client, and the entry point to their Paystack and settlement configuration."
+  />
 
-  <form (ngSubmit)="onSearchSubmit()" class="flex items-end gap-3">
-    <div class="w-full max-w-sm">
-      <ui-text-field
-        label="Search by name"
-        [ngModel]="searchTerm()"
-        [ngModelOptions]="{ standalone: true }"
-        (ngModelChange)="onSearchTermChange($event)"
-      />
-    </div>
-    <ui-button type="submit" variant="secondary">Search</ui-button>
-  </form>
+  <ui-filter-bar
+    [searchValue]="searchTerm()"
+    searchLabel="Search by name"
+    placeholder="Search businesses by name…"
+    ariaLabel="Business filters"
+    [chips]="chips()"
+    (searchChange)="onSearchTermChange($event)"
+    (chipRemoved)="onClearSearch()"
+    (cleared)="onClearSearch()"
+  />
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
   } @else if (store.isEmpty()) {
     <ui-empty-state
       title="No businesses found"
-      description="Businesses across every Client will appear here."
+      [description]="
+        searchTerm()
+          ? 'No business matches that name. Clear the filter to see all of them.'
+          : 'Businesses across every Client will appear here.'
+      "
     />
   } @else {
-    <ui-table [loading]="store.loading()">
+    <ui-table
+      label="Businesses"
+      [loading]="store.loading()"
+    >
       <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Name</th>
-          <th class="px-4 py-2">Client</th>
-          <th class="px-4 py-2">Vertical</th>
-          <th class="px-4 py-2">KYB status</th>
-          <th class="px-4 py-2">Active</th>
-          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
+        <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+          <th class="py-2">Name</th>
+          <th class="hidden py-2 md:table-cell">Client</th>
+          <th class="hidden py-2 md:table-cell">Vertical</th>
+          <th class="py-2">KYB status</th>
+          <th class="hidden py-2 md:table-cell">Active</th>
+          <th class="py-2"><span class="sr-only">Actions</span></th>
         </tr>
       </thead>
       <tbody>
         @for (business of store.items(); track business.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ business.name }}</td>
-            <td class="px-4 py-2">{{ business.client_name }}</td>
-            <td class="px-4 py-2">{{ business.vertical }}</td>
-            <td class="px-4 py-2">
+          <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+            <td class="py-2 font-medium text-strong">
+              {{ business.name }}
+              <!-- The columns hidden below `md`, re-flowed. -->
+              <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                {{ business.client_name }} · {{ business.vertical }} ·
+                {{ business.is_active ? 'Active' : 'Inactive' }}
+              </span>
+            </td>
+            <td class="hidden py-2 md:table-cell">{{ business.client_name }}</td>
+            <td class="hidden py-2 md:table-cell">{{ business.vertical }}</td>
+            <td class="py-2">
               <ui-status-pill
                 [tone]="statusTone[business.kyb_status]"
                 [label]="statusLabel[business.kyb_status]"
               />
             </td>
-            <td class="px-4 py-2">
+            <td class="hidden py-2 md:table-cell">
               @if (business.is_active) {
                 <ui-status-pill tone="positive" label="Active" />
               } @else {
                 <ui-status-pill tone="neutral" label="Inactive" />
               }
             </td>
-            <td class="px-4 py-2 text-right">
-              <a
-                [routerLink]="['/businesses', business.id, 'paystack-account']"
-                class="mr-4 text-sm font-medium text-slate-700 hover:text-slate-900"
-                >Paystack</a
-              >
-              <a
-                [routerLink]="['/businesses', business.id, 'settlement-runs']"
-                class="mr-4 text-sm font-medium text-slate-700 hover:text-slate-900"
-                >Settlements</a
-              >
-              <a
-                [routerLink]="['/businesses', business.id, 'seat-hold']"
-                class="text-sm font-medium text-slate-700 hover:text-slate-900"
-                >Seat hold</a
-              >
+            <!-- Wrapping, not three links on one line: a link's label is
+                 exempt from `ui-table`'s break-anywhere rule, so three of
+                 them side by side set this column's minimum width and
+                 squeezed the Name column to one character per line at
+                 390px. They stack instead. -->
+            <td class="py-2">
+              <div class="flex flex-wrap justify-end gap-x-4 gap-y-1">
+                <a
+                  [routerLink]="['/businesses', business.id, 'paystack-account']"
+                  class="text-sm font-medium text-default hover:text-strong"
+                  >Paystack</a
+                >
+                <a
+                  [routerLink]="['/businesses', business.id, 'settlement-runs']"
+                  class="text-sm font-medium text-default hover:text-strong"
+                  >Settlements</a
+                >
+                <a
+                  [routerLink]="['/businesses', business.id, 'seat-hold']"
+                  class="text-sm font-medium text-default hover:text-strong"
+                  >Seat hold</a
+                >
+              </div>
             </td>
           </tr>
         }

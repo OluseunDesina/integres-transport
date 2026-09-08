@@ -133,6 +133,13 @@ export class AuthApiService {
   }
 
   private async fetchCurrentUser(accessToken: string): Promise<AuthUser | null> {
+    // **The only hand-written `Authorization` header left in this
+    // workspace, and deliberately so.** Everywhere else `@auth`'s
+    // `authMiddleware` attaches it (docs/specs/13-session-resilience.md);
+    // here the token has just been issued and is not in `AuthStore` yet —
+    // this call is what fetches the user the session is built from. The
+    // middleware's "never overwrite an explicit header" rule exists for
+    // exactly this request.
     const { data } = await this.api.GET('/api/v1/auth/me/', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });

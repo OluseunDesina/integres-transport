@@ -66,6 +66,7 @@ below without reading the Django source — e.g. locally,
 | Client `Integra E2E KYC Review Client` | KYC `submitted` | super-admin KYC queue has something to review |
 | Business `Integra E2E KYB Review Business` | KYB `submitted` | super-admin KYB queue has something to review |
 | Business `Integra E2E Network Test Business` | KYB `approved` | Route "Ikeja → CMS" (Ikeja/Yaba/CMS stops), 6-seat VehicleType (`1A`/`1B`/`2A`/`2B`/`3A`/`3B`), a Vehicle, a ₦750 flat fare, Trips generated daily at 06:30 for the next 8 days — this is what §5–§8 book against |
+| Business `Integra E2E Per-Segment Fare Business` | KYB `approved`, fare pricing mode `per_segment` | Route "Apapa → Ojota" (Apapa/Surulere/Ojota stops), a 6-seat VehicleType, a Vehicle, Trips daily at 08:00 for the next 8 days, and **deliberately no fares at all** — pricing this route through the grid is what §3.4 exercises |
 | Business `Integra E2E Tap & Go Business` | KYB `approved` | Route "CBD Loop" (Gate A/Mid Stop/Gate B), a Vehicle, a ₦300 flat fare, Trips daily at 07:00 for the next 8 days, plus a `TapCredential` for **passenger** with a **known raw token**: `e2e-tap-credential-fixed-token` — this is what §7 taps against |
 
 **Paystack test-mode checkout card** (used in §6): card number
@@ -122,24 +123,50 @@ OTP `123456` — Paystack's own published test card.
 - **Preconditions**: logged in as Owner or Manager (Staff is blocked —
   see 2.4).
 - **Steps**: go to `businesses/new`. Fill in name, vertical, currency,
-  timezone, booking mode (`reservation` or `tap_and_go`). Submit.
+  timezone, booking mode (`reservation` or `tap_and_go`), fare pricing
+  mode (`flat` or `per segment`). Submit.
 - **Expected result**: new Business appears in `businesses`, KYB status
   `not_submitted`.
 - **Worth trying**: create one with `booking_mode_default: tap_and_go`
   — this is what determines every Trip generated under it later; it
   can't be changed per-Trip.
+- **Worth trying**: set fare pricing mode to **per segment**, then look
+  at a route's fare grid (§3.4). Switch it back to flat afterwards and
+  confirm the segment fares are still listed but no longer applied —
+  switching consults a different rule type, it does not delete
+  anything. The control says so at the point of change.
 
-### 2.2 KYB document upload + review
+### 2.2 KYB: directors, documents, and review
 
-- **App + role**: client-admin-app (upload) then super-admin-app
+- **App + role**: client-admin-app (submit) then super-admin-app
   (review).
 - **Preconditions**: 2.1, or the seeded KYB business.
-- **Steps**: on the Business's detail/edit screen, upload a KYB
-  document. As **platform staff**, go to `kyb-queue`, find it, approve
-  it.
-- **Expected result**: Business's KYB status moves
-  `not_submitted → submitted → approved`. Route creation (§4) is
+- **Steps**: open the Business's edit screen and follow **Open
+  verification** to `businesses/:id/kyb`. Add a director (full name,
+  ID type, optional ID number) — the guidance text under **ID type**
+  changes with the type you pick. Upload that director's ID from their
+  own row, then upload a company-level document (certificate of
+  incorporation, proof of address, tax certificate, or other) from its
+  own section. As **platform staff**, go to `kyb-queue`, find the
+  business — its **Directors** column shows who you are approving —
+  and approve it.
+- **Expected result**: each section shows what has been supplied and
+  what is still outstanding ("Not supplied yet.") rather than an
+  undifferentiated pile. A director's ID is filed against that
+  director, not into the company-level pile. Business's KYB status
+  moves `not_submitted → submitted → approved`. Route creation (§4) is
   gated on `approved` — you can't skip this for a new Business.
+- **Worth trying**: press **Add director** with the name blank — the
+  field goes red with "This field is required." Use a very long
+  director name and confirm the row still lays out cleanly.
+  **Remove** a director who already has an uploaded ID: they disappear
+  from the form but stay on the reviewer's packet, because their
+  document is still part of the submission. Open the KYB screen for a
+  business well down the list (not one you just created) — that path
+  used to report "couldn't be found" for anything past the 25th row.
+- **Note**: the review queue is ordered **oldest submission first**,
+  so a freshly submitted business is on the *last* page, and the queue
+  has no search yet. Page to it.
 
 ### 2.3 Staff invite + accept
 
@@ -226,11 +253,37 @@ from zero (§2.1–2.2 covers that path).
   `docker compose exec backend python manage.py shell -c "from apps.scheduling.tasks import generate_trips; generate_trips()"`.
 - **Expected result (after generation)**: Trips appear in `trips`,
   one per matching day in the generation horizon.
-- **Note**: there's no client-admin screen for Fares or Seat layouts —
-  both exist only as backend + `seed_e2e_users`-produced data. A real
-  gap, not an oversight to work around here.
+- **Note**: Fares and Seat layouts both have client-admin screens now
+  (§3.4 below, and `vehicle-types/:id/seats`). This entry used to say
+  they existed only as backend + `seed_e2e_users` data.
 
----
+### 3.4 Fare grid (stop-pair pricing)
+
+- **App + role**: client-admin-app, **owner** (or Manager —
+  `fares.manage`; `fares.view` gets a read-only grid).
+- **Preconditions**: a Business with fare pricing mode **per segment**
+  (§2.1) and a Route with at least 3 Stops. The seeded "Integra E2E
+  Per-Segment Fare Business" and its "Apapa → Ojota" route are exactly
+  this.
+- **Steps**: `routes` → the route's **Fares** link (or `fares` →
+  "Price by stop pair"). Type an amount into some cells, watch the
+  unsaved-change count, then **Save fares**.
+- **Expected result**: only forward stop pairs are editable; edited
+  cells highlight; the save reports how many fares changed and the
+  amounts come back in the server's own `450.00` formatting.
+- **Worth trying**: save with nothing edited — the button stays
+  disabled. Re-type the same price in a different format (`1500` over
+  `1500.00`) — still not a change, because re-saving would churn the
+  fare's version history for nothing.
+- **Worth trying**: clear a priced cell and save. It must ask first,
+  naming the segments by stop. Confirm, then try to book that segment
+  as a passenger — it should fail with "no fare configured", which is
+  exactly what clearing a cell means.
+- **Worth trying**: open the same screen for a **flat**-priced
+  Business. It should warn and disable every cell rather than let you
+  enter prices that would never be read.
+- **Worth trying**: navigate the grid with the keyboard alone — Tab
+  along a row, Up/Down between rows of a column.
 
 ## 4. Booking (customer-app)
 

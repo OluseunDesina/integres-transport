@@ -25,6 +25,17 @@ export const routes: Routes = [
         canActivate: [permissionGuard],
         data: { permissions: ['ticketing.validate'] },
       },
+      {
+        path: 'report-issue',
+        loadComponent: () => import('./report-issue/report-issue').then((m) => m.ReportIssue),
+        canActivate: [permissionGuard],
+        // `incidents.manage`, not `incidents.view`: this screen only
+        // writes. Every default preset holds it (slice 1 granted both
+        // incident codenames to Owner, Manager *and* Staff), but a
+        // custom Role need not — hence the guard and the matching
+        // `*appHasPermission` on the nav link.
+        data: { permissions: ['incidents.manage'] },
+      },
     ],
   },
   { path: 'forbidden', component: ForbiddenPage },

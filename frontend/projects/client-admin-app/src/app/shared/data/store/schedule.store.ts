@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
 import { ListStore, type Page } from '@shared-data';
 
 // The backend's `days_of_week` is a plain JSONField — drf-spectacular
@@ -14,6 +13,14 @@ export type Schedule = Omit<components['schemas']['Schedule'], 'days_of_week'> &
 
 export interface ScheduleQuery {
   business?: string;
+  /**
+   * Free-text search, applied server-side — spec 14 slice 3a added
+   * `?search=` to this endpoint precisely so `ui-filter-bar` narrows the
+   * whole result set rather than the loaded page.
+   */
+  search?: string;
+  /** Undefined means both, not "active only". */
+  is_active?: boolean;
 }
 
 function toErrorMessage(error: unknown): string {
@@ -29,7 +36,6 @@ function toErrorMessage(error: unknown): string {
 @Injectable({ providedIn: 'root' })
 export class ScheduleStore extends ListStore<Schedule, ScheduleQuery> {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   constructor() {
     super({}, 25);
@@ -40,8 +46,15 @@ export class ScheduleStore extends ListStore<Schedule, ScheduleQuery> {
     page: Page
   ): Promise<{ items: Schedule[]; total: number }> {
     const { data, error } = await this.api.GET('/api/v1/schedules/', {
-      params: { query: { limit: page.limit, offset: page.offset, business: query.business } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+      params: {
+        query: {
+          limit: page.limit,
+          offset: page.offset,
+          business: query.business,
+          search: query.search,
+          is_active: query.is_active,
+        },
+      },
     });
     if (!data) {
       throw new Error(toErrorMessage(error));

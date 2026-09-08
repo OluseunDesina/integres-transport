@@ -34,6 +34,58 @@ TRIP_TRANSITIONS: dict[str, set[str]] = {
 }
 
 
+class TripClassNotAvailableOnRoute(Exception):
+    """The class isn't in the Route's `available_trip_classes` allow-list
+    — docs/specs/15-trip-classes.md. Mapped to a 400."""
+
+
+class TripClassLocked(Exception):
+    """`Trip.trip_class` cannot change once anything non-cancelled is
+    sold for that Trip. Mapped to a 409.
+
+    Changing it would silently change what a passenger already paid
+    for, and the price they were charged is snapshotted on their
+    `SeatReservation` against a rule for the *old* class — so the
+    booking would no longer be explainable by any rule the system could
+    still find.
+    """
+
+
+class VehicleClassMismatch(Exception):
+    """The Vehicle's `vehicle_type.trip_class` differs from the Trip's.
+    Mapped to a 400.
+
+    A hard rejection, not a warning: selling Premium and running a Mini
+    is a refund event, and this system has no refund service — spec 10's
+    own `trip.oversold` note records that an audit record nobody can act
+    on is not a control. Better to block it at assignment.
+    """
+
+
+def _check_class_allowed_on_route(route: Route, trip_class: str) -> None:
+    """An **empty** allow-list means no restriction, not "nothing
+    allowed" — that is what keeps every Route that predates spec 15
+    working untouched."""
+    allowed = route.available_trip_classes or []
+    if allowed and trip_class not in allowed:
+        raise TripClassNotAvailableOnRoute(
+            f"Route {route.name} does not offer {trip_class} services."
+        )
+
+
+def _check_vehicle_class_matches(vehicle: Vehicle | None, trip_class: str) -> None:
+    """Unassignment (`vehicle=None`) is always allowed — the class
+    belongs to the Trip, not to whatever is currently running it."""
+    if vehicle is None:
+        return
+    vehicle_class = vehicle.vehicle_type.trip_class
+    if vehicle_class != trip_class:
+        raise VehicleClassMismatch(
+            f"This is a {trip_class} service and {vehicle.registration_number} "
+            f"is a {vehicle_class} vehicle."
+        )
+
+
 def compute_scheduled_departure_at(
     business: Business, service_date: date, departure_time: time
 ) -> datetime:
@@ -57,8 +109,10 @@ def create_schedule(
     effective_from: date,
     effective_until: date | None,
     created_by: User,
+    trip_class: str = Business.TripClass.STANDARD,
 ) -> Schedule:
     business = route.business
+    _check_class_allowed_on_route(route, trip_class)
     schedule = Schedule.objects.create(
         client=business.client,
         route=route,
@@ -67,6 +121,7 @@ def create_schedule(
         departure_time=departure_time,
         effective_from=effective_from,
         effective_until=effective_until,
+        trip_class=trip_class,
     )
     record_audit_event(actor=created_by, action="schedule.created", target=schedule)
     return schedule
@@ -82,6 +137,8 @@ def update_schedule(*, schedule: Schedule, updated_by: User, **fields: Any) -> S
     inconsistent cancellation set."""
     with transaction.atomic():
         schedule = Schedule.all_objects.select_for_update().get(pk=schedule.pk)
+        if "trip_class" in fields:
+            _check_class_allowed_on_route(schedule.route, fields["trip_class"])
         previous_days = set(schedule.days_of_week)
         previous_effective_until = schedule.effective_until
         previous_is_active = schedule.is_active
@@ -150,11 +207,19 @@ def create_manual_trip(
     vehicle: Vehicle | None,
     driver: Driver | None,
     created_by: User,
+    trip_class: str = Business.TripClass.STANDARD,
 ) -> Trip:
-    """schedule=None always. booking_mode snapshotted from
-    route.business.booking_mode_default at creation time — later changes
-    to the Business's default only affect future Trips."""
+    """schedule=None always. booking_mode and fare_collection_mode are
+    both snapshotted from the Business at creation time — later changes
+    to either default only affect future Trips.
+
+    `trip_class` comes from the request rather than from the Business,
+    because unlike those two it is a per-departure decision, not a
+    Business-wide default.
+    """
     business = route.business
+    _check_class_allowed_on_route(route, trip_class)
+    _check_vehicle_class_matches(vehicle, trip_class)
     trip = Trip.objects.create(
         client=business.client,
         schedule=None,
@@ -168,6 +233,8 @@ def create_manual_trip(
         vehicle=vehicle,
         driver=driver,
         booking_mode=business.booking_mode_default,
+        fare_collection_mode=business.fare_collection_mode,
+        trip_class=trip_class,
     )
     record_audit_event(actor=created_by, action="trip.created", target=trip)
     return trip
@@ -176,6 +243,7 @@ def create_manual_trip(
 def assign_trip_resources(
     *, trip: Trip, vehicle: Vehicle | None, driver: Driver | None, updated_by: User
 ) -> Trip:
+    _check_vehicle_class_matches(vehicle, trip.trip_class)
     trip.vehicle = vehicle
     trip.driver = driver
     trip.save(update_fields=["vehicle", "driver"])
@@ -189,20 +257,107 @@ def assign_trip_resources(
     return trip
 
 
+def set_trip_class(*, trip: Trip, trip_class: str, updated_by: User) -> Trip:
+    """Change a Trip's class, but only while nothing is sold —
+    docs/specs/15-trip-classes.md.
+
+    Its own service function and its own endpoint rather than a field on
+    the assignment PATCH: `TripAssignmentSerializer`'s `vehicle` and
+    `driver` both default to `None` and therefore *clear* on omission,
+    and a guarded field sharing a body with two clear-on-omit fields is
+    a trap — a class edit that forgot to resend the vehicle would
+    silently unassign it.
+
+    A `pending_payment` Booking counts as sold: a held seat is a live
+    offer at a quoted price. Only `cancelled` and `expired` Bookings
+    leave the class free to move, because nothing survives them.
+
+    Also re-checks the route allow-list and the assigned vehicle, so
+    this path cannot reach a state `create_manual_trip` would have
+    refused.
+    """
+    # Local import — apps.booking imports Trip from this app, so a
+    # module-level import back would be circular. Same shape
+    # apps.seating.services already uses for apps.ticketing.capacity.
+    from apps.booking.models import Booking
+
+    with transaction.atomic():
+        locked = Trip.all_objects.select_for_update().get(pk=trip.pk)
+        if locked.trip_class == trip_class:
+            # Idempotent no-op, matching transition_trip_status's own
+            # handling of a request to the current value: no audit row,
+            # and — importantly — no rejection, so re-sending the class
+            # a sold Trip already has does not 409.
+            return locked
+
+        sold = (
+            Booking.all_objects.filter(trip=locked, deleted_at__isnull=True)
+            .exclude(status__in=[Booking.Status.CANCELLED, Booking.Status.EXPIRED])
+            .exists()
+        )
+        if sold:
+            raise TripClassLocked(
+                "This trip already has bookings, so its class can no longer be changed."
+            )
+
+        _check_class_allowed_on_route(locked.route, trip_class)
+        _check_vehicle_class_matches(locked.vehicle, trip_class)
+
+        previous = locked.trip_class
+        locked.trip_class = trip_class
+        locked.save(update_fields=["trip_class"])
+
+    record_audit_event(
+        actor=updated_by,
+        action="trip.class_changed",
+        target=locked,
+        previous_trip_class=previous,
+        trip_class=trip_class,
+    )
+    return locked
+
+
 def transition_trip_status(*, trip: Trip, new_status: str, reason: str, actor: User) -> Trip:
     """Trusts the caller (TripStatusSerializer.validate(), or
     _cancel_future_trips_for_schedule() above) to have already checked
     the transition is legal per TRIP_TRANSITIONS and that a reason is
     present when cancelling — same pre-validated-input convention as the
     rest of this module. A request to the Trip's own current status is
-    an idempotent no-op: returns the Trip unchanged, no audit row."""
+    an idempotent no-op: returns the Trip unchanged, no audit row.
+
+    Also the **sole** writer of `Trip.status` anywhere in this backend,
+    which is what makes it the right place to stamp the actual
+    departure/arrival times docs/specs/16-operational-analytics.md needs
+    — `status_changed_at` alone cannot answer "when did this Trip
+    depart" once it has since completed, because every transition
+    overwrites it.
+    """
     if new_status == trip.status:
         return trip
+    now = timezone.now()
     trip.status = new_status
-    trip.status_changed_at = timezone.now()
+    trip.status_changed_at = now
+    # Stamped only when still null, so a transition cannot rewrite a
+    # time that already happened. TRIP_TRANSITIONS makes returning to a
+    # status unreachable through the API today, but this function trusts
+    # its caller to have checked that — and an analytics field that a
+    # future caller could silently falsify is worse than one that is
+    # occasionally stale.
+    if new_status == Trip.Status.IN_PROGRESS and trip.actual_departure_at is None:
+        trip.actual_departure_at = now
+    if new_status == Trip.Status.COMPLETED and trip.actual_arrival_at is None:
+        trip.actual_arrival_at = now
     if new_status == Trip.Status.CANCELLED:
         trip.cancellation_reason = reason
-    trip.save(update_fields=["status", "status_changed_at", "cancellation_reason"])
+    trip.save(
+        update_fields=[
+            "status",
+            "status_changed_at",
+            "actual_departure_at",
+            "actual_arrival_at",
+            "cancellation_reason",
+        ]
+    )
     record_audit_event(
         actor=actor, action="trip.status_changed", target=trip, status=new_status, reason=reason
     )

@@ -13,6 +13,10 @@ function makeTrip(overrides: Record<string, unknown> = {}) {
     scheduled_departure_at: '2026-09-01T06:30:00Z',
     status: 'scheduled',
     status_changed_at: null,
+    // docs/specs/16-operational-analytics.md slice 1 — null
+    // on every Trip that has not departed, which is most of them.
+    actual_departure_at: null,
+    actual_arrival_at: null,
     vehicle: null,
     driver: null,
     booking_mode: 'reservation',
@@ -54,9 +58,10 @@ describe('TripStore', () => {
             schedule: undefined,
             service_date: undefined,
             status: undefined,
+            search: undefined,
           },
         },
-      }),
+      })
     );
     expect(store.items().length).toBe(1);
     expect(store.items()[0].route.name).toBe('Ikeja Express');
@@ -95,9 +100,10 @@ describe('TripStore', () => {
             schedule: 'schedule-1',
             service_date: '2026-09-01',
             status: 'scheduled',
+            search: undefined,
           },
         },
-      }),
+      })
     );
   });
 });

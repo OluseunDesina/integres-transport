@@ -59,6 +59,10 @@ def test_staff_client_staff_permissions_array_is_limited() -> None:
         "client.view",
         "fares.view",
         "fleet.view",
+        # docs/specs/17-incidents.md — Staff get both, unlike
+        # `analytics.view`, which is still correctly absent below.
+        "incidents.manage",
+        "incidents.view",
         "ledger.view",
         "network.view",
         "notifications.view",

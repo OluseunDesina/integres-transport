@@ -343,14 +343,14 @@ def test_create_booking_rejects_an_unauthenticated_request() -> None:
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
-def test_create_booking_rejects_a_tap_and_go_trip() -> None:
+def test_create_booking_rejects_a_pay_as_you_go_trip() -> None:
     client = ClientFactory()
     trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client)
     passenger = PassengerUserFactory(client=client)
     with tenant_context(str(client.id)):
         seat = SeatFactory(client=client, vehicle_type=vehicle_type)
-        trip.booking_mode = Business.BookingMode.TAP_AND_GO
-        trip.save(update_fields=["booking_mode"])
+        trip.fare_collection_mode = Business.FareCollectionMode.PAY_AS_YOU_GO
+        trip.save(update_fields=["fare_collection_mode"])
 
     response = _auth_client(passenger).post(
         reverse("booking-list-create"),
@@ -741,6 +741,26 @@ def test_bookings_mine_nests_the_trip_with_its_route_and_departure() -> None:
     assert row["trip"]["service_date"] == trip.service_date
 
 
+def test_bookings_mine_nests_the_trip_class() -> None:
+    """docs/specs/15-trip-classes.md slice 3 — my-bookings and the ticket
+    screen both name the service a passenger bought.
+
+    Asserts a *non-default* class on purpose: every Trip defaults to
+    `standard`, so a hardcoded default would pass a test written against
+    one.
+    """
+    client = ClientFactory()
+    trip, passenger, _booking = _one_booking(client)
+    with tenant_context(str(client.id)):
+        trip.trip_class = Business.TripClass.PREMIUM
+        trip.save(update_fields=["trip_class"])
+
+    response = _auth_client(passenger).get(reverse("booking-mine"))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["results"][0]["trip"]["trip_class"] == "premium"
+
+
 def test_staff_booking_list_nests_the_trip_too() -> None:
     client = ClientFactory()
     roles = create_default_roles(client)
@@ -779,3 +799,251 @@ def test_bookings_mine_query_count_does_not_scale_with_booking_count(
 
     assert response.status_code == status.HTTP_200_OK
     assert len(response.data["results"]) == 5
+
+
+# --- ?business= / ?search= on GET /bookings/ ---------------------------
+# docs/specs/14-design-system-and-ui-rebuild.md slice 3b. `business` was
+# missing entirely, so client-admin's booking list spanned every Business
+# under the Client while its header switcher claimed one was active — the
+# same gap TripListQuerySerializer already records having had.
+
+
+def _booking_for(client: object, *, route_name: str, passenger_email: str) -> Booking:
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client)
+    with tenant_context(str(client.id)):  # type: ignore[attr-defined]
+        trip.route.name = route_name
+        trip.route.save(update_fields=["name"])
+        passenger = PassengerUserFactory(client=client, email=passenger_email)
+        return BookingFactory(
+            client=client, trip=trip, business=trip.business, passenger=passenger
+        )
+
+
+def test_booking_list_filters_by_business_query_param() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    create_default_roles(client)
+    mine = _booking_for(client, route_name="Ikeja Express", passenger_email="a@example.com")
+    _booking_for(client, route_name="Lekki Loop", passenger_email="b@example.com")
+
+    response = _auth_client(staff).get(
+        reverse("booking-list-create"), {"business": str(mine.business_id)}
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["id"] for row in response.data["results"]] == [str(mine.id)]
+
+
+def test_booking_list_rejects_an_unknown_business_query_param() -> None:
+    # Silently returning an unfiltered list would be worse than a 400 —
+    # the caller would believe it had scoped and had not.
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    create_default_roles(client)
+
+    response = _auth_client(staff).get(
+        reverse("booking-list-create"), {"business": "00000000-0000-0000-0000-000000000000"}
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_booking_list_rejects_another_clients_business_query_param() -> None:
+    client_a = ClientFactory()
+    client_b = ClientFactory()
+    staff_a = ClientStaffUserFactory(client=client_a)
+    create_default_roles(client_a)
+    other = _booking_for(client_b, route_name="Ikeja Express", passenger_email="b@example.com")
+
+    response = _auth_client(staff_a).get(
+        reverse("booking-list-create"), {"business": str(other.business_id)}
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+def test_booking_list_search_matches_route_name_case_insensitively() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    create_default_roles(client)
+    match = _booking_for(client, route_name="Ikeja Express", passenger_email="a@example.com")
+    _booking_for(client, route_name="Lekki Loop", passenger_email="b@example.com")
+
+    response = _auth_client(staff).get(reverse("booking-list-create"), {"search": "ikeja"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+def test_booking_list_search_also_matches_passenger_email() -> None:
+    # The other half of what a support call actually gives you.
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    create_default_roles(client)
+    match = _booking_for(client, route_name="Ikeja Express", passenger_email="ada@example.com")
+    _booking_for(client, route_name="Lekki Loop", passenger_email="bola@example.com")
+
+    response = _auth_client(staff).get(reverse("booking-list-create"), {"search": "ada@"})
+
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+def test_booking_list_search_with_no_match_returns_empty_not_everything() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    create_default_roles(client)
+    _booking_for(client, route_name="Ikeja Express", passenger_email="a@example.com")
+
+    response = _auth_client(staff).get(reverse("booking-list-create"), {"search": "nothing here"})
+
+    assert response.data["count"] == 0
+
+
+def test_booking_list_blank_search_is_accepted_and_ignored() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    create_default_roles(client)
+    _booking_for(client, route_name="Ikeja Express", passenger_email="a@example.com")
+
+    response = _auth_client(staff).get(reverse("booking-list-create"), {"search": ""})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 1
+
+
+def test_booking_list_search_never_reaches_another_clients_rows() -> None:
+    client_a = ClientFactory()
+    client_b = ClientFactory()
+    staff_a = ClientStaffUserFactory(client=client_a)
+    create_default_roles(client_a)
+    _booking_for(client_b, route_name="Ikeja Express", passenger_email="ada@example.com")
+
+    response = _auth_client(staff_a).get(reverse("booking-list-create"), {"search": "Ikeja"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 0
+
+
+# --- reference (docs/specs/18-manifest-and-staff-booking.md slice 1) --------
+
+
+def test_a_booking_gets_a_quotable_reference() -> None:
+    """Until spec 18 a Booking's only identifier was its UUID, so a
+    passenger had nothing to read out and the manifest had nothing to
+    print."""
+    client = ClientFactory()
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client)
+    passenger = PassengerUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
+        seat = SeatFactory(client=client, vehicle_type=vehicle_type)
+        booking = create_booking(
+            trip=trip,
+            passenger=passenger,
+            seats=[{"seat": seat, "from_stop": stop_a, "to_stop": stop_b}],
+            idempotency_key="ref-1",
+        )
+
+    assert booking.reference.startswith("BKG-")
+    # Crockford base32: no I, L, O or U, so nothing is ambiguous when
+    # read aloud down a phone. Same alphabet as `Incident.reference`.
+    body = booking.reference.removeprefix("BKG-")
+    assert len(body) == 6
+    assert set(body) <= set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+
+
+def test_two_bookings_in_one_business_get_different_references() -> None:
+    client = ClientFactory()
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client)
+    with tenant_context(str(client.id)):
+        FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
+        references = set()
+        for index in range(2):
+            seat = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number=f"{index}A")
+            booking = create_booking(
+                trip=trip,
+                passenger=PassengerUserFactory(client=client),
+                seats=[{"seat": seat, "from_stop": stop_a, "to_stop": stop_b}],
+                idempotency_key=f"ref-uniq-{index}",
+            )
+            references.add(booking.reference)
+
+    assert len(references) == 2
+
+
+def test_an_idempotent_replay_returns_the_original_reference() -> None:
+    """A retry must not mint a second reference for the same booking —
+    the passenger has already been told the first one."""
+    client = ClientFactory()
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client)
+    passenger = PassengerUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
+        seat = SeatFactory(client=client, vehicle_type=vehicle_type)
+        kwargs = {
+            "trip": trip,
+            "passenger": passenger,
+            "seats": [{"seat": seat, "from_stop": stop_a, "to_stop": stop_b}],
+            "idempotency_key": "ref-replay",
+        }
+        first = create_booking(**kwargs)  # type: ignore[arg-type]
+        replay = create_booking(**kwargs)  # type: ignore[arg-type]
+
+    assert replay.id == first.id
+    assert replay.reference == first.reference
+
+
+def test_a_reference_collision_is_retried_rather_than_raised(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """The nested `transaction.atomic()` in `_create_booking_row` is what
+    makes this survivable: without a savepoint the `IntegrityError`
+    poisons the outer transaction and the retry dies on the next
+    statement — and, worse, it would surface in `create_booking`'s own
+    `except IntegrityError` handler as a bogus idempotency conflict."""
+    from .. import services
+
+    client = ClientFactory()
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client)
+    with tenant_context(str(client.id)):
+        FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
+        seat_one = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number="1A")
+        seat_two = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number="2A")
+        taken = create_booking(
+            trip=trip,
+            passenger=PassengerUserFactory(client=client),
+            seats=[{"seat": seat_one, "from_stop": stop_a, "to_stop": stop_b}],
+            idempotency_key="ref-collide-first",
+        )
+
+        # The first draw collides with the reference already issued; the
+        # second is free.
+        draws = iter([taken.reference, "BKG-FREE01"])
+        monkeypatch.setattr(services, "_generate_reference", lambda: next(draws))
+
+        second = create_booking(
+            trip=trip,
+            passenger=PassengerUserFactory(client=client),
+            seats=[{"seat": seat_two, "from_stop": stop_a, "to_stop": stop_b}],
+            idempotency_key="ref-collide-second",
+        )
+
+    assert second.reference == "BKG-FREE01"
+
+
+def test_the_reference_is_on_the_bookings_list_so_it_can_be_quoted() -> None:
+    client = ClientFactory()
+    roles = create_default_roles(client)
+    staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client)
+    with tenant_context(str(client.id)):
+        FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
+        seat = SeatFactory(client=client, vehicle_type=vehicle_type)
+        booking = create_booking(
+            trip=trip,
+            passenger=PassengerUserFactory(client=client),
+            seats=[{"seat": seat, "from_stop": stop_a, "to_stop": stop_b}],
+            idempotency_key="ref-list",
+        )
+
+    response = _auth_client(staff).get(reverse("booking-list-create"))
+
+    assert response.data["results"][0]["reference"] == booking.reference

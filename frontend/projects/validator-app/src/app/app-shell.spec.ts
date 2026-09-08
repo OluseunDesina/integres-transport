@@ -9,7 +9,7 @@ describe('AppShell', () => {
   let fixture: ComponentFixture<AppShell>;
   let authApi: jasmine.SpyObj<AuthApiService>;
 
-  beforeEach(async () => {
+  async function createShell(permissions: string[] = []): Promise<void> {
     authApi = jasmine.createSpyObj<AuthApiService>('AuthApiService', ['login', 'logout']);
     // AppShell now always renders NotificationBell, which fetches on
     // init and needs both API_CLIENT and AuthStore.accessToken() —
@@ -28,7 +28,7 @@ describe('AppShell', () => {
         {
           provide: AuthStore,
           useValue: {
-            user: () => ({ email: 'staff@example.com' }),
+            user: () => ({ email: 'staff@example.com', permissions }),
             isAuthenticated: () => true,
             accessToken: () => 'test-token',
           },
@@ -39,6 +39,10 @@ describe('AppShell', () => {
 
     fixture = TestBed.createComponent(AppShell);
     fixture.detectChanges();
+  }
+
+  beforeEach(async () => {
+    await createShell(['tapngo.record', 'ticketing.validate']);
   });
 
   it('creates', () => {
@@ -49,11 +53,29 @@ describe('AppShell', () => {
     expect(fixture.nativeElement.textContent).toContain('staff@example.com');
   });
 
-  it('renders nav links to both screens', () => {
+  // `href`, not the `routerLink` attribute: the links are generated
+  // from a list with a bound `[routerLink]`, which emits no static
+  // attribute to read. Same assertion customer-app's own shell spec
+  // makes.
+  it('renders nav links to both tapping screens', () => {
     const links = Array.from(
       (fixture.nativeElement as HTMLElement).querySelectorAll('nav a')
-    ).map((a) => a.getAttribute('routerLink'));
+    ).map((a) => a.getAttribute('href'));
+    // No /report-issue: this user holds the two tapping codenames but
+    // not `incidents.manage`, which a custom Role can perfectly well
+    // omit. The link is filtered rather than rendered and then 403'd by
+    // its own guard.
     expect(links).toEqual(['/record', '/validate-ticket']);
+  });
+
+  it('adds the report link for a user who can file incidents', async () => {
+    TestBed.resetTestingModule();
+    await createShell(['tapngo.record', 'ticketing.validate', 'incidents.manage']);
+
+    const links = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('nav a')
+    ).map((a) => a.getAttribute('href'));
+    expect(links).toEqual(['/record', '/validate-ticket', '/report-issue']);
   });
 
   it('signs out and navigates to /login', async () => {

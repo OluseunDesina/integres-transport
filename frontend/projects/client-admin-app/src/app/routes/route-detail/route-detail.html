@@ -1,0 +1,153 @@
+@if (loading()) {
+  <div class="flex flex-col gap-4" aria-busy="true">
+    <ui-skeleton [lines]="2" />
+    <ui-skeleton variant="block" height="10rem" />
+  </div>
+} @else if (notFound()) {
+  <div class="flex flex-col gap-4">
+    <ui-page-header title="Route not found" />
+    <ui-alert>
+      This route does not exist, or belongs to another client.
+      <a class="underline underline-offset-2" routerLink="/routes">Back to routes</a>
+    </ui-alert>
+  </div>
+} @else if (route(); as route) {
+  <div class="flex flex-col gap-6">
+    <ui-page-header [title]="route.name" description="Depth, stops, fares and status actions for this route.">
+      <a actions class="text-sm text-muted underline underline-offset-2" routerLink="/routes"
+        >Back to routes</a
+      >
+    </ui-page-header>
+
+    <div class="flex flex-wrap items-center gap-2">
+      <ui-status-pill [tone]="statusTone(route.status)" [label]="statusLabel(route.status)" />
+      <span class="text-sm text-muted">
+        {{ route.code || 'No code' }} · created {{ route.created_at | date: 'd MMM y' }}
+      </span>
+    </div>
+
+    @if (actionError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+
+    @if (route.description) {
+      <section class="rounded-md border border-border bg-surface p-4">
+        <h2 class="mb-2 text-sm font-medium text-strong">Description</h2>
+        <p class="text-sm whitespace-pre-line text-default">{{ route.description }}</p>
+      </section>
+    }
+
+    <section class="rounded-md border border-border bg-surface p-4">
+      <h2 class="mb-3 text-sm font-medium text-strong">Depth</h2>
+      <dl class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-3">
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Distance</dt>
+          <dd class="text-default">
+            {{ route.distance_km ? route.distance_km + ' km' : notSet }}
+          </dd>
+        </div>
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Estimated duration</dt>
+          <dd class="text-default">
+            {{ route.estimated_duration_minutes ? route.estimated_duration_minutes + ' min' : notSet }}
+          </dd>
+        </div>
+        <div class="flex flex-col gap-1">
+          <dt class="font-medium text-strong">Schedules</dt>
+          <dd class="text-default">{{ route.schedule_count }}</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="rounded-md border border-border bg-surface p-4">
+      <h2 class="mb-3 text-sm font-medium text-strong">
+        Stops ({{ route.stop_count }})
+      </h2>
+      @if (route.stops.length === 0) {
+        <p class="text-sm text-muted">
+          No stops ordered yet. A route needs at least two before it can be activated.
+        </p>
+      } @else {
+        <ol class="list-decimal pl-5 text-sm text-default">
+          @for (stop of route.stops; track stop.id) {
+            <li>{{ stop.name }}</li>
+          }
+        </ol>
+      }
+    </section>
+
+    <section class="rounded-md border border-border bg-surface p-4">
+      <h2 class="mb-3 text-sm font-medium text-strong">Fare summary</h2>
+      @if (route.current_fare_summary.configured) {
+        <p class="text-sm text-default">
+          {{ route.current_fare_summary.rule_count }}
+          currently-effective
+          {{ route.current_fare_summary.pricing_mode === 'flat' ? 'flat fare rule' : 'segment fare rule' }}{{
+            route.current_fare_summary.rule_count === 1 ? '' : 's'
+          }}.
+        </p>
+      } @else {
+        <p class="text-sm text-muted">
+          No currently-effective fare. This route cannot be activated until one is priced.
+        </p>
+      }
+    </section>
+
+    <section *appHasPermission="'network.manage'" class="flex flex-col gap-3 rounded-md border border-border bg-surface p-4">
+      <h2 class="text-sm font-medium text-strong">Status and actions</h2>
+      <div class="flex flex-wrap gap-3">
+        <a
+          [routerLink]="['/routes', route.id, 'edit']"
+          class="inline-flex min-h-11 items-center rounded-md border border-border px-4 text-sm font-medium text-strong hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >
+          Edit
+        </a>
+        @for (target of transitionTargets(); track target) {
+          <ui-button
+            [variant]="transitionDanger(target) ? 'danger' : 'secondary'"
+            (pressed)="confirmStatusChange(target)"
+          >
+            {{ actionLabel(target) }}
+          </ui-button>
+        }
+        <ui-button variant="secondary" (pressed)="confirmDuplicate()">Duplicate</ui-button>
+      </div>
+    </section>
+  </div>
+}
+
+<ng-template #statusConfirmBody>
+  @if (route(); as r) {
+    @if (pendingTarget(); as target) {
+      <p class="text-sm text-default">
+        @switch (target) {
+          @case ('active') {
+            {{ r.name }} will be available for new trips and bookings.
+          }
+          @case ('inactive') {
+            @if (r.status === 'archived') {
+              {{ r.name }} will be restored, paused rather than bookable — activating it again is
+              a separate, deliberate step.
+            } @else {
+              {{ r.name }} will stop being offered for new trips and bookings. Trips already
+              scheduled on it are not changed.
+            }
+          }
+          @case ('archived') {
+            {{ r.name }} will be hidden from the routes list by default and locked against
+            editing. Restoring it later is always possible.
+          }
+        }
+      </p>
+    }
+  }
+</ng-template>
+
+<ng-template #duplicateConfirmBody>
+  @if (route(); as r) {
+    <p class="text-sm text-default">
+      A new draft route named "{{ r.name }} (copy)" will be created with the same stops. Fares,
+      schedules and trips are not copied — the copy must be priced before it can be activated.
+    </p>
+  }
+</ng-template>

@@ -520,9 +520,14 @@ def test_trip_availability_endpoint_returns_seats_with_availability() -> None:
     )
 
     assert response.status_code == status.HTTP_200_OK
-    assert len(response.data) == 1
-    assert response.data[0]["seat"]["seat_number"] == "1A"
-    assert response.data[0]["is_available"] is True
+    # An envelope, not a bare array, as of docs/specs/10-booking-modes.md
+    # — the array could not say *why* it was empty.
+    assert response.data["booking_mode"] == "reservation"
+    assert response.data["status"] == "open"
+    assert response.data["capacity_remaining"] is None
+    assert len(response.data["seats"]) == 1
+    assert response.data["seats"][0]["seat"]["seat_number"] == "1A"
+    assert response.data["seats"][0]["is_available"] is True
 
 
 def test_trip_availability_endpoint_rejects_an_unauthenticated_request() -> None:

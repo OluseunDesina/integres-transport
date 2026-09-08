@@ -1,21 +1,26 @@
 <div class="mx-auto flex max-w-lg flex-col gap-6">
-  <div>
-    <a routerLink="/businesses" class="text-sm text-slate-500 hover:text-slate-900">&larr; Businesses</a>
-    <h1 class="mt-2 text-lg font-semibold text-slate-900">
-      Paystack account
-      @if (business(); as b) {
-        — {{ b.name }}
-      }
-    </h1>
-  </div>
+  <ui-page-header [title]="heading()" description="Where this business's settlements are paid out.">
+    <a
+      breadcrumb
+      routerLink="/businesses"
+      class="inline-flex min-h-11 items-center text-sm text-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+    >
+      &larr; Businesses
+    </a>
+  </ui-page-header>
 
   @if (notFound()) {
     <ui-alert>Business not found.</ui-alert>
   } @else if (loading()) {
-    <p class="text-sm text-slate-500">Loading…</p>
+    <div role="status" aria-busy="true" aria-label="Loading this business">
+      <ui-skeleton variant="block" height="12rem" />
+    </div>
   } @else {
     @if (!alreadyConfigured()) {
-      <p class="text-sm text-slate-500">Not yet configured — fill in the form below.</p>
+      <ui-alert variant="warning">
+        No payout destination is configured yet, so settlement runs for this business cannot be
+        paid out. Fill in the form below.
+      </ui-alert>
     }
     @if (successMessage(); as message) {
       <ui-alert variant="success">{{ message }}</ui-alert>
@@ -24,20 +29,50 @@
       <ui-alert>{{ message }}</ui-alert>
     }
 
-    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-text-field label="Bank code" formControlName="bank_code" />
-      <ui-text-field label="Account number" formControlName="account_number" />
-      <ui-text-field label="Account name" formControlName="account_name" />
-      <ui-text-field
-        label="Recipient code"
-        formControlName="recipient_code"
-        [invalid]="form.controls.recipient_code.invalid && form.controls.recipient_code.touched"
-        errorMessage="This field is required."
-      />
-      <label class="flex items-center gap-2 text-sm text-slate-700">
-        <input type="checkbox" formControlName="is_active" />
-        Active
-      </label>
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      <ui-form-section
+        title="Destination account"
+        description="The bank account Paystack pays this business's settlements into."
+      >
+        <ui-text-field
+          label="Bank code"
+          formControlName="bank_code"
+          [invalid]="!!fieldError('bank_code')"
+          [errorMessage]="fieldError('bank_code')"
+        />
+        <ui-text-field
+          label="Account number"
+          inputMode="numeric"
+          formControlName="account_number"
+          [invalid]="!!fieldError('account_number')"
+          [errorMessage]="fieldError('account_number')"
+        />
+        <ui-text-field
+          label="Account name"
+          formControlName="account_name"
+          [invalid]="!!fieldError('account_name')"
+          [errorMessage]="fieldError('account_name')"
+        />
+      </ui-form-section>
+
+      <ui-form-section
+        title="Paystack recipient"
+        description="The transfer recipient this account maps to on Paystack's side."
+      >
+        <ui-text-field
+          label="Recipient code"
+          hint="Created in Paystack, and required before any transfer can be initiated."
+          formControlName="recipient_code"
+          [invalid]="!!fieldError('recipient_code')"
+          [errorMessage]="fieldError('recipient_code')"
+        />
+        <ui-checkbox
+          label="Active"
+          hint="An inactive account is not paid out, and settlement runs will refuse to trigger."
+          formControlName="is_active"
+        />
+      </ui-form-section>
+
       <div>
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">Save</ui-button>
       </div>

@@ -1,7 +1,7 @@
 from django.db.models import QuerySet
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
-from rest_framework import generics
+from rest_framework import generics, status
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -17,13 +17,21 @@ from .serializers import (
     ScheduleSerializer,
     SchedulingListQuerySerializer,
     TripAssignmentSerializer,
+    TripClassSerializer,
     TripCreateSerializer,
     TripListQuerySerializer,
     TripSearchQuerySerializer,
     TripSerializer,
     TripStatusSerializer,
 )
-from .services import assign_trip_resources, transition_trip_status
+from .services import (
+    TripClassLocked,
+    TripClassNotAvailableOnRoute,
+    VehicleClassMismatch,
+    assign_trip_resources,
+    set_trip_class,
+    transition_trip_status,
+)
 
 _BUSINESS_QUERY_PARAM = OpenApiParameter(
     "business",
@@ -53,10 +61,41 @@ _SERVICE_DATE_QUERY_PARAM = OpenApiParameter(
 _STATUS_QUERY_PARAM = OpenApiParameter(
     "status", str, OpenApiParameter.QUERY, required=False, description="Filter to a single status."
 )
+_TRIP_CLASS_QUERY_PARAM = OpenApiParameter(
+    "trip_class",
+    str,
+    OpenApiParameter.QUERY,
+    required=False,
+    description="Filter to a single service class (premium/exclusive/standard/mini).",
+)
+
+
+_SCHEDULE_SEARCH_QUERY_PARAM = OpenApiParameter(
+    "search",
+    str,
+    OpenApiParameter.QUERY,
+    required=False,
+    description="Case-insensitive substring match on the schedule's route "
+    "name. A Schedule has no name of its own.",
+)
+
+_SCHEDULE_IS_ACTIVE_QUERY_PARAM = OpenApiParameter(
+    "is_active",
+    bool,
+    OpenApiParameter.QUERY,
+    required=False,
+    description="Filter to active or inactive schedules. Omit for both.",
+)
 
 
 @extend_schema_view(
-    get=extend_schema(parameters=[_BUSINESS_QUERY_PARAM]),
+    get=extend_schema(
+        parameters=[
+            _BUSINESS_QUERY_PARAM,
+            _SCHEDULE_SEARCH_QUERY_PARAM,
+            _SCHEDULE_IS_ACTIVE_QUERY_PARAM,
+        ]
+    ),
     post=extend_schema(request=ScheduleCreateSerializer, responses=ScheduleSerializer),
 )
 class ScheduleListCreateView(generics.ListCreateAPIView[Schedule]):
@@ -66,11 +105,29 @@ class ScheduleListCreateView(generics.ListCreateAPIView[Schedule]):
 
     def get_queryset(self) -> QuerySet[Schedule]:
         queryset = Schedule.objects.select_related("route", "business").all()
-        query = SchedulingListQuerySerializer(data=self.request.query_params)
+        # `.dict()`, not the QueryDict itself. DRF's `BooleanField.get_value`
+        # treats any mapping with `getlist` as HTML form input, and an HTML
+        # form omits an unchecked checkbox — so it substitutes `False` for a
+        # *missing* boolean, and `is_active` would silently filter every
+        # schedule list to inactive rows on requests that never mentioned it.
+        query = SchedulingListQuerySerializer(data=self.request.query_params.dict())
         query.is_valid(raise_exception=True)
+
         business = query.validated_data.get("business")
         if business is not None:
             queryset = queryset.filter(business=business)
+
+        # Searches the route's name — a Schedule has none of its own.
+        # `select_related("route")` above already joins it, so this adds
+        # no query.
+        search = query.validated_data.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(route__name__icontains=search)
+
+        is_active = query.validated_data.get("is_active")
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active)
+
         return queryset
 
     def get_serializer_class(self) -> type[BaseSerializer[Schedule]]:
@@ -81,6 +138,16 @@ class ScheduleListCreateView(generics.ListCreateAPIView[Schedule]):
         serializer.is_valid(raise_exception=True)
         schedule = serializer.save()
         return Response(ScheduleSerializer(schedule).data, status=201)
+
+
+_TRIP_SEARCH_QUERY_PARAM = OpenApiParameter(
+    "search",
+    str,
+    OpenApiParameter.QUERY,
+    required=False,
+    description="Case-insensitive substring match on the trip's route name. "
+    "A Trip has no name of its own.",
+)
 
 
 class ScheduleUpdateView(generics.UpdateAPIView[Schedule]):
@@ -95,10 +162,13 @@ class ScheduleUpdateView(generics.UpdateAPIView[Schedule]):
 @extend_schema_view(
     get=extend_schema(
         parameters=[
+            _BUSINESS_QUERY_PARAM,
             _ROUTE_QUERY_PARAM,
             _SCHEDULE_QUERY_PARAM,
             _SERVICE_DATE_QUERY_PARAM,
             _STATUS_QUERY_PARAM,
+            _TRIP_CLASS_QUERY_PARAM,
+            _TRIP_SEARCH_QUERY_PARAM,
         ]
     ),
     post=extend_schema(request=TripCreateSerializer, responses=TripSerializer),
@@ -110,12 +180,18 @@ class TripListCreateView(generics.ListCreateAPIView[Trip]):
 
     def get_queryset(self) -> QuerySet[Trip]:
         queryset = Trip.objects.select_related("route", "vehicle", "driver").all()
-        query = TripListQuerySerializer(data=self.request.query_params)
+        query = TripListQuerySerializer(data=self.request.query_params.dict())
         query.is_valid(raise_exception=True)
+        business = query.validated_data.get("business")
         route = query.validated_data.get("route")
         schedule = query.validated_data.get("schedule")
         service_date = query.validated_data.get("service_date")
         status_filter = query.validated_data.get("status")
+        trip_class = query.validated_data.get("trip_class")
+        if trip_class is not None:
+            queryset = queryset.filter(trip_class=trip_class)
+        if business is not None:
+            queryset = queryset.filter(business=business)
         if route is not None:
             queryset = queryset.filter(route=route)
         if schedule is not None:
@@ -124,6 +200,13 @@ class TripListCreateView(generics.ListCreateAPIView[Trip]):
             queryset = queryset.filter(service_date=service_date)
         if status_filter is not None:
             queryset = queryset.filter(status=status_filter)
+
+        # `select_related("route")` above already joins it, so this adds
+        # no query, and it only ever narrows.
+        search = query.validated_data.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(route__name__icontains=search)
+
         return queryset
 
     def get_serializer_class(self) -> type[BaseSerializer[Trip]]:
@@ -146,6 +229,7 @@ class TripListCreateView(generics.ListCreateAPIView[Trip]):
             required=True,
             description="The service date to search (YYYY-MM-DD).",
         ),
+        _TRIP_CLASS_QUERY_PARAM,
     ],
     responses=TripSerializer(many=True),
 )
@@ -169,15 +253,27 @@ class TripSearchView(generics.ListAPIView[Trip]):
     def get_queryset(self) -> QuerySet[Trip]:
         query = TripSearchQuerySerializer(data=self.request.query_params)
         query.is_valid(raise_exception=True)
-        # status and booking_mode are forced here, never read from the
-        # query params — a passenger must not be able to widen this to
-        # reach a cancelled, completed or tap_and_go Trip.
-        return Trip.objects.select_related("route", "vehicle", "driver").filter(
+        # status and fare_collection_mode are forced here, never read
+        # from the query params — a passenger must not be able to widen
+        # this to reach a cancelled, completed or pay-as-you-go Trip.
+        #
+        # Filters on fare_collection_mode, not booking_mode: what makes
+        # a trip buyable in advance is that it is prepaid, not that it
+        # has assigned seats. Open-seating trips are bookable too
+        # (docs/specs/10-booking-modes.md).
+        queryset = Trip.objects.select_related("route", "vehicle", "driver").filter(
             route=query.validated_data["route"],
             service_date=query.validated_data["service_date"],
             status=Trip.Status.SCHEDULED,
-            booking_mode=Business.BookingMode.RESERVATION,
+            fare_collection_mode=Business.FareCollectionMode.PREPAID,
         )
+        # Optional and passenger-supplied, unlike the two forced filters
+        # above — narrowing to a class they want is not a way to reach a
+        # Trip they should not see.
+        trip_class = query.validated_data.get("trip_class")
+        if trip_class is not None:
+            queryset = queryset.filter(trip_class=trip_class)
+        return queryset
 
 
 @extend_schema(request=TripAssignmentSerializer, responses=TripSerializer)
@@ -223,4 +319,43 @@ class TripStatusView(generics.GenericAPIView[Trip]):
             reason=serializer.validated_data.get("reason", ""),
             actor=user,
         )
+        return Response(TripSerializer(updated).data)
+
+
+@extend_schema(request=TripClassSerializer, responses=TripSerializer)
+class TripClassView(generics.GenericAPIView[Trip]):
+    """POST /trips/{id}/class/ — docs/specs/15-trip-classes.md.
+
+    Its own endpoint rather than a field on the assignment PATCH; see
+    TripClassSerializer's docstring for why. Modelled on TripStatusView,
+    the other guarded single-field Trip mutation.
+    """
+
+    permission_classes = [HasPermission("scheduling.manage")]
+    serializer_class = TripClassSerializer
+
+    def get_queryset(self) -> QuerySet[Trip]:
+        return Trip.objects.all()
+
+    def post(self, request: Request, pk: str) -> Response:
+        trip = get_object_or_404(self.get_queryset(), pk=pk)
+        serializer = TripClassSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        assert isinstance(user, User)
+        try:
+            updated = set_trip_class(
+                trip=trip,
+                trip_class=serializer.validated_data["trip_class"],
+                updated_by=user,
+            )
+        except TripClassLocked as exc:
+            # 409, not 400: the request is well-formed and the class is
+            # valid — what refuses it is the state of the Trip, and the
+            # operator's next action is a different one entirely
+            # (cancel and rebook). Same reasoning as
+            # RouteFareMatrixView's own FarePricingModeMismatch branch.
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except (TripClassNotAvailableOnRoute, VehicleClassMismatch) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(TripSerializer(updated).data)

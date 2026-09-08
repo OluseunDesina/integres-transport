@@ -14,7 +14,7 @@ import {
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { AuthApiService, AuthStore, PermissionsService } from '@auth';
-import { Icon, type IconName } from '@shared-ui';
+import { ActionMenu, Icon, type ActionMenuItem, type IconName } from '@shared-ui';
 import { map } from 'rxjs';
 
 import { NavCollapseStore } from './nav-collapse-store';
@@ -33,6 +33,21 @@ export interface NavItem {
 export interface BusinessSwitcherItem {
   id: string;
   name: string;
+}
+
+/**
+ * An entry in the top bar's "New…" menu — spec 14 slice 3a.
+ *
+ * Caller-supplied for the same reason `navItems` is: `@layout` stays
+ * app-agnostic, and only the app knows which records it can create. An
+ * app that passes none (super-admin, validator) renders no top bar at
+ * all, so nothing shifts for them.
+ */
+export interface QuickAction {
+  label: string;
+  /** `routerLink` path, navigated on select. */
+  path: string;
+  permissions: readonly string[];
 }
 
 /** Sidebar collapses to an icon-only rail below this width, overriding
@@ -76,17 +91,17 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
 @Component({
   selector: 'app-nav-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'flex min-h-screen bg-slate-50' },
-  imports: [RouterLink, RouterLinkActive, RouterOutlet, Icon, NotificationBell],
+  host: { class: 'flex min-h-screen bg-surface-muted' },
+  imports: [ActionMenu, RouterLink, RouterLinkActive, RouterOutlet, Icon, NotificationBell],
   template: `
     <aside
-      class="flex shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] duration-150 motion-reduce:transition-none"
+      class="flex shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-150 motion-reduce:transition-none"
       [class.w-64]="!effectiveCollapsed()"
       [class.w-16]="effectiveCollapsed()"
     >
-      <div class="flex h-14 items-center justify-between gap-2 border-b border-slate-200 px-3">
+      <div class="flex h-14 items-center justify-between gap-2 border-b border-border px-3">
         @if (!effectiveCollapsed()) {
-          <span class="truncate text-sm font-semibold text-slate-900">{{ appName() }}</span>
+          <span class="truncate text-sm font-semibold text-strong">{{ appName() }}</span>
         } @else {
           <span class="sr-only">{{ appName() }}</span>
         }
@@ -101,12 +116,12 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
         @for (item of visibleNavItems(); track item.path) {
           <a
             [routerLink]="item.path"
-            routerLinkActive="bg-slate-100 text-slate-900 font-medium"
+            routerLinkActive="bg-primary-subtle text-strong font-medium"
             #rla="routerLinkActive"
             [attr.aria-current]="rla.isActive ? 'page' : null"
             [attr.aria-label]="effectiveCollapsed() ? item.label : null"
             [title]="effectiveCollapsed() ? item.label : null"
-            class="inline-flex min-h-11 min-w-11 items-center gap-3 rounded-md px-3 text-sm text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            class="inline-flex min-h-11 min-w-11 items-center gap-3 rounded-md px-3 text-sm text-default hover:bg-surface-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             <ui-icon [name]="item.icon" />
             @if (!effectiveCollapsed()) {
@@ -116,13 +131,13 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
         }
       </nav>
 
-      <div class="border-t border-slate-200 p-2">
+      <div class="border-t border-border p-2">
         <button
           type="button"
           (click)="collapseStore.toggle()"
           [attr.aria-expanded]="!effectiveCollapsed()"
           aria-label="Toggle navigation width"
-          class="inline-flex min-h-11 w-full min-w-11 items-center justify-center gap-2 rounded-md text-sm text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+          class="inline-flex min-h-11 w-full min-w-11 items-center justify-center gap-2 rounded-md text-sm text-muted hover:bg-surface-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           <ui-icon [name]="effectiveCollapsed() ? 'chevron-double-right' : 'chevron-double-left'" />
           @if (!effectiveCollapsed()) {
@@ -131,7 +146,7 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
         </button>
       </div>
 
-      <div class="relative border-t border-slate-200 p-2" #profileRoot>
+      <div class="relative border-t border-border p-2" #profileRoot>
         <button
           type="button"
           #profileTrigger
@@ -140,24 +155,24 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
           [attr.aria-expanded]="menuOpen()"
           [attr.aria-label]="effectiveCollapsed() ? (authStore.user()?.email ?? 'Account menu') : null"
           [title]="effectiveCollapsed() ? (authStore.user()?.email ?? '') : null"
-          class="inline-flex min-h-11 w-full items-center gap-3 rounded-md px-2 text-left hover:bg-slate-50"
+          class="inline-flex min-h-11 w-full items-center gap-3 rounded-md px-2 text-left hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           [class.justify-center]="effectiveCollapsed()"
         >
           <span
-            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-sunken text-xs font-semibold text-default"
           >
             {{ initial() }}
           </span>
           @if (!effectiveCollapsed()) {
             <span class="min-w-0 flex-1">
-              <span class="block truncate text-sm font-medium text-slate-900">{{
+              <span class="block truncate text-sm font-medium text-strong">{{
                 authStore.user()?.email
               }}</span>
               @if (roleAndClientLabel(); as label) {
-                <span class="block truncate text-xs text-slate-500">{{ label }}</span>
+                <span class="block truncate text-xs text-muted">{{ label }}</span>
               }
             </span>
-            <ui-icon name="chevron-up-down" [size]="16" class="shrink-0 text-slate-400" />
+            <ui-icon name="chevron-up-down" [size]="16" class="shrink-0 text-muted" />
           }
         </button>
 
@@ -166,18 +181,18 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
             role="menu"
             aria-label="Account menu"
             tabindex="-1"
-            class="absolute bottom-full left-2 z-10 mb-1 flex max-h-[70vh] w-72 flex-col rounded-md border border-slate-200 bg-white p-2 shadow-lg"
+            class="absolute bottom-full left-2 z-10 mb-1 flex max-h-[70vh] w-72 flex-col rounded-md border border-border bg-surface p-2 shadow-md"
           >
-            <div class="shrink-0 border-b border-slate-100 px-2 pb-2">
-              <p class="truncate text-sm font-medium text-slate-900">{{ authStore.user()?.email }}</p>
+            <div class="shrink-0 border-b border-border px-2 pb-2">
+              <p class="truncate text-sm font-medium text-strong">{{ authStore.user()?.email }}</p>
               @if (roleAndClientLabel(); as label) {
-                <p class="truncate text-xs text-slate-500">{{ label }}</p>
+                <p class="truncate text-xs text-muted">{{ label }}</p>
               }
             </div>
 
             @if (showBusinessSwitcher()) {
-              <div class="min-h-0 overflow-y-auto border-b border-slate-100 py-2">
-                <p class="px-2 pb-1 text-xs font-medium tracking-wide text-slate-500 uppercase">
+              <div class="min-h-0 overflow-y-auto border-b border-border py-2">
+                <p class="px-2 pb-1 text-xs font-medium tracking-wide text-muted uppercase">
                   Business
                 </p>
                 @for (business of businesses(); track business.id) {
@@ -186,8 +201,8 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
                     role="menuitemradio"
                     [attr.aria-checked]="business.id === activeBusinessId()"
                     (click)="selectBusiness(business.id)"
-                    class="flex min-h-11 w-full items-center justify-between rounded-md px-2 text-sm text-slate-700 hover:bg-slate-50"
-                    [class.bg-slate-100]="business.id === activeBusinessId()"
+                    class="flex min-h-11 w-full items-center justify-between rounded-md px-2 text-sm text-default hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    [class.bg-primary-subtle]="business.id === activeBusinessId()"
                   >
                     <span class="truncate">{{ business.name }}</span>
                     @if (business.id === activeBusinessId()) {
@@ -203,7 +218,7 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
                 type="button"
                 role="menuitem"
                 (click)="signOut()"
-                class="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                class="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-sm font-medium text-default hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
               >
                 <ui-icon name="arrow-right-start-on-rectangle" [size]="20" />
                 <span>Sign out</span>
@@ -214,8 +229,22 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
       </div>
     </aside>
 
-    <main class="min-w-0 flex-1 overflow-y-auto p-6">
-      <div class="mx-auto max-w-6xl">
+    <main class="flex min-w-0 flex-1 flex-col overflow-y-auto">
+      @if (visibleQuickActions().length > 0) {
+        <!-- Rendered only when the app supplies actions, so an app
+             without them keeps exactly its previous layout. -->
+        <div
+          class="sticky top-0 z-10 flex justify-end border-b border-border bg-surface px-6 py-2"
+        >
+          <ui-action-menu
+            label="Create a new record"
+            triggerLabel="New"
+            [items]="quickActionItems()"
+            (selected)="onQuickAction($event)"
+          />
+        </div>
+      }
+      <div class="mx-auto w-full max-w-6xl p-6">
         <router-outlet />
       </div>
     </main>
@@ -233,6 +262,16 @@ export class NavShell {
   // duplicating that placement. Defaults to NotificationBell's own
   // "mark read, never navigate" behavior when a caller doesn't pass one.
   readonly resolveNotificationRoute = input<NotificationRouteResolver>(() => null);
+  /**
+   * Records the app can create from anywhere. Empty by default, which
+   * renders no top bar — `super-admin-app` and `validator-app` are
+   * unaffected by this addition.
+   *
+   * Solves a real irritation: creating any record meant navigating to
+   * its own list screen first, because the only "New …" button lives in
+   * that screen's page header.
+   */
+  readonly quickActions = input<readonly QuickAction[]>([]);
 
   protected readonly authStore = inject(AuthStore);
   protected readonly collapseStore = inject(NavCollapseStore);
@@ -256,6 +295,25 @@ export class NavShell {
       (item) => item.permissions.length === 0 || this.permissionsService.hasAny(item.permissions)
     )
   );
+
+  /** Permission-gated the same way `visibleNavItems` is — a create
+   * action a user cannot perform must not be offered. */
+  protected readonly visibleQuickActions = computed(() =>
+    this.quickActions().filter(
+      (action) =>
+        action.permissions.length === 0 || this.permissionsService.hasAny(action.permissions)
+    )
+  );
+
+  /** `ui-action-menu` takes ids, so the path is the id — it is already
+   * unique per action and is exactly what the handler needs. */
+  protected readonly quickActionItems = computed<ActionMenuItem[]>(() =>
+    this.visibleQuickActions().map((action) => ({ id: action.path, label: action.label }))
+  );
+
+  protected onQuickAction(path: string): void {
+    void this.router.navigate([path]);
+  }
 
   protected readonly menuOpen = signal(false);
   private readonly profileRoot = viewChild.required<ElementRef<HTMLElement>>('profileRoot');

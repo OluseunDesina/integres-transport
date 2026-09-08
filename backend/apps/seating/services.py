@@ -2,11 +2,12 @@
 docs/specs/4-fares-seating-booking.md §4 and docs/adr/0004."""
 
 import string
+from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any, TypedDict
 
-from django.db import IntegrityError, OperationalError, transaction
+from django.db import IntegrityError, OperationalError, models, transaction
 from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from psycopg.types.range import Range
@@ -138,13 +139,30 @@ def generate_seat_layout(
     return layout
 
 
-def _segment_sequence_range(*, route_id: Any, from_stop: Stop, to_stop: Stop) -> tuple[int, int]:
+def segment_sequence_range(
+    *, route_id: Any, from_stop: Stop, to_stop: Stop, tenant_scoped: bool = True
+) -> tuple[int, int]:
     """Resolves (from_sequence, to_sequence) via RouteStop — mirrors
     apps.fares.serializers's own stop-order validation. Raises
-    ValueError if either stop isn't on the route or is out of order."""
+    ValueError if either stop isn't on the route or is out of order.
+
+    Public rather than module-private as of
+    docs/specs/10-booking-modes.md: `apps.ticketing` derives
+    `Ticket.segment_range` with it, so open-seating capacity counting
+    and seat-overlap checking share one definition of "which stops does
+    this journey span" instead of two that could drift.
+
+    `tenant_scoped=False` reads through `all_objects` and must be passed
+    by callers running under `platform_staff_bypass()` — that sets the
+    Postgres RLS GUCs but deliberately never touches the Python tenancy
+    contextvar, so `.objects` there matches **zero rows** and this
+    raises a misleading "Both stops must be on the route." Exactly the
+    trap CLAUDE.md warns about, hit for real by ticket issuance, which
+    runs from a webhook with no request behind it."""
+    manager = RouteStop.objects if tenant_scoped else RouteStop.all_objects
     sequence_by_stop_id = {
         route_stop.stop_id: route_stop.sequence
-        for route_stop in RouteStop.objects.filter(
+        for route_stop in manager.filter(
             route_id=route_id, stop_id__in=[from_stop.id, to_stop.id]
         )
     }
@@ -158,15 +176,18 @@ def _segment_sequence_range(*, route_id: Any, from_stop: Stop, to_stop: Stop) ->
 
 
 def get_availability(*, trip: Trip, from_stop: Stop, to_stop: Stop) -> list[SeatAvailability]:
-    """One row per active Seat on trip.vehicle's VehicleType. A Trip
-    with no Vehicle assigned yet has no seats to check availability
-    against — returns an empty list, the same non-error "not yet
-    configured" state Seat's own docstring names for a VehicleType with
-    zero Seat rows, not a 400/404."""
+    """One row per active Seat on trip.vehicle's VehicleType, or `[]`
+    when there is no vehicle or no seat map.
+
+    Callers should prefer `get_bookability`, which distinguishes "no
+    vehicle yet" from "sold out" — this function cannot, since both are
+    an empty list. It is kept as the seat-level primitive that function
+    builds on.
+    """
     vehicle = trip.vehicle
     if vehicle is None:
         return []
-    from_sequence, to_sequence = _segment_sequence_range(
+    from_sequence, to_sequence = segment_sequence_range(
         route_id=trip.route_id, from_stop=from_stop, to_stop=to_stop
     )
     requested_range = Range(from_sequence, to_sequence)
@@ -179,6 +200,103 @@ def get_availability(*, trip: Trip, from_stop: Stop, to_stop: Stop) -> list[Seat
         ).values_list("seat_id", flat=True)
     )
     return [{"seat": seat, "is_available": seat.id not in occupied_seat_ids} for seat in seats]
+
+
+class BookabilityStatus(models.TextChoices):
+    OPEN = "open", "Open"
+    NOT_CONFIGURED = "not_configured", "Not configured"
+    SOLD_OUT = "sold_out", "Sold out"
+
+
+@dataclass(frozen=True)
+class Bookability:
+    """One answer for both booking modes — docs/specs/10-booking-modes.md.
+
+    `get_availability` returns `[]` both when a trip has no vehicle
+    assigned and when every seat is taken, and the customer app rendered
+    the two identically ("not open for booking yet" vs "sold out"). They
+    are completely different situations: one an operator fixes by
+    assigning a bus, the other a passenger fixes by picking another
+    departure. `status` is what separates them.
+
+    `capacity_remaining` is open-seating only, and `None` means
+    unlimited — either the Business does not enforce capacity, or
+    capacity is unknowable because no vehicle is assigned (in which case
+    `status` is already `not_configured`, so it is never read as
+    "unlimited" by mistake).
+
+    `seat_selection_enabled` answers "may a passenger pick their own
+    seat on *this trip*", which is not the same as the Business field of
+    that name: open seating has no seats to pick, so it is always
+    `False` there regardless of the setting. A client that read the
+    Business field instead would show a seat map for a trip that has no
+    seats.
+    """
+
+    booking_mode: str
+    status: str
+    seats: list[SeatAvailability]
+    capacity_remaining: int | None
+    seat_selection_enabled: bool
+
+
+def get_bookability(*, trip: Trip, from_stop: Stop, to_stop: Stop) -> Bookability:
+    """Whether this segment of this trip can be booked, and why not if
+    it cannot. Read-only and lock-free — see
+    `apps.ticketing.capacity.get_capacity` for why the booking path
+    locks and this does not."""
+    # Local import: apps.ticketing imports apps.seating.services for
+    # segment_sequence_range, so a module-level import back would be
+    # circular — same shape apps.booking.services already uses for
+    # mark_booking_completed_if_fully_boarded.
+    from apps.ticketing.capacity import get_capacity, is_open_seating
+
+    if is_open_seating(trip):
+        if trip.business.capacity_enforced and trip.vehicle is None:
+            # Unknowable capacity. Treating it as unlimited would sell
+            # an unbounded number of places onto a bus nobody has
+            # chosen yet — see docs/adr/0008.
+            return Bookability(
+                booking_mode=trip.booking_mode,
+                status=BookabilityStatus.NOT_CONFIGURED,
+                seats=[],
+                capacity_remaining=None,
+                seat_selection_enabled=False,
+            )
+        from_sequence, to_sequence = segment_sequence_range(
+            route_id=trip.route_id, from_stop=from_stop, to_stop=to_stop
+        )
+        capacity = get_capacity(
+            trip=trip, from_sequence=from_sequence, to_sequence=to_sequence
+        )
+        sold_out = capacity.remaining is not None and capacity.remaining <= 0
+        return Bookability(
+            booking_mode=trip.booking_mode,
+            status=BookabilityStatus.SOLD_OUT if sold_out else BookabilityStatus.OPEN,
+            seats=[],
+            capacity_remaining=capacity.remaining,
+            # Never true for open seating: there are no seats to pick.
+            seat_selection_enabled=False,
+        )
+
+    seats = get_availability(trip=trip, from_stop=from_stop, to_stop=to_stop)
+    if not seats:
+        # No vehicle, or a vehicle type with no active seats. Both are
+        # "an operator has not finished setting this up", which is
+        # exactly what get_availability's own docstring already called
+        # a non-error "not yet configured" state.
+        status = BookabilityStatus.NOT_CONFIGURED
+    elif not any(seat["is_available"] for seat in seats):
+        status = BookabilityStatus.SOLD_OUT
+    else:
+        status = BookabilityStatus.OPEN
+    return Bookability(
+        booking_mode=trip.booking_mode,
+        status=status,
+        seats=seats,
+        capacity_remaining=None,
+        seat_selection_enabled=trip.business.seat_selection_enabled,
+    )
 
 
 def create_reservation(
@@ -218,7 +336,7 @@ def create_reservation(
     by the SeatReservation CHECK constraint)."""
     if (fare_rule is None) == (fare_segment_rule is None):
         raise ValueError("Exactly one of fare_rule or fare_segment_rule must be set.")
-    from_sequence, to_sequence = _segment_sequence_range(
+    from_sequence, to_sequence = segment_sequence_range(
         route_id=trip.route_id, from_stop=from_stop, to_stop=to_stop
     )
     try:

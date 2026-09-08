@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
 import { ListStore, type Page } from '@shared-data';
 
 export type BusinessSuperAdmin = components['schemas']['BusinessSuperAdmin'];
@@ -35,7 +34,6 @@ export class BusinessSuperAdminStore extends ListStore<
   BusinessSuperAdminQuery
 > {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   constructor() {
     super({}, 25);
@@ -49,7 +47,6 @@ export class BusinessSuperAdminStore extends ListStore<
       params: {
         query: { limit: page.limit, offset: page.offset, search: query.search },
       },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     if (!data) {
       throw new Error(toErrorMessage(error));

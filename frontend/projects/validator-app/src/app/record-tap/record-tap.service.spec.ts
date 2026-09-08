@@ -13,10 +13,15 @@ function makeTrip(overrides: Record<string, unknown> = {}) {
     scheduled_departure_at: '2026-09-01T06:30:00Z',
     status: 'scheduled',
     status_changed_at: null,
+    // docs/specs/16-operational-analytics.md slice 1 — null
+    // on every Trip that has not departed, which is most of them.
+    actual_departure_at: null,
+    actual_arrival_at: null,
     vehicle: null,
     driver: null,
     booking_mode: 'open_seating',
     fare_collection_mode: 'pay_as_you_go',
+    trip_class: 'standard',
     cancellation_reason: '',
     compliance_warnings: [],
     created_at: '2026-08-06T00:00:00Z',

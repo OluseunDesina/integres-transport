@@ -1,55 +1,150 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Staff</h1>
-    <ui-button *appHasPermission="'staff.invite'" (pressed)="goToInvite()">Invite staff</ui-button>
-  </div>
+  <ui-page-header
+    title="Staff"
+    description="Everyone with access to this console, and what they are allowed to do."
+  >
+    <ui-button actions *appHasPermission="'staff.invite'" (pressed)="goToInvite()"
+      >Invite staff</ui-button
+    >
+  </ui-page-header>
 
+  <!-- A failed role or status change is transient and must not replace
+       the table — the row it came from still needs to be visible. -->
   @if (errorMessage(); as message) {
     <ui-alert>{{ message }}</ui-alert>
   }
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state title="No staff yet" description="Invite your first team member to get started.">
-      <ui-button *appHasPermission="'staff.invite'" (pressed)="goToInvite()">Invite staff</ui-button>
-    </ui-empty-state>
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Email</th>
-          <th class="px-4 py-2">Role</th>
-          <th class="px-4 py-2">Active</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (member of store.items(); track member.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ member.email }}</td>
-            <td class="px-4 py-2 [&_label]:sr-only">
-              <ui-select
-                label="Role"
-                [options]="roleOptions()"
-                [ngModel]="member.role.id"
-                [ngModelOptions]="{ standalone: true }"
-                (ngModelChange)="onRoleChange(member, $event)"
-              />
-            </td>
-            <td class="px-4 py-2">
-              <input
-                type="checkbox"
-                [attr.aria-label]="'Active — ' + member.email"
-                [ngModel]="member.is_active"
-                [ngModelOptions]="{ standalone: true }"
-                (ngModelChange)="onActiveChange(member, $event)"
-                class="h-4 w-4"
-              />
-            </td>
-          </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search staff"
+        placeholder="Search by email…"
+        ariaLabel="Staff filters"
+        [chips]="filters.chips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      />
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No staff yet"
+        description="Invite your first team member to get started."
+      >
+        <ui-button *appHasPermission="'staff.invite'" (pressed)="goToInvite()"
+          >Invite staff</ui-button
+        >
+      </ui-empty-state>
+    } @else {
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Staff"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No staff match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Email</th>
+              <th class="hidden py-2 md:table-cell">Role</th>
+              <th class="py-2">Status</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="14rem" /></td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="5rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="4rem" /></td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
+              }
+            } @else {
+              @for (member of store.items(); track member.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    <span class="block break-all">{{ member.email }}</span>
+                    <!-- The Role column, hidden below `md`. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ member.role.name }}
+                    </span>
+                  </td>
+                  <!-- Read-only. Changing a colleague's role is an
+                       explicit, confirmed action in the row menu —
+                       docs/specs/14's one behavioural change. It used to
+                       be a <select> that rewrote their permissions the
+                       moment it changed. -->
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ member.role.name }}
+                  </td>
+                  <td [class]="cellClass()">
+                    @if (member.is_active) {
+                      <ui-status-pill tone="positive" label="Active" />
+                    } @else {
+                      <ui-status-pill tone="neutral" label="Inactive" />
+                    }
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    @if (canManage()) {
+                      <ui-action-menu
+                        [items]="menuItems(member)"
+                        [label]="'Actions for ' + member.email"
+                        (selected)="onMenuSelected(member, $event)"
+                      />
+                    }
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
+
+<ng-template #roleBody>
+  @if (selected(); as member) {
+    <div class="flex flex-col gap-3 text-sm">
+      <p class="text-default">
+        {{ member.email }} currently holds the {{ member.role.name }} role. Changing it takes effect
+        on their next request.
+      </p>
+      <ui-select
+        label="New role"
+        [options]="roleOptions()"
+        [ngModel]="pendingRoleId()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="onPendingRoleChange($event)"
+      />
+    </div>
+  }
+</ng-template>
+
+<ng-template #activeBody>
+  @if (selected(); as member) {
+    <p class="text-sm text-default">
+      @if (member.is_active) {
+        {{ member.email }} will lose access to this console immediately. Their record and history
+        are kept.
+      } @else {
+        {{ member.email }} will be able to sign in again with their existing role.
+      }
+    </p>
+  }
+</ng-template>

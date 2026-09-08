@@ -1,13 +1,16 @@
 <div class="flex flex-col gap-6">
-  <div>
-    <a routerLink="/businesses" class="text-sm text-slate-500 hover:text-slate-900">&larr; Businesses</a>
-    <h1 class="mt-2 text-lg font-semibold text-slate-900">
-      Settlement runs
-      @if (business(); as b) {
-        — {{ b.name }}
-      }
-    </h1>
-  </div>
+  <ui-page-header
+    [title]="heading()"
+    description="Payouts claimed and transferred to this business, one per period."
+  >
+    <a
+      breadcrumb
+      routerLink="/businesses"
+      class="inline-flex min-h-11 items-center text-sm text-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+    >
+      &larr; Businesses
+    </a>
+  </ui-page-header>
 
   @if (notFound()) {
     <ui-alert>Business not found.</ui-alert>
@@ -20,28 +23,40 @@
         description="Runs triggered for this business will appear here."
       />
     } @else {
-      <ui-table [loading]="store.loading()">
+      <ui-table
+        label="Settlement runs"
+        [loading]="store.loading()"
+      >
         <thead>
-          <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-            <th class="px-4 py-2">Period</th>
-            <th class="px-4 py-2">Status</th>
-            <th class="px-4 py-2">Total</th>
-            <th class="px-4 py-2">PSP reference</th>
-            <th class="px-4 py-2">Executed</th>
+          <tr class="border-b border-border text-xs uppercase tracking-wide text-muted">
+            <th class="py-2">Period</th>
+            <th class="py-2">Status</th>
+            <th class="hidden py-2 md:table-cell">Total</th>
+            <th class="hidden py-2 md:table-cell">PSP reference</th>
+            <th class="hidden py-2 md:table-cell">Executed</th>
           </tr>
         </thead>
         <tbody>
           @for (run of store.items(); track run.id) {
-            <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-              <td class="px-4 py-2">{{ run.period_start }} – {{ run.period_end }}</td>
-              <td class="px-4 py-2">
+            <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+              <td class="py-2 font-medium text-strong">
+                {{ run.period_start }} – {{ run.period_end }}
+                <!-- The columns hidden below `md`, re-flowed. -->
+                <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                  {{ totalLabel(run) }} ·
+                  {{ run.executed_at ? (run.executed_at | date: 'short') : 'Not executed' }}
+                </span>
+              </td>
+              <td class="py-2">
                 <ui-status-pill [tone]="statusTone[run.status]" [label]="statusLabel[run.status]" />
               </td>
-              <td class="px-4 py-2">{{ totalLabel(run) }}</td>
-              <td class="px-4 py-2 font-mono text-xs text-slate-500">
+              <td class="hidden py-2 md:table-cell">{{ totalLabel(run) }}</td>
+              <td class="hidden py-2 font-mono text-xs text-muted md:table-cell">
                 {{ run.psp_transfer_reference || '—' }}
               </td>
-              <td class="px-4 py-2">{{ run.executed_at ? (run.executed_at | date: 'short') : '—' }}</td>
+              <td class="hidden py-2 md:table-cell">
+                {{ run.executed_at ? (run.executed_at | date: 'short') : '—' }}
+              </td>
             </tr>
           }
         </tbody>
@@ -49,8 +64,8 @@
       <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
     }
 
-    <div class="max-w-md rounded-md border border-slate-200 p-4">
-      <h2 class="mb-4 text-sm font-medium text-slate-900">Trigger a settlement run</h2>
+    <div class="max-w-md rounded-xl border border-border bg-surface p-5 shadow-sm">
+      <h2 class="mb-4 font-medium text-strong">Trigger a settlement run</h2>
 
       @if (payoutNotConfigured()) {
         <ui-alert class="mb-4">
@@ -66,8 +81,20 @@
       }
 
       <form [formGroup]="form" (ngSubmit)="onTrigger()" class="flex flex-col gap-4" novalidate>
-        <ui-text-field label="Period start" type="date" formControlName="period_start" />
-        <ui-text-field label="Period end" type="date" formControlName="period_end" />
+        <ui-text-field
+          label="Period start"
+          type="date"
+          formControlName="period_start"
+          [invalid]="!!fieldError('period_start')"
+          [errorMessage]="fieldError('period_start')"
+        />
+        <ui-text-field
+          label="Period end"
+          type="date"
+          formControlName="period_end"
+          [invalid]="!!fieldError('period_end')"
+          [errorMessage]="fieldError('period_end')"
+        />
         <div>
           <ui-button type="submit" [loading]="triggering()" [disabled]="triggering()">
             Trigger

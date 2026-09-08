@@ -23,6 +23,22 @@ from apps.businesses.models import Business
 from apps.core.models import BaseModel
 from apps.network.models import Route, Stop
 
+# docs/specs/15-trip-classes.md. The empty string is a **wildcard**
+# meaning "any class", not "no class", and it is why both rule models
+# below store `trip_class` as a NOT NULL blank-able CharField rather
+# than a nullable one.
+#
+# A nullable column was considered and rejected on a database fact:
+# Postgres `=` does not match NULL against NULL, so a GiST exclusion
+# constraint containing `trip_class WITH =` would silently permit two
+# overlapping NULL-class rules for the same route — the exact duplicate
+# the constraint exists to prevent. The sentinel keeps it honest.
+#
+# It is also what makes spec 15's migration behaviour-preserving: every
+# pre-existing rule backfills to the wildcard and therefore keeps
+# pricing every class exactly as it did before classes existed.
+ANY_TRIP_CLASS = ""
+
 
 class FareRule(BaseModel):
     """Versioned flat fare for a Route — used when
@@ -32,6 +48,15 @@ class FareRule(BaseModel):
 
     business = models.ForeignKey(Business, on_delete=models.PROTECT, related_name="+")
     route = models.ForeignKey(Route, on_delete=models.PROTECT, related_name="+")
+    # `""` (ANY_TRIP_CLASS) is the wildcard — see its definition above.
+    # An exact class match beats the wildcard at lookup time; the
+    # precedence rule lives in `services.get_fare`.
+    trip_class = models.CharField(
+        max_length=20,
+        choices=Business.TripClass.choices,
+        blank=True,
+        default=ANY_TRIP_CLASS,
+    )
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     effective_from = models.DateTimeField()
     effective_to = models.DateTimeField(null=True, blank=True)
@@ -57,6 +82,13 @@ class FareSegmentRule(BaseModel):
     route = models.ForeignKey(Route, on_delete=models.PROTECT, related_name="+")
     from_stop = models.ForeignKey(Stop, on_delete=models.PROTECT, related_name="+")
     to_stop = models.ForeignKey(Stop, on_delete=models.PROTECT, related_name="+")
+    # Same wildcard semantics as FareRule.trip_class above.
+    trip_class = models.CharField(
+        max_length=20,
+        choices=Business.TripClass.choices,
+        blank=True,
+        default=ANY_TRIP_CLASS,
+    )
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     effective_from = models.DateTimeField()
     effective_to = models.DateTimeField(null=True, blank=True)

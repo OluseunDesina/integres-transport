@@ -31,6 +31,17 @@ async function createBusiness(page: Page, name: string): Promise<void> {
   await expect(page).toHaveURL(/\/businesses$/);
 }
 
+/**
+ * Row actions moved from bare text links and in-row write controls into
+ * one `ui-action-menu` per row — docs/specs/14 slice 3b.
+ */
+async function openRowMenu(page: Page, rowName: string): Promise<void> {
+  await page
+    .getByRole('row', { name: new RegExp(rowName) })
+    .getByRole('button', { name: new RegExp('^Actions for') })
+    .click();
+}
+
 test.describe('client-admin-app businesses', () => {
   test('renders an axe-clean businesses screen behind the nav shell', async ({ page }) => {
     await signIn(page);
@@ -38,7 +49,7 @@ test.describe('client-admin-app businesses', () => {
 
     await expect(page).toHaveURL(/\/businesses$/);
     await expect(page.getByRole('heading', { name: 'Businesses' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Home' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Dashboard' })).toBeVisible();
 
     // Sign out now lives inside the profile menu (closed by default),
     // not as its own always-visible button.
@@ -110,10 +121,8 @@ test.describe('client-admin-app businesses', () => {
     await signIn(page);
     await createBusiness(page, originalName);
 
-    await page
-      .getByRole('row', { name: new RegExp(originalName) })
-      .getByRole('link', { name: 'Edit' })
-      .click();
+    await openRowMenu(page, originalName);
+    await page.getByRole('menuitem', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit business' })).toBeVisible();
     await expect(page.getByLabel('Business name')).toHaveValue(originalName);
 
@@ -136,18 +145,13 @@ test.describe('client-admin-app businesses', () => {
     await signIn(page);
     await createBusiness(page, name);
 
-    await page
-      .getByRole('row', { name: new RegExp(name) })
-      .getByRole('link', { name: 'Edit' })
-      .click();
+    await openRowMenu(page, name);
+    await page.getByRole('menuitem', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit business' })).toBeVisible();
     await page.getByRole('link', { name: 'Open verification' }).click();
     await expect(
       page.getByRole('heading', { name: 'Business verification (KYB)' }),
     ).toBeVisible();
-
-    // Every section starts outstanding, which the old UI could not show.
-    await expect(page.getByText('Not supplied yet.').first()).toBeVisible();
 
     await page.getByLabel('Full name').fill('Ada Okafor');
     await page.getByLabel('ID type').selectOption('nin');
@@ -165,6 +169,13 @@ test.describe('client-admin-app businesses', () => {
     });
     await page.getByRole('button', { name: "Upload Ada Okafor's ID" }).click();
     await expect(page.getByText('No ID uploaded yet.')).toHaveCount(0);
+
+    // Company documents are their own tab now — with both halves
+    // stacked this was the longest screen in the console.
+    await page.getByRole('tab', { name: 'Company documents' }).click();
+
+    // Every section starts outstanding, which the old UI could not show.
+    await expect(page.getByText('Not supplied yet.').first()).toBeVisible();
 
     // A company-level document needs no director.
     await page.getByLabel('Tax certificate file').setInputFiles({

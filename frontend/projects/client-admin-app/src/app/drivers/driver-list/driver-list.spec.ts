@@ -1,10 +1,14 @@
+import { Dialog } from '@angular/cdk/dialog';
 import { signal } from '@angular/core';
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { provideRouter } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import { AuthStore } from '@auth';
 import type { AuthUser } from '@auth';
+import { DrawerService, expectColumnVisibilityParity } from '@shared-ui';
+import type { ConfirmDialogData } from '@shared-ui';
+import { Subject } from 'rxjs';
 
 import { DriverList } from './driver-list';
 import { BusinessStore, type Business } from '../../shared/data/store/business.store';
@@ -79,8 +83,20 @@ describe('DriverList', () => {
   let fixture: ComponentFixture<DriverList>;
   let store: FakeDriverStore;
 
+  let dialogSpy: jasmine.SpyObj<Dialog>;
+  let drawerSpy: jasmine.SpyObj<DrawerService>;
+  let closedSubject: Subject<boolean | undefined>;
+  let authStore: AuthStore;
+
   beforeEach(async () => {
     localStorage.clear();
+    apiClientStub.PATCH.calls.reset();
+    closedSubject = new Subject<boolean | undefined>();
+    dialogSpy = jasmine.createSpyObj<Dialog>('Dialog', ['open']);
+    dialogSpy.open.and.returnValue({
+      closed: closedSubject.asObservable(),
+    } as ReturnType<Dialog['open']>);
+    drawerSpy = jasmine.createSpyObj<DrawerService>('DrawerService', ['open']);
     store = new FakeDriverStore();
 
     await TestBed.configureTestingModule({
@@ -88,6 +104,8 @@ describe('DriverList', () => {
       providers: [
         provideRouter([]),
         { provide: API_CLIENT, useValue: apiClientStub },
+        { provide: Dialog, useValue: dialogSpy },
+        { provide: DrawerService, useValue: drawerSpy },
         { provide: DriverStore, useValue: store },
         { provide: BusinessStore, useValue: new FakeBusinessStore() },
         {
@@ -97,24 +115,54 @@ describe('DriverList', () => {
       ],
     }).compileComponents();
 
-    const authStore = TestBed.inject(AuthStore);
+    authStore = TestBed.inject(AuthStore);
     authStore.setSession(
       'a',
       'r',
-      makeUser({ permissions: ['client-admin:access', 'fleet.view'] }),
+      makeUser({ permissions: ['client-admin:access', 'fleet.view'] })
     );
 
     fixture = TestBed.createComponent(DriverList);
     fixture.detectChanges();
   });
 
-  afterEach(() => localStorage.clear());
+  function openRowMenu(): HTMLButtonElement[] {
+    const trigger = fixture.debugElement
+      .queryAll(By.css('tbody button'))
+      .find((el) =>
+        (el.nativeElement as HTMLElement).getAttribute('aria-label')?.startsWith('Actions for')
+      )!;
+    (trigger.nativeElement as HTMLButtonElement).click();
+    fixture.detectChanges();
+    return Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
+  }
+
+  /** `ui-action-menu` emits one macrotask after the click, so the menu
+   * has closed and returned focus before a dialog opens. */
+  async function chooseAction(label: string): Promise<void> {
+    const item = openRowMenu().find((el) => el.textContent?.trim() === label)!;
+    item.click();
+    await new Promise((resolve) => setTimeout(resolve));
+    fixture.detectChanges();
+  }
+
+  function typeSearch(value: string): void {
+    const input = fixture.debugElement.query(By.css('input[type="search"]'))
+      .nativeElement as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event('input'));
+  }
+
+  afterEach(() => {
+    localStorage.clear();
+    fixture.destroy();
+  });
 
   it('scopes the query to the active Business on init', () => {
     expect(store.updateQuery).toHaveBeenCalledWith({ business: 'biz-1' });
   });
 
-  it('shows the empty state when the store has no rows', () => {
+  it('shows the empty state when the store has no rows and nothing is filtered', () => {
     store.isEmpty.set(true);
     fixture.detectChanges();
 
@@ -140,7 +188,117 @@ describe('DriverList', () => {
 
     const cells = fixture.debugElement.queryAll(By.css('tbody td'));
     expect(
-      cells.some((c) => (c.nativeElement.textContent as string).includes('1 warning(s)')),
+      cells.some((c) => (c.nativeElement.textContent as string).includes('1 warning(s)'))
     ).toBe(true);
+  });
+
+  // --- docs/specs/14 slice 3a: toggle becomes pill + confirmed action ---
+
+  it('renders status as a read-only pill, with no switch in the table', () => {
+    // A write control in a read surface is one mis-tap from a change
+    // nobody confirmed.
+    store.items.set([makeDriver()]);
+    fixture.detectChanges();
+
+    expect(fixture.debugElement.query(By.css('tbody [role="switch"]'))).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('Active');
+  });
+
+  it('offers a manager Edit and Deactivate for an active row', () => {
+    authStore.setSession(
+      'a',
+      'r',
+      makeUser({
+        permissions: ['client-admin:access', 'fleet.view', 'fleet.manage'],
+      })
+    );
+    store.items.set([makeDriver()]);
+    fixture.detectChanges();
+
+    expect(openRowMenu().map((el) => el.textContent?.trim())).toEqual([
+      'View details',
+      'Edit',
+      'Deactivate',
+    ]);
+  });
+
+  it('gives a view-only user no write actions', () => {
+    store.items.set([makeDriver()]);
+    fixture.detectChanges();
+
+    expect(openRowMenu().map((el) => el.textContent?.trim())).toEqual(['View details']);
+  });
+
+  it('confirms before deactivating, and writes only once confirmed', async () => {
+    authStore.setSession(
+      'a',
+      'r',
+      makeUser({
+        permissions: ['client-admin:access', 'fleet.view', 'fleet.manage'],
+      })
+    );
+    store.items.set([makeDriver()]);
+    fixture.detectChanges();
+
+    await chooseAction('Deactivate');
+    expect(dialogSpy.open).toHaveBeenCalled();
+    expect(apiClientStub.PATCH).not.toHaveBeenCalled();
+
+    const data = dialogSpy.open.calls.mostRecent().args[1]?.data as ConfirmDialogData;
+    expect(data.danger()).toBeTrue();
+    await data.onConfirm();
+
+    expect(apiClientStub.PATCH).toHaveBeenCalledWith('/api/v1/drivers/{id}/', {
+      params: { path: { id: 'd-1' } },
+      body: { is_active: false },
+    });
+  });
+
+  it('opens a drawer of detail', async () => {
+    store.items.set([makeDriver()]);
+    fixture.detectChanges();
+    await chooseAction('View details');
+
+    expect(drawerSpy.open).toHaveBeenCalled();
+    expect(drawerSpy.open.calls.mostRecent().args[0].title).toBe('Tunde Bello');
+  });
+
+  // --- Filters ---
+
+  it('sends a debounced search to the store, scoped to the active Business', fakeAsync(() => {
+    store.updateQuery.calls.reset();
+    typeSearch('Ikeja');
+    expect(store.updateQuery).not.toHaveBeenCalled();
+
+    tick(300);
+    expect(store.updateQuery).toHaveBeenCalledWith({
+      business: 'biz-1',
+      search: 'Ikeja',
+      is_active: undefined,
+    });
+  }));
+
+  it('says "no matches" rather than "none yet" when a filter is active', fakeAsync(() => {
+    typeSearch('nothing matches');
+    tick(300);
+    store.isEmpty.set(true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('match these filters');
+  }));
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makeDriver()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'driver-list rows');
+  });
+
+  it('keeps the skeleton row aligned with the header too', () => {
+    store.loading.set(true);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'driver-list skeleton');
   });
 });

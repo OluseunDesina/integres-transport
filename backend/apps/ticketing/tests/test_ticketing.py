@@ -17,6 +17,7 @@ from rest_framework.test import APIClient
 from apps.booking.models import Booking
 from apps.booking.services import mark_booking_paid
 from apps.booking.tests.factories import BookingFactory
+from apps.businesses.models import Business
 from apps.businesses.tests.factories import BusinessFactory
 from apps.clients.tests.factories import ClientFactory
 from apps.core.models import AuditLog
@@ -114,11 +115,13 @@ def _two_seat_booking(client, business):  # type: ignore[no-untyped-def]
 
 def test_sign_and_verify_round_trips() -> None:
     now = timezone.now()
+    ticket_id = str(uuid4())
     booking_id, seat_reservation_id = str(uuid4()), str(uuid4())
     trip_id, seat_id = str(uuid4()), str(uuid4())
     from_stop_id, to_stop_id = str(uuid4()), str(uuid4())
 
     payload = signing.sign_ticket(
+        ticket_id=ticket_id,
         booking_id=booking_id,
         seat_reservation_id=seat_reservation_id,
         trip_id=trip_id,
@@ -130,6 +133,7 @@ def test_sign_and_verify_round_trips() -> None:
     )
     claims = signing.verify_and_decode(payload=payload)
 
+    assert claims["ticket_id"] == ticket_id
     assert claims["booking_id"] == booking_id
     assert claims["seat_reservation_id"] == seat_reservation_id
     assert claims["trip_id"] == trip_id
@@ -143,6 +147,7 @@ def test_sign_and_verify_round_trips() -> None:
 def test_tampered_payload_is_rejected() -> None:
     now = timezone.now()
     payload = signing.sign_ticket(
+        ticket_id=str(uuid4()),
         booking_id=str(uuid4()),
         seat_reservation_id=str(uuid4()),
         trip_id=str(uuid4()),
@@ -178,6 +183,7 @@ def test_unknown_kid_is_rejected() -> None:
     ):
         now = timezone.now()
         payload = signing.sign_ticket(
+            ticket_id=str(uuid4()),
             booking_id=str(uuid4()),
             seat_reservation_id=str(uuid4()),
             trip_id=str(uuid4()),
@@ -270,6 +276,31 @@ def test_owner_can_list_their_own_tickets() -> None:
     assert response.status_code == status.HTTP_200_OK
     assert len(response.data["results"]) == 1
     assert response.data["results"][0]["signed_payload"]
+
+
+def test_listed_tickets_carry_the_trips_service_class() -> None:
+    """docs/specs/15-trip-classes.md slice 3 — the ticket screen names
+    the service, and has no other source for it: there is no
+    single-Booking GET, and the screen is deep-linkable, so router state
+    cannot carry it.
+
+    A non-default class on purpose — every Trip defaults to `standard`.
+    """
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+    booking, _reservation = booking_with_a_held_seat(client, business)
+    with tenant_context(str(client.id)):
+        booking.trip.trip_class = Business.TripClass.EXCLUSIVE
+        booking.trip.save(update_fields=["trip_class"])
+    mark_booking_paid(booking=booking)
+
+    response = _auth_client(booking.passenger).get(
+        reverse("booking-tickets", kwargs={"booking_id": str(booking.id)})
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["results"][0]["trip_class"] == "exclusive"
 
 
 def test_listing_another_passengers_tickets_is_forbidden() -> None:

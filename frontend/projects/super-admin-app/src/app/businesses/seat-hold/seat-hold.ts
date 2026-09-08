@@ -2,8 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, TextField } from '@shared-ui';
+import { Alert, Button, PageHeader, Skeleton, TextField, fieldErrorMessage } from '@shared-ui';
 
 import {
   BusinessSuperAdminStore,
@@ -48,14 +47,13 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-seat-hold',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, RouterLink, Alert, Button, TextField],
+  imports: [ReactiveFormsModule, RouterLink, Alert, Button, PageHeader, Skeleton, TextField],
   templateUrl: './seat-hold.html',
 })
 export class SeatHold implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly businessStore = inject(BusinessSuperAdminStore);
 
   protected readonly businessId = signal('');
@@ -74,6 +72,28 @@ export class SeatHold implements OnInit {
     () => this.business()?.booking_mode_default === 'open_seating'
   );
 
+  /** The Business name lives in the heading rather than in a suffixed
+   * `<h1>` fragment, so the page has one title rather than a title and
+   * a trailing em-dash clause. */
+  protected readonly heading = computed(() => {
+    const business = this.business();
+    return business ? `Seat-hold duration — ${business.name}` : 'Seat-hold duration';
+  });
+
+  /**
+   * The error that actually failed, not a hardcoded sentence.
+   *
+   * This field bound `errorMessage="This field is required."`
+   * literally — the exact defect slice 4 removed seventeen copies of.
+   * It says the right thing today only because `required` is the field's
+   * only validator, which is itself worth noting: nothing here rejects
+   * `0`, `-5` or `abc`, so those reach the API. Named, not fixed —
+   * adding validation is behaviour, and this slice changes none.
+   */
+  protected fieldError(): string | null {
+    return fieldErrorMessage(this.form.controls.seat_hold_minutes, { label: 'Minutes' });
+  }
+
   async ngOnInit(): Promise<void> {
     const id = this.route.snapshot.paramMap.get('id');
     if (!id) {
@@ -91,7 +111,6 @@ export class SeatHold implements OnInit {
 
     const { data, error } = await this.api.GET('/api/v1/super-admin/businesses/{id}/seat-hold/', {
       params: { path: { id } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     if (data) {
@@ -116,7 +135,6 @@ export class SeatHold implements OnInit {
     const { data, error } = await this.api.PATCH('/api/v1/super-admin/businesses/{id}/seat-hold/', {
       params: { path: { id: this.businessId() } },
       body: { seat_hold_minutes: Number(this.form.getRawValue().seat_hold_minutes) },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     this.submitting.set(false);

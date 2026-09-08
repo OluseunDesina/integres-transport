@@ -266,6 +266,18 @@ class StaffSerializer(serializers.ModelSerializer[User]):
         read_only_fields = ["id", "email", "first_name", "last_name"]
 
 
+class StaffListQuerySerializer(serializers.Serializer):
+    """Query shape for GET /staff/ — this endpoint's first, added by
+    spec 14 slice 3b so its filter bar has something real behind it.
+
+    Email is what a colleague is identified by everywhere in this
+    console, and `identity.User` has no display name of its own worth
+    searching. `allow_blank`, because the filter bar emits '' when its
+    search box is cleared."""
+
+    search = serializers.CharField(required=False, allow_blank=True)
+
+
 class StaffUpdateSerializer(serializers.Serializer):
     role = serializers.UUIDField(required=False)
     is_active = serializers.BooleanField(required=False)
@@ -276,3 +288,38 @@ class StaffUpdateSerializer(serializers.Serializer):
             return Role.objects.get(pk=value, client=request.user.client)
         except Role.DoesNotExist:
             raise serializers.ValidationError("Unknown role.", code="unknown_role") from None
+
+
+class PassengerLookupQuerySerializer(serializers.Serializer):
+    """Query shape for GET /passengers/lookup/ —
+    docs/specs/18-manifest-and-staff-booking.md slice 2.
+
+    **The spec names `?phone=` as well, and there is no phone number to
+    match.** `identity.User` carries email, first and last name and
+    nothing else; `phone` exists on `Client`, `Driver` and `Incident`,
+    but a passenger has none anywhere in the schema, and no registration
+    path collects one. Adding the column would ship a lookup field that
+    is empty for every account that exists and is filled by nothing —
+    worse than not offering it, because it would fail as "not found"
+    rather than as "not supported". Email only, and the gap is recorded
+    rather than papered over.
+    """
+
+    email = serializers.EmailField()
+
+
+class PassengerSerializer(serializers.Serializer):
+    """What a counter agent is allowed to see about a passenger they
+    just resolved: enough to confirm the right person and to book for
+    them, and no more.
+
+    `email` is masked (`apps.identity.services.mask_email`) — the agent
+    typed the address to get here, so this withholds nothing they did
+    not already have, while keeping a full address off a screen a queue
+    of other passengers can read.
+    """
+
+    id = serializers.UUIDField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    email = serializers.CharField(help_text="Masked — e.g. `a••••••@example.com`.")

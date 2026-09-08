@@ -1,9 +1,17 @@
+import { expectColumnVisibilityParity } from '@shared-ui';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { ActivatedRoute, provideRouter } from '@angular/router';
+import { API_CLIENT } from '@api-client';
 
 import { PaymentList } from './payment-list';
-import { PaymentIntentStore, type PaymentIntent } from '../../shared/data/store/payment-intent.store';
+import { ExportStore } from '../../shared/data/store/export.store';
+import { PaymentSummaryStore } from '../../shared/data/store/payment-summary.store';
+import {
+  PaymentIntentStore,
+  type PaymentIntent,
+} from '../../shared/data/store/payment-intent.store';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 
 function makePaymentIntent(overrides: Partial<PaymentIntent> = {}): PaymentIntent {
@@ -23,6 +31,9 @@ function makePaymentIntent(overrides: Partial<PaymentIntent> = {}): PaymentInten
     psp_provider: 'paystack',
     psp_reference: 'ref-1',
     psp_authorization_url: '',
+    // docs/specs/16-operational-analytics.md slice 1 — blank is
+    // what every intent that never succeeded carries.
+    channel: '',
     succeeded_at: '2026-08-10T00:00:00Z',
     failed_at: null,
     requires_manual_refund: false,
@@ -50,18 +61,47 @@ class FakeSelectedBusinessStore {
   selectedBusinessId = signal<string | null>('biz-1');
 }
 
+class FakeSummaryStore {
+  data = signal<Record<string, unknown> | null>(null);
+  loading = signal(false);
+  error = signal<string | null>(null);
+  load = jasmine.createSpy('load').and.resolveTo();
+}
+
+class FakeExportStore {
+  error = signal<string | null>(null);
+  download = jasmine.createSpy('download').and.resolveTo();
+  isPending = () => false;
+}
+
 describe('PaymentList', () => {
+  let summary: FakeSummaryStore;
+  let exports: FakeExportStore;
+
   let fixture: ComponentFixture<PaymentList>;
   let store: FakePaymentIntentStore;
 
   beforeEach(async () => {
     store = new FakePaymentIntentStore();
 
+    summary = new FakeSummaryStore();
+    exports = new FakeExportStore();
     await TestBed.configureTestingModule({
       imports: [PaymentList],
       providers: [
+        provideRouter([]),
+        { provide: API_CLIENT, useValue: { GET: jasmine.createSpy('GET').and.resolveTo({}) } },
         { provide: PaymentIntentStore, useValue: store },
-        { provide: SelectedBusinessStore, useValue: new FakeSelectedBusinessStore() },
+        { provide: PaymentSummaryStore, useValue: summary },
+        { provide: ExportStore, useValue: exports },
+        {
+          provide: ActivatedRoute,
+          useValue: { snapshot: { queryParamMap: { get: () => null } } },
+        },
+        {
+          provide: SelectedBusinessStore,
+          useValue: new FakeSelectedBusinessStore(),
+        },
       ],
     }).compileComponents();
 
@@ -70,18 +110,29 @@ describe('PaymentList', () => {
   });
 
   it('scopes the query to the active Business on init', () => {
-    expect(store.updateQuery).toHaveBeenCalledWith({ business: 'biz-1' });
+    expect(store.updateQuery).toHaveBeenCalledWith(
+      jasmine.objectContaining({ business: 'biz-1' })
+    );
+    // The strip is refreshed from the same query as the table, which is
+    // the frontend half of "the numbers above a table describe the rows
+    // in it".
+    expect(summary.load).toHaveBeenCalledWith(
+      jasmine.objectContaining({ business: 'biz-1' })
+    );
   });
 
   it('shows the empty state when the store has no rows', () => {
     store.isEmpty.set(true);
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('No payments found');
+    expect(fixture.nativeElement.textContent).toContain('No payments yet');
   });
 
   it('renders a row per payment with amount and status', () => {
-    store.items.set([makePaymentIntent(), makePaymentIntent({ id: 'payment-2', status: 'failed' })]);
+    store.items.set([
+      makePaymentIntent(),
+      makePaymentIntent({ id: 'payment-2', status: 'failed' }),
+    ]);
     fixture.detectChanges();
 
     const rows = fixture.debugElement.queryAll(By.css('tbody tr'));
@@ -104,7 +155,9 @@ describe('PaymentList', () => {
     select.dispatchEvent(new Event('change'));
     fixture.detectChanges();
 
-    expect(store.updateQuery).toHaveBeenCalledWith({ status: 'failed' });
+    expect(store.updateQuery).toHaveBeenCalledWith(
+      jasmine.objectContaining({ business: 'biz-1', status: 'failed' })
+    );
   });
 
   it('calls store.changePage() when the paginator emits', () => {
@@ -113,9 +166,26 @@ describe('PaymentList', () => {
     fixture.detectChanges();
 
     const buttons = fixture.debugElement.queryAll(By.css('button'));
-    const nextButton = buttons.find((b) => (b.nativeElement.textContent as string).includes('Next'));
+    const nextButton = buttons.find((b) =>
+      (b.nativeElement.textContent as string).includes('Next')
+    );
     nextButton?.nativeElement.click();
 
     expect(store.changePage).toHaveBeenCalledWith(25);
+  });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makePaymentIntent()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'payment-list rows');
+  });
+
+  it('keeps the skeleton row aligned with the header too', () => {
+    store.loading.set(true);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'payment-list skeleton');
   });
 });

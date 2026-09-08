@@ -1,3 +1,4 @@
+import { expectColumnVisibilityParity } from '@shared-ui';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -30,8 +31,18 @@ function makeJournalEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
     memo: 'Trip fare',
     settlement_run: null,
     lines: [
-      { id: 'line-1', account: 'acct-clearing', amount: '1500.00', currency: 'NGN' },
-      { id: 'line-2', account: 'acct-commission', amount: '-1500.00', currency: 'NGN' },
+      {
+        id: 'line-1',
+        account: 'acct-clearing',
+        amount: '1500.00',
+        currency: 'NGN',
+      },
+      {
+        id: 'line-2',
+        account: 'acct-commission',
+        amount: '-1500.00',
+        currency: 'NGN',
+      },
     ],
     created_at: '2026-08-10T00:00:00Z',
     ...overrides,
@@ -78,13 +89,18 @@ describe('LedgerOverview', () => {
 
   beforeEach(async () => {
     store = new FakeLedgerEntryStore();
-    apiClient = { GET: jasmine.createSpy('GET').and.resolveTo({ data: { count: 1, results: [makeAccount()] } }) };
+    apiClient = {
+      GET: jasmine.createSpy('GET').and.resolveTo({ data: { count: 1, results: [makeAccount()] } }),
+    };
 
     await TestBed.configureTestingModule({
       imports: [LedgerOverview],
       providers: [
         { provide: LedgerEntryStore, useValue: store },
-        { provide: SelectedBusinessStore, useValue: new FakeSelectedBusinessStore() },
+        {
+          provide: SelectedBusinessStore,
+          useValue: new FakeSelectedBusinessStore(),
+        },
         { provide: API_CLIENT, useValue: apiClient },
       ],
     }).compileComponents();
@@ -96,10 +112,15 @@ describe('LedgerOverview', () => {
   });
 
   it('scopes the entries query and fetches accounts for the active Business on init', () => {
-    expect(store.updateQuery).toHaveBeenCalledWith({ business: 'biz-1', account: undefined });
+    expect(store.updateQuery).toHaveBeenCalledWith({
+      business: 'biz-1',
+      account: undefined,
+    });
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/ledger/accounts/',
-      jasmine.objectContaining({ params: { query: { business: 'biz-1', limit: 100, offset: 0 } } })
+      jasmine.objectContaining({
+        params: { query: { business: 'biz-1', limit: 100, offset: 0 } },
+      })
     );
   });
 
@@ -151,6 +172,23 @@ describe('LedgerOverview', () => {
     select.dispatchEvent(new Event('change'));
     fixture.detectChanges();
 
-    expect(store.updateQuery).toHaveBeenCalledWith({ account: 'acct-clearing' });
+    expect(store.updateQuery).toHaveBeenCalledWith({
+      account: 'acct-clearing',
+    });
+  });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makeJournalEntry()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'ledger-overview rows');
+  });
+
+  it('keeps the skeleton row aligned with the header too', () => {
+    store.loading.set(true);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'ledger-overview skeleton');
   });
 });

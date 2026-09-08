@@ -61,7 +61,11 @@ describe('KycStatus', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('submitted');
-    expect(fixture.nativeElement.textContent).toContain('certificate_of_incorporation');
+    // The label, not the raw enum: the upload select beside this list
+    // has always offered labels, so the screen showed the same value
+    // written two ways.
+    expect(fixture.nativeElement.textContent).toContain('Certificate of incorporation');
+    expect(fixture.nativeElement.textContent).not.toContain('certificate_of_incorporation');
   });
 
   it('shows the rejection reason when rejected', async () => {

@@ -60,7 +60,9 @@ describe('BusinessStore', () => {
 
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/businesses/',
-      jasmine.objectContaining({ params: { query: { limit: 25, offset: 0 } } })
+      jasmine.objectContaining({
+        params: { query: { limit: 25, offset: 0, search: undefined } },
+      })
     );
     expect(store.items().length).toBe(1);
     expect(store.items()[0].name).toBe('Acme Shuttle Co');
@@ -82,8 +84,9 @@ describe('BusinessStore', () => {
     function stubList(total: number): void {
       apiClient.GET.and.callFake((_path: string, init: { params: { query: Params } }) => {
         const { limit, offset } = init.params.query;
-        const results = Array.from({ length: Math.max(0, Math.min(limit, total - offset)) }, (_, i) =>
-          makeBusiness(`biz-${offset + i}`)
+        const results = Array.from(
+          { length: Math.max(0, Math.min(limit, total - offset)) },
+          (_, i) => makeBusiness(`biz-${offset + i}`)
         );
         return Promise.resolve({ data: { count: total, results } });
       });

@@ -1,7 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
 
 export type Business = components['schemas']['Business'];
 
@@ -42,7 +41,6 @@ const MAX_PAGES = 50;
 @Injectable({ providedIn: 'root' })
 export class SelectedBusinessStore {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   private readonly businesses = signal<Business[]>([]);
   private readonly selectedId = signal<string | null>(this.restore());
@@ -97,13 +95,11 @@ export class SelectedBusinessStore {
   // this codebase has ever supported being correct for, just not one
   // this loop is allowed to hang on forever.
   private async fetchAllBusinesses(): Promise<Business[]> {
-    const headers = { Authorization: `Bearer ${this.authStore.accessToken()}` };
     const items: Business[] = [];
     let offset = 0;
     for (let page = 0; page < MAX_PAGES; page++) {
       const { data } = await this.api.GET('/api/v1/businesses/', {
         params: { query: { limit: PAGE_SIZE, offset } },
-        headers,
       });
       if (!data) {
         break;

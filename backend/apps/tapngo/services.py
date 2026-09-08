@@ -39,8 +39,15 @@ class CredentialInactive(Exception):
     """Credential exists but has been revoked — mapped to 403."""
 
 
-class TripNotTapAndGo(Exception):
-    """Trip.booking_mode != TAP_AND_GO — mapped to 400."""
+class TripNotPayAsYouGo(Exception):
+    """Trip.fare_collection_mode != PAY_AS_YOU_GO — mapped to 400.
+
+    Board/alight taps determine a fare *after* travel, so they are only
+    meaningful where the passenger has not already paid. Renamed from
+    `TripNotTapAndGo` in docs/specs/10-booking-modes.md: tapping a
+    credential is now valid in any mode, it is the pay-after fare model
+    that is not.
+    """
 
 
 class TripNotOpenForTaps(Exception):
@@ -103,7 +110,17 @@ def revoke_credential(*, credential: TapCredential, revoked_by: User) -> TapCred
     return credential
 
 
-def _resolve_credential(token: str) -> TapCredential:
+def resolve_credential(token: str) -> TapCredential:
+    """Token -> `TapCredential`, raising `UnknownToken` when nothing
+    matches.
+
+    Public, and deliberately so as of docs/specs/10-booking-modes.md:
+    `apps.ticketing.services.validate_credential` resolves the same
+    credential for a prepaid trip, and a second copy of a
+    security-relevant hash-and-lookup is exactly the kind of duplication
+    that drifts. `apps.tapngo` imports nothing from `apps.ticketing`, so
+    that direction adds no cycle.
+    """
     try:
         return TapCredential.objects.select_related("passenger").get(token_hash=_hash_token(token))
     except TapCredential.DoesNotExist:
@@ -111,14 +128,17 @@ def _resolve_credential(token: str) -> TapCredential:
 
 
 def _validate_trip_for_taps(trip: Trip) -> None:
-    if trip.booking_mode != Business.BookingMode.TAP_AND_GO:
-        raise TripNotTapAndGo("This trip does not use tap-and-go.")
+    if trip.fare_collection_mode != Business.FareCollectionMode.PAY_AS_YOU_GO:
+        raise TripNotPayAsYouGo(
+            "This trip is prepaid, so it does not charge fares from taps. "
+            "Validate the passenger's ticket instead."
+        )
     if trip.status not in (Trip.Status.SCHEDULED, Trip.Status.IN_PROGRESS):
         raise TripNotOpenForTaps("This trip is not open for taps.")
 
 
 def _stop_sequence(*, route_id: Any, stop: Stop) -> int:
-    """Mirrors apps.seating.services._segment_sequence_range's own
+    """Mirrors apps.seating.services.segment_sequence_range's own
     RouteStop lookup, one stop at a time (tap-and-go resolves board and
     alight independently, not as a single pair, since they arrive as two
     separate requests)."""
@@ -285,7 +305,7 @@ def record_tap(
         return _tap_event_from_idempotency_record(existing)
 
     _validate_trip_for_taps(trip)
-    credential = _resolve_credential(token)
+    credential = resolve_credential(token)
     if not credential.is_active:
         raise CredentialInactive("This tap credential has been revoked.")
 

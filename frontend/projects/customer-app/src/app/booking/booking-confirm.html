@@ -1,43 +1,55 @@
 @if (request(); as journey) {
   <div class="flex flex-col gap-6">
-    <div>
-      <h1 class="text-lg font-semibold text-slate-900">Review your booking</h1>
-      <p class="mt-1 text-sm text-slate-500">
-        Check the details below, then
-        {{ seatNumbers() ? 'reserve your seats' : 'reserve your places' }}.
-      </p>
-    </div>
+    <app-booking-steps current="confirm" />
+
+    <ui-page-header
+      title="Review your booking"
+      [description]="
+        'Check the details below, then ' +
+        (seatNumbers() ? 'reserve your seats' : 'reserve your places') + '.'
+      "
+    />
 
     @if (submitError(); as message) {
       <ui-alert>{{ message }}</ui-alert>
     }
 
     <dl
-      class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 rounded-md border border-slate-200 bg-white p-4 text-sm"
+      class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-3 rounded-xl border border-border bg-surface p-5 shadow-sm"
     >
-      <dt class="text-slate-500">Route</dt>
-      <dd class="font-medium text-slate-900">{{ journey.routeName }}</dd>
-      <dt class="text-slate-500">From</dt>
-      <dd>{{ journey.fromStop.name }}</dd>
-      <dt class="text-slate-500">To</dt>
-      <dd>{{ journey.toStop.name }}</dd>
-      <dt class="text-slate-500">Departs</dt>
-      <dd>{{ journey.scheduledDepartureAt | date: 'medium' }}</dd>
+      <dt class="text-muted">Route</dt>
+      <dd class="font-medium text-strong">{{ journey.routeName }}</dd>
+      <dt class="text-muted">From</dt>
+      <dd class="text-default">{{ journey.fromStop.name }}</dd>
+      <dt class="text-muted">To</dt>
+      <dd class="text-default">{{ journey.toStop.name }}</dd>
+      <!-- Omitted rather than blank when the flow carried no class — a
+           state object written by an older build. A "Service:" row with
+           nothing after it reads as a rendering fault. -->
+      @if (serviceClass(); as serviceClass) {
+        <dt class="text-muted">Service</dt>
+        <dd class="text-default">{{ serviceClass }}</dd>
+      }
+      <dt class="text-muted">Departs</dt>
+      <dd class="text-default">{{ journey.scheduledDepartureAt | date: 'medium' }}</dd>
       <!-- Seats only where the passenger actually chose some. On a
            service that does not assign them, a blank "Seats" row would
            read as a rendering fault rather than as how the service
            works. -->
       @if (seatNumbers(); as seats) {
-        <dt class="text-slate-500">Seats</dt>
-        <dd>{{ seats }}</dd>
+        <dt class="text-muted">Seats</dt>
+        <dd class="text-default">{{ seats }}</dd>
       } @else {
-        <dt class="text-slate-500">Passengers</dt>
-        <dd>{{ passengerCount() }}</dd>
+        <dt class="text-muted">Passengers</dt>
+        <dd class="text-default">{{ passengerCount() }}</dd>
       }
-      <dt class="text-slate-500">Fare</dt>
-      <dd>{{ fareLabel() }} × {{ passengerCount() }}</dd>
-      <dt class="text-slate-500">Total</dt>
-      <dd class="font-medium text-slate-900">{{ totalLabel() }}</dd>
+      <dt class="text-muted">Fare</dt>
+      <dd class="text-default">{{ fareLabel() }} × {{ passengerCount() }}</dd>
+
+      <dt class="border-t border-border pt-3 font-medium text-strong">Total</dt>
+      <dd class="border-t border-border pt-3 text-lg font-semibold text-strong">
+        {{ totalLabel() }}
+      </dd>
     </dl>
 
     <!-- The "held" promise is only made where it is true. Choosing
@@ -47,13 +59,13 @@
          (docs/specs/10-booking-modes.md). This screen cannot tell open
          seating from quick book (both arrive as `places`), so the
          wording it uses there is one that is true of both. -->
-    <p class="text-sm text-slate-500">
+    <ui-alert variant="warning">
       @if (seatNumbers()) {
         Payment is not collected yet — your seats are held once you reserve.
       } @else {
         Payment is not collected yet — your booking is confirmed once you pay.
       }
-    </p>
+    </ui-alert>
 
     <div class="flex gap-2">
       <ui-button variant="secondary" [disabled]="submitting()" (pressed)="backToSeats()">

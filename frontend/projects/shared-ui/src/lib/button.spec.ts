@@ -66,8 +66,32 @@ describe('Button', () => {
     host.variant = 'danger';
     fixture.detectChanges();
     const button = fixture.debugElement.query(By.css('button')).nativeElement as HTMLButtonElement;
-    expect(button.classList).toContain('bg-red-700');
-    expect(button.classList).not.toContain('bg-slate-900');
+    expect(button.classList).toContain('bg-danger');
+    expect(button.classList).not.toContain('bg-primary');
+  });
+
+  it('uses the flippable on-primary token for the primary variant', () => {
+    // The primary fill is a white-labelled tenant's own colour, so its
+    // text must use the token BrandThemeService flips to a dark ink when
+    // white would fail AA. `text-on-solid` is fixed white and only safe
+    // on fills we control.
+    //
+    // An earlier version used `on-solid` for both and shipped
+    // white-on-#FFE066 buttons for a tenant with a pale brand — the token
+    // flipped correctly, it just reached no text.
+    host.variant = 'primary';
+    fixture.detectChanges();
+    const button = fixture.debugElement.query(By.css('button')).nativeElement as HTMLButtonElement;
+    expect(button.classList).toContain('text-on-primary');
+    expect(button.classList).not.toContain('text-on-solid');
+  });
+
+  it('uses the fixed on-solid token for danger, whose fill we control', () => {
+    host.variant = 'danger';
+    fixture.detectChanges();
+    const button = fixture.debugElement.query(By.css('button')).nativeElement as HTMLButtonElement;
+    expect(button.classList).toContain('text-on-solid');
+    expect(button.classList).not.toContain('text-on-primary');
   });
 
   it('omits aria-pressed by default, for ordinary (non-toggle) buttons', () => {
@@ -95,9 +119,9 @@ describe('Button', () => {
     host.disabled = true;
     fixture.detectChanges();
     const button = fixture.debugElement.query(By.css('button')).nativeElement as HTMLButtonElement;
-    expect(button.classList).toContain('bg-slate-100');
-    expect(button.classList).toContain('text-slate-700');
-    expect(button.classList).not.toContain('bg-slate-900');
-    expect(button.classList).not.toContain('text-white');
+    expect(button.classList).toContain('bg-surface-sunken');
+    expect(button.classList).toContain('text-default');
+    expect(button.classList).not.toContain('bg-primary');
+    expect(button.classList).not.toContain('text-on-solid');
   });
 });

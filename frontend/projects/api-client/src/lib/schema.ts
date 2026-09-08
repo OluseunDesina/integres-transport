@@ -4,6 +4,129 @@
  */
 
 export interface paths {
+    "/api/v1/activity/mine/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /activity/mine/ — the signed-in passenger's own recent
+         *     activity: wallet top-ups, booking payments, tickets boarded and
+         *     pay-as-you-go fares, newest first.
+         *
+         *     `IsAuthenticated` only, matching every other "mine" passenger
+         *     endpoint (`GET /wallet/mine/`, `GET /activity/mine/`'s own sibling)
+         *     — passengers hold no Role/Permission to gate on (docs/adr/0003).
+         *     Polled on the same `poll_interval_seconds`-in-the-response
+         *     discipline as `GET /trips/live/`, at its own, wider interval:
+         *     a passenger's history changes far less often than a vehicle's
+         *     position, so there is no `ETag`/`?since=` machinery here — the
+         *     fleet-bandwidth motivation for that in spec 20 slice 2 does not
+         *     apply to one passenger's own small, bounded feed.
+         */
+        get: operations["activity_mine_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analytics/dashboard/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /analytics/dashboard/ — the whole dashboard in one request.
+         *
+         *     One envelope rather than a dozen endpoints the client fans out to
+         *     and reduces locally: that pattern is the source of four separate
+         *     production bugs recorded in CLAUDE.md, and on a dashboard it would
+         *     produce silently wrong totals plausible enough that nobody checks.
+         */
+        get: operations["analytics_dashboard_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analytics/payments/summary/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /analytics/payments/summary/ — the metrics strip above the
+         *     transactions table.
+         *
+         *     Gated on `payments.view`, not `analytics.view`: it describes exactly
+         *     the rows `GET /payments/` returns for the same filters, so anyone
+         *     who may read that table may read its totals. It takes the identical
+         *     filter set through the identical shared module, which is what makes
+         *     the strip and the table incapable of disagreeing.
+         */
+        get: operations["analytics_payments_summary_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analytics/revenue/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description GET /analytics/revenue/ — totals, trend and breakdowns. */
+        get: operations["analytics_revenue_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analytics/trips/{id}/performance/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /analytics/trips/{id}/performance/ — one trip's operational
+         *     and financial outcome.
+         *
+         *     Takes no filter set: the trip *is* the scope. Resolved through
+         *     `Trip.objects`, so another Client's trip is a 404 rather than a
+         *     permission error — the same posture every other object-scoped
+         *     endpoint in this backend takes.
+         */
+        get: operations["analytics_trips_performance_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/client-admin/token/": {
         parameters: {
             query?: never;
@@ -176,6 +299,47 @@ export interface paths {
         get: operations["bookings_mine_list"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/staff/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description `POST /bookings/staff/` — book for a passenger at the counter
+         *     (docs/specs/18-manifest-and-staff-booking.md slice 2).
+         *
+         *     Gated on **`booking.manage`**, which Owner and Manager hold and
+         *     Staff deliberately do not. Reading a manifest (`booking.view`) and
+         *     creating a financial obligation for someone who is not in the room
+         *     are different authorities, and the second is the one that needs a
+         *     name on it.
+         *
+         *     Every rejection a passenger would meet is met here identically,
+         *     because the body is validated by a subclass of the passenger's own
+         *     serializer and the write goes through the same service. The
+         *     exception list below is `BookingListCreateView.create`'s, unchanged
+         *     — deliberately not shortened, since a counter agent needs the *same*
+         *     distinctions a passenger gets (a departure with no vehicle assigned
+         *     is an operator's problem, not a full bus).
+         *
+         *     **No cash tender.** ADR-0006's chart of accounts has no cash
+         *     account, so a counter agent either settles from the passenger's
+         *     wallet or leaves the booking `pending_payment` for them to pay. This
+         *     is the single biggest limitation of the flow and it is deliberate —
+         *     inventing a cash account is a ledger change needing an ADR
+         *     amendment, a float model and a reconciliation story.
+         */
+        post: operations["bookings_staff_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -386,6 +550,38 @@ export interface paths {
         patch: operations["drivers_partial_update"];
         trace?: never;
     };
+    "/api/v1/exports/{resource}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /exports/{resource}/ — the caller's current filtered view, as CSV.
+         *
+         *     **Everything is materialised inside `get()`**, while
+         *     `TenancyMiddleware`'s transaction and RLS session variables are still
+         *     live. See `apps/analytics/exports.py`'s module docstring for why this
+         *     is not a `StreamingHttpResponse` — the short version is that a lazily
+         *     iterated body runs its queries after the tenancy context is gone, and
+         *     hands the operator a silently empty file that reports `200 OK`.
+         *
+         *     **Not `exclude=True`.** The path has to reach the generated
+         *     `schema.ts` so the frontend can download it through the typed client
+         *     and inherit `authMiddleware`'s bearer token and 401-refresh; a raw
+         *     `fetch` with a hand-attached header would re-create the stale-token
+         *     bug docs/specs/13-session-resilience.md records.
+         */
+        get: operations["exports_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/fare-journeys/": {
         parameters: {
             query?: never;
@@ -513,6 +709,180 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/incidents/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description `GET`/`POST /incidents/` — the operator queue and its create form. */
+        get: operations["incidents_list"];
+        put?: never;
+        /** @description `GET`/`POST /incidents/` — the operator queue and its create form. */
+        post: operations["incidents_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description `GET`/`PATCH /incidents/{id}/`.
+         *
+         *     `PATCH` cannot move `status` — see
+         *     `apps.incidents.services.update_incident`. Another Client's incident
+         *     is a 404 rather than a 403: the tenant-scoped manager simply does not
+         *     contain it, and saying "forbidden" would confirm it exists.
+         */
+        get: operations["incidents_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * @description `GET`/`PATCH /incidents/{id}/`.
+         *
+         *     `PATCH` cannot move `status` — see
+         *     `apps.incidents.services.update_incident`. Another Client's incident
+         *     is a 404 rather than a 403: the tenant-scoped manager simply does not
+         *     contain it, and saying "forbidden" would confirm it exists.
+         */
+        patch: operations["incidents_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/incidents/{id}/notes/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description `POST /incidents/{id}/notes/` — an internal note on the trail. */
+        post: operations["incidents_notes_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/{id}/transition/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description `POST /incidents/{id}/transition/` — the only way status moves. */
+        post: operations["incidents_transition_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/assignable-users/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description `GET /incidents/assignable-users/` — who an incident can be
+         *     handed to.
+         *
+         *     This exists because `GET /staff/` is gated on `staff.manage`, which
+         *     only the **Owner** preset holds. Manager and Staff both hold
+         *     `incidents.manage` and are exactly the people who triage incidents,
+         *     so populating an assignee picker from `/staff/` would 403 for almost
+         *     everyone who needs it.
+         *
+         *     Narrower than `/staff/` on purpose — `AssignableUserSerializer`
+         *     carries no Role and no permission list.
+         *
+         *     `User` is not a `BaseModel` and `User.objects` is the plain unscoped
+         *     manager (docs/adr/0003), so the `client` filter here is the only
+         *     thing scoping this response.
+         */
+        get: operations["incidents_assignable_users_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/mine/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description `GET /incidents/mine/` — the reporter's own reports, reduced.
+         *
+         *     Parity with `apps.booking.views.BookingMineView`. The reduced shape
+         *     is a distinct serializer class rather than an exclusion list, so
+         *     staff notes on a safety report cannot leak back to the person who
+         *     filed it.
+         */
+        get: operations["incidents_mine_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/incidents/report/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description `POST /incidents/report/` — a passenger reports a problem.
+         *
+         *     `IsAuthenticated` only, no codename: passengers have no Role
+         *     (docs/adr/0003), so any `HasPermission` gate would exclude them by
+         *     construction.
+         *
+         *     Throttled, and this is the first non-auth **POST** scope in this
+         *     backend. `ScopedRateThrottle` keys on the authenticated user, so the
+         *     limit is per passenger — the abuse vector the spec's Failure Modes
+         *     section names. There is no anonymous reporting to rate-limit by IP,
+         *     because the customer app is authenticated throughout.
+         *
+         *     Responds with the **passenger** serializer, not the staff one: the
+         *     reporter must not learn who the incident was assigned to just
+         *     because they filed it.
+         */
+        post: operations["incidents_report_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ledger/accounts/": {
         parameters: {
             query?: never;
@@ -616,6 +986,55 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["notifications_read_all_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/passengers/lookup/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description `GET /passengers/lookup/?email=` — resolve one passenger of this
+         *     Client, so staff can act for them.
+         *
+         *     Two capabilities need this, which is why it takes either codename:
+         *
+         *     - **`booking.manage`** — the counter-booking flow
+         *       (docs/specs/18-manifest-and-staff-booking.md slice 2) needs a
+         *       passenger id before it can book.
+         *     - **`wallet.view`** — `client-admin-app`'s wallet-lookup screen has
+         *       shipped since spec 5 with its limitation written into its own
+         *       docstring: `GET /wallet/?business=&passenger=` takes a UUID and
+         *       there was no way to obtain one, so the screen only worked if a
+         *       support ticket happened to quote it. That is the capability this
+         *       endpoint is; gating it on `booking.manage` alone would have left
+         *       the screen broken for every Staff user, since Staff hold
+         *       `wallet.view` and deliberately not `booking.manage`.
+         *
+         *     Widening the gate widens who can confirm an address is registered.
+         *     That is a real cost and it was taken deliberately: the alternative
+         *     was a second endpoint doing the same lookup under a different name,
+         *     which is the same disclosure with more code.
+         *
+         *     Lives in `apps.identity` rather than `apps.booking` because the data
+         *     is `identity.User` — the app that owns the data owns the endpoint,
+         *     and it now has two consumers in different apps, so hanging it off
+         *     either one would make the other depend on it.
+         *
+         *     Throttled: an exact-match endpoint is still an enumeration oracle if
+         *     you let someone hammer it. A `404` is returned for both "no such
+         *     passenger" and "a passenger of another Client", with one message —
+         *     the distinction is exactly what an attacker wants.
+         */
+        get: operations["passengers_lookup_retrieve"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -728,13 +1147,47 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * @description GET (detail) + PATCH (mutable fields) on `/routes/{id}/` —
+         *     docs/specs/19-route-lifecycle.md. One resource, one path; the two
+         *     methods differ in permission and response shape the same way
+         *     `RouteListCreateView` already splits GET from POST.
+         */
+        get: operations["routes_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
+        /**
+         * @description GET (detail) + PATCH (mutable fields) on `/routes/{id}/` —
+         *     docs/specs/19-route-lifecycle.md. One resource, one path; the two
+         *     methods differ in permission and response shape the same way
+         *     `RouteListCreateView` already splits GET from POST.
+         */
         patch: operations["routes_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/routes/{id}/duplicate/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description POST /routes/{id}/duplicate/ — returns the new draft route.
+         *     docs/specs/19-route-lifecycle.md: no request body, since there is
+         *     nothing to choose — the copy is always a draft with a suffixed name
+         *     and no code.
+         */
+        post: operations["routes_duplicate_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/routes/{id}/fare-matrix/": {
@@ -773,6 +1226,26 @@ export interface paths {
          */
         put: operations["routes_fare_matrix_update"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/routes/{id}/status/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description POST /routes/{id}/status/ — the only way `Route.status` moves.
+         *     Mirrors `apps.scheduling.views.TripStatusView`'s shape.
+         */
+        post: operations["routes_status_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1280,6 +1753,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/telemetry/devices/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET/POST /telemetry/devices/ — both gated on `fleet.manage`, per
+         *     the spec's API table (device management has no separate `.view`
+         *     codename).
+         */
+        get: operations["telemetry_devices_list"];
+        put?: never;
+        /**
+         * @description GET/POST /telemetry/devices/ — both gated on `fleet.manage`, per
+         *     the spec's API table (device management has no separate `.view`
+         *     codename).
+         */
+        post: operations["telemetry_devices_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/telemetry/devices/{id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description PATCH /telemetry/devices/{id}/ — revoke and/or reassign. */
+        patch: operations["telemetry_devices_partial_update"];
+        trace?: never;
+    };
     "/api/v1/ticketing/revoked/": {
         parameters: {
             query?: never;
@@ -1391,6 +1907,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/trips/{id}/class/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description POST /trips/{id}/class/ — docs/specs/15-trip-classes.md.
+         *
+         *     Its own endpoint rather than a field on the assignment PATCH; see
+         *     TripClassSerializer's docstring for why. Modelled on TripStatusView,
+         *     the other guarded single-field Trip mutation.
+         */
+        post: operations["trips_class_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trips/{id}/fare/": {
         parameters: {
             query?: never;
@@ -1408,6 +1947,66 @@ export interface paths {
          *     tenancy-scoped-only) actually matters.
          */
         get: operations["trips_fare_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trips/{id}/live/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /trips/{id}/live/ — one trip's live detail. `scheduling.view`
+         *     staff, or a passenger holding a ticket (or, on a pay-as-you-go trip,
+         *     a fare journey) on it — checked by hand rather than via
+         *     `permission_classes`, since neither `HasPermission` nor
+         *     `HasAnyPermission` can express "this codename, or ownership of the
+         *     object". Another passenger's trip is a 404, never a 403: confirming
+         *     it exists is exactly what a 403 would do, and an unknown trip id is
+         *     already a 404 by construction (`Trip.objects` is tenant-scoped).
+         */
+        get: operations["trip_live_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trips/{id}/manifest/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description `GET /trips/{id}/manifest/` — who is aboard.
+         *
+         *     Gated on `booking.view`, which Owner, Manager **and** Staff already
+         *     hold: the person who most needs this is the one standing at the
+         *     door. `booking.manage` (slice 2) is a different authority — creating
+         *     a financial obligation for someone else — and is not required here.
+         *
+         *     Lives in `apps.booking` rather than `apps.scheduling` even though the
+         *     path is under `trips/`, matching how `apps.fares` owns
+         *     `trips/{id}/fare/` and `apps.tapngo` owns `trips/{id}/taps/`: the
+         *     app that owns the data owns the endpoint, and the codename follows
+         *     the data.
+         *
+         *     Another Client's trip is a 404 rather than a 403 — the tenant-scoped
+         *     manager simply does not contain it, and "forbidden" would confirm it
+         *     exists.
+         */
+        get: operations["trips_manifest_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1477,6 +2076,36 @@ export interface paths {
          *     non-null and a prepaid trip opens no journey.
          */
         post: operations["trips_tickets_validate_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trips/live/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /trips/live/ — every in-progress trip with live state.
+         *     `scheduling.view`, the same codename that gates the rest of the
+         *     scheduling read surface: live monitoring is scheduling visibility,
+         *     not a new capability — the spec's own call for why this needed no
+         *     new permission codename.
+         *
+         *     `ETag`/`If-None-Match` is checked **before** any per-trip envelope
+         *     is built (occupancy and incident counts included), so a genuinely
+         *     quiet poll costs one cheap query, not one per trip. `?since=` then
+         *     narrows a real `200` to the trips that actually moved — see
+         *     `apps.telemetry.live.compute_fleet_etag`/`include_in_delta` for why
+         *     these are two independent layers, not one mechanism.
+         */
+        get: operations["trips_live_list"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1696,9 +2325,47 @@ export interface components {
          * @enum {string}
          */
         AccountTypeEnum: "wallet" | "business_clearing" | "integra_commission" | "psp_suspense" | "refund_contra";
+        ActivityEntry: {
+            type: components["schemas"]["TypeEnum"];
+            /** Format: date-time */
+            occurred_at: string;
+            business: string;
+            route: string | null;
+            reference: string | null;
+            /** Format: decimal */
+            amount: string | null;
+            currency: string | null;
+            /** Format: decimal */
+            wallet_balance: string | null;
+        };
+        ActivityResponse: {
+            results: components["schemas"]["ActivityEntry"][];
+            poll_interval_seconds: number;
+        };
+        /**
+         * @description `GET /incidents/assignable-users/` — just enough to populate an
+         *     assignee picker.
+         *
+         *     Deliberately **not** `apps.identity.serializers.StaffSerializer`,
+         *     which nests each user's Role and that Role's full permission list.
+         *     Choosing who to hand a broken reader to does not require knowing
+         *     everyone's permissions, and this endpoint is reachable by every
+         *     `incidents.manage` holder rather than only `staff.manage` (Owner).
+         */
+        AssignableUser: {
+            /** Format: uuid */
+            readonly id: string;
+            /** Format: email */
+            readonly email: string;
+            readonly first_name: string;
+            readonly last_name: string;
+        };
+        /** @enum {unknown} */
+        BlankEnum: "";
         Booking: {
             /** Format: uuid */
             readonly id: string;
+            readonly reference: string;
             /** Format: uuid */
             readonly business: string;
             readonly trip: components["schemas"]["BookingTrip"];
@@ -1722,6 +2389,12 @@ export interface components {
         BookingCancel: {
             /** @default  */
             reason: string;
+        };
+        BookingCounts: {
+            total: number;
+            paid: number;
+            cancelled: number;
+            pending_payment: number;
         };
         /**
          * @description POST /bookings/ body — see the spec's §3 request-handling order.
@@ -1791,6 +2464,11 @@ export interface components {
          * @enum {string}
          */
         BookingStatusEnum: "pending_payment" | "paid" | "completed" | "cancelled" | "expired";
+        BookingTrendPoint: {
+            /** Format: date */
+            date: string;
+            count: number;
+        };
         /**
          * @description Schema-only shape for `BookingSerializer.get_trip` — see
          *     docs/specs/4-fares-seating-booking-frontend.md §3.4. Mirrors
@@ -1805,6 +2483,7 @@ export interface components {
             scheduled_departure_at: string;
             /** Format: date */
             service_date: string;
+            trip_class: string;
         };
         BookingTripRoute: {
             /** Format: uuid */
@@ -1819,7 +2498,7 @@ export interface components {
             currency: components["schemas"]["CurrencyEnum"];
             timezone: string;
             booking_mode_default: components["schemas"]["BookingModeDefaultEnum"];
-            fare_collection_mode?: components["schemas"]["FareCollectionModeEnum"];
+            fare_collection_mode?: components["schemas"]["ManifestKindEnum"];
             seat_selection_enabled?: boolean;
             capacity_enforced?: boolean;
             fare_pricing_mode?: components["schemas"]["FarePricingModeEnum"];
@@ -1881,6 +2560,29 @@ export interface components {
             readonly booking_mode_default: components["schemas"]["BookingModeDefaultEnum"];
             /** Format: date-time */
             readonly created_at: string;
+        };
+        /**
+         * @description * `hardware` - Hardware
+         *     * `vehicle` - Vehicle
+         *     * `safety` - Safety
+         *     * `service` - Service quality
+         *     * `gps` - GPS / location
+         *     * `announcement` - Stop announcement
+         *     * `other` - Other
+         * @enum {string}
+         */
+        CategoryEnum: "hardware" | "vehicle" | "safety" | "service" | "gps" | "announcement" | "other";
+        /**
+         * @description `channel` is `wallet` for balance-funded payments (which have no
+         *     PSP leg at all) and `unknown` for anything with no captured channel
+         *     — never guessed.
+         */
+        ChannelBreakdown: {
+            currency: string;
+            channel: string;
+            /** Format: decimal */
+            amount: string;
+            transaction_volume: number;
         };
         /**
          * @description * `qr` - QR code
@@ -1976,6 +2678,21 @@ export interface components {
             /** Format: uuid */
             client?: string;
         };
+        Dashboard: {
+            period: components["schemas"]["Period"];
+            routes: components["schemas"]["RouteCounts"];
+            trips: components["schemas"]["TripCounts"];
+            bookings: components["schemas"]["BookingCounts"];
+            incidents: components["schemas"]["IncidentCounts"];
+            money: components["schemas"]["MoneyEntry"][];
+            trends: components["schemas"]["DashboardTrends"];
+            recent_incidents: components["schemas"]["RecentIncident"][];
+            recent_transactions: components["schemas"]["RecentTransaction"][];
+        };
+        DashboardTrends: {
+            revenue: components["schemas"]["RevenueTrendPoint"][];
+            bookings: components["schemas"]["BookingTrendPoint"][];
+        };
         /**
          * @description * `approve` - approve
          *     * `reject` - reject
@@ -2042,12 +2759,6 @@ export interface components {
          * @enum {string}
          */
         EntryTypeEnum: "payment" | "refund" | "concession" | "topup";
-        /**
-         * @description * `prepaid` - Prepaid
-         *     * `pay_as_you_go` - Pay as you go
-         * @enum {string}
-         */
-        FareCollectionModeEnum: "prepaid" | "pay_as_you_go";
         FareJourney: {
             /** Format: uuid */
             readonly id: string;
@@ -2109,6 +2820,7 @@ export interface components {
             route: string;
             currency: string;
             fare_pricing_mode: string;
+            trip_class: string;
             stops: components["schemas"]["FareMatrixStop"][];
             cells: components["schemas"]["FareMatrixCell"][];
         };
@@ -2192,6 +2904,8 @@ export interface components {
             readonly business: string;
             /** Format: uuid */
             readonly route: string;
+            readonly route_name: string;
+            readonly trip_class: components["schemas"]["TripClassEnum"] | components["schemas"]["BlankEnum"];
             /** Format: decimal */
             readonly amount: string;
             /** Format: date-time */
@@ -2206,6 +2920,7 @@ export interface components {
             business: string;
             /** Format: uuid */
             route: string;
+            trip_class?: components["schemas"]["TripClassEnum"] | components["schemas"]["BlankEnum"];
             /** Format: decimal */
             amount: string;
             /** Format: date-time */
@@ -2218,10 +2933,14 @@ export interface components {
             readonly business: string;
             /** Format: uuid */
             readonly route: string;
+            readonly route_name: string;
             /** Format: uuid */
             readonly from_stop: string;
+            readonly from_stop_name: string;
             /** Format: uuid */
             readonly to_stop: string;
+            readonly to_stop_name: string;
+            readonly trip_class: components["schemas"]["TripClassEnum"] | components["schemas"]["BlankEnum"];
             /** Format: decimal */
             readonly amount: string;
             /** Format: date-time */
@@ -2240,6 +2959,7 @@ export interface components {
             from_stop: string;
             /** Format: uuid */
             to_stop: string;
+            trip_class?: components["schemas"]["TripClassEnum"] | components["schemas"]["BlankEnum"];
             /** Format: decimal */
             amount: string;
             /** Format: date-time */
@@ -2256,6 +2976,221 @@ export interface components {
          * @enum {string}
          */
         IdTypeEnum: "nin" | "passport" | "drivers_licence" | "voters_card";
+        /**
+         * @description The staff list shape.
+         *
+         *     **No activity trail here.** A nested trail on a paginated list is one
+         *     extra query per row; the detail serializer below is where it belongs,
+         *     and a query-count test pins that.
+         */
+        Incident: {
+            /** Format: uuid */
+            readonly id: string;
+            readonly reference: string;
+            /** Format: uuid */
+            readonly business: string;
+            readonly title: string;
+            readonly description: string;
+            readonly category: components["schemas"]["CategoryEnum"];
+            readonly severity: components["schemas"]["SeverityEnum"];
+            readonly status: components["schemas"]["IncidentStatusEnum"];
+            readonly source: components["schemas"]["SourceEc5Enum"];
+            /** Format: uuid */
+            readonly trip: string | null;
+            /** Format: uuid */
+            readonly route: string | null;
+            readonly route_name: string | null;
+            /** Format: uuid */
+            readonly vehicle: string | null;
+            readonly vehicle_registration: string | null;
+            /** Format: uuid */
+            readonly driver: string | null;
+            readonly driver_name: string | null;
+            /** Format: uuid */
+            readonly stop: string | null;
+            readonly stop_name: string | null;
+            readonly device_reference: string;
+            /** Format: uuid */
+            readonly reported_by: string | null;
+            readonly reported_by_email: string | null;
+            /** Format: uuid */
+            readonly assigned_to: string | null;
+            readonly assigned_to_email: string | null;
+            /** Format: decimal */
+            readonly latitude: string | null;
+            /** Format: decimal */
+            readonly longitude: string | null;
+            /** Format: date-time */
+            readonly resolved_at: string | null;
+            readonly resolution_notes: string;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+        };
+        IncidentActivity: {
+            /** Format: uuid */
+            readonly id: string;
+            readonly kind: components["schemas"]["IncidentActivityKindEnum"];
+            /** Format: uuid */
+            readonly actor: string | null;
+            readonly actor_email: string | null;
+            readonly from_status: string;
+            readonly to_status: string;
+            readonly note: string;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /**
+         * @description * `status_change` - Status change
+         *     * `assignment` - Assignment
+         *     * `severity_change` - Severity change
+         *     * `note` - Note
+         * @enum {string}
+         */
+        IncidentActivityKindEnum: "status_change" | "assignment" | "severity_change" | "note";
+        /**
+         * @description Real since docs/specs/17-incidents.md. Shipped one spec early as a
+         *     hardcoded zero precisely so filling it in was additive rather than a
+         *     breaking envelope change for a frontend already reading this shape.
+         *
+         *     `open` is `apps.incidents.models.OPEN_STATUSES` — open, acknowledged
+         *     or investigating — not the literal `open` status alone.
+         */
+        IncidentCounts: {
+            open: number;
+        };
+        /**
+         * @description `POST /incidents/` body. `source` is absent on purpose — it is
+         *     forced to `operator` in the service, never read from the request.
+         */
+        IncidentCreate: {
+            /** Format: uuid */
+            business: string;
+            title: string;
+            category: components["schemas"]["CategoryEnum"];
+            description?: string;
+            severity?: components["schemas"]["SeverityEnum"];
+            /** Format: uuid */
+            trip?: string | null;
+            /** Format: uuid */
+            route?: string | null;
+            /** Format: uuid */
+            vehicle?: string | null;
+            /** Format: uuid */
+            driver?: string | null;
+            /** Format: uuid */
+            stop?: string | null;
+            device_reference?: string;
+            /** Format: uuid */
+            assigned_to?: string | null;
+            /** Format: decimal */
+            latitude?: string | null;
+            /** Format: decimal */
+            longitude?: string | null;
+        };
+        /**
+         * @description The staff list shape.
+         *
+         *     **No activity trail here.** A nested trail on a paginated list is one
+         *     extra query per row; the detail serializer below is where it belongs,
+         *     and a query-count test pins that.
+         */
+        IncidentDetail: {
+            /** Format: uuid */
+            readonly id: string;
+            readonly reference: string;
+            /** Format: uuid */
+            readonly business: string;
+            readonly title: string;
+            readonly description: string;
+            readonly category: components["schemas"]["CategoryEnum"];
+            readonly severity: components["schemas"]["SeverityEnum"];
+            readonly status: components["schemas"]["IncidentStatusEnum"];
+            readonly source: components["schemas"]["SourceEc5Enum"];
+            /** Format: uuid */
+            readonly trip: string | null;
+            /** Format: uuid */
+            readonly route: string | null;
+            readonly route_name: string | null;
+            /** Format: uuid */
+            readonly vehicle: string | null;
+            readonly vehicle_registration: string | null;
+            /** Format: uuid */
+            readonly driver: string | null;
+            readonly driver_name: string | null;
+            /** Format: uuid */
+            readonly stop: string | null;
+            readonly stop_name: string | null;
+            readonly device_reference: string;
+            /** Format: uuid */
+            readonly reported_by: string | null;
+            readonly reported_by_email: string | null;
+            /** Format: uuid */
+            readonly assigned_to: string | null;
+            readonly assigned_to_email: string | null;
+            /** Format: decimal */
+            readonly latitude: string | null;
+            /** Format: decimal */
+            readonly longitude: string | null;
+            /** Format: date-time */
+            readonly resolved_at: string | null;
+            readonly resolution_notes: string;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+            readonly activities: components["schemas"]["IncidentActivity"][];
+        };
+        /** @description `POST /incidents/{id}/notes/` body. */
+        IncidentNote: {
+            note: string;
+        };
+        /**
+         * @description `POST /incidents/report/` body — the passenger entry point.
+         *
+         *     Narrower than the operator's on purpose. No `severity` (a passenger
+         *     declaring their own report critical would be a one-tap way to ring
+         *     every operator's bell), no `driver`, no `assigned_to`. `title` is
+         *     optional and derived from the category when absent.
+         *
+         *     `business` may be omitted **only** when a `trip` is given, since the
+         *     trip names it. A report with neither has nothing to file it against.
+         */
+        IncidentReport: {
+            category: components["schemas"]["CategoryEnum"];
+            description: string;
+            /** Format: uuid */
+            business?: string | null;
+            title?: string;
+            /** Format: uuid */
+            trip?: string | null;
+            /** Format: uuid */
+            route?: string | null;
+            /** Format: uuid */
+            vehicle?: string | null;
+            /** Format: uuid */
+            stop?: string | null;
+            device_reference?: string;
+            /** Format: decimal */
+            latitude?: string | null;
+            /** Format: decimal */
+            longitude?: string | null;
+        };
+        /**
+         * @description * `open` - Open
+         *     * `acknowledged` - Acknowledged
+         *     * `investigating` - Investigating
+         *     * `resolved` - Resolved
+         *     * `closed` - Closed
+         * @enum {string}
+         */
+        IncidentStatusEnum: "open" | "acknowledged" | "investigating" | "resolved" | "closed";
+        /** @description `POST /incidents/{id}/transition/` body. */
+        IncidentTransition: {
+            status: components["schemas"]["IncidentStatusEnum"];
+            note?: string;
+        };
         /**
          * @description * `booking_payment` - Booking payment
          *     * `wallet_topup` - Wallet top-up
@@ -2387,6 +3322,119 @@ export interface components {
             /** Format: date-time */
             readonly created_at: string;
         };
+        LiveEta: {
+            /** Format: date-time */
+            next_stop_at: string | null;
+            /** Format: date-time */
+            final_stop_at: string;
+            method: string;
+            confidence: string;
+        };
+        LiveOccupancy: {
+            boarded: number;
+            capacity: number | null;
+        };
+        LivePosition: {
+            /** Format: decimal */
+            latitude: string;
+            /** Format: decimal */
+            longitude: string;
+            /** Format: date-time */
+            recorded_at: string;
+            source: components["schemas"]["TelemetrySourceEnum"];
+            staleness_seconds: number;
+        };
+        LiveProgress: {
+            last_stop: string;
+            next_stop: string | null;
+            stops_completed: number;
+            stops_total: number;
+            method: string;
+        };
+        LivePunctuality: {
+            delay_minutes: number | null;
+        };
+        /**
+         * @description Mirrors `apps.booking.serializers.ManifestTripSerializer`'s shape
+         *     exactly (both are built from `apps.booking.manifest.trip_summary`) —
+         *     kept as its own copy per this codebase's small-per-app-serializer
+         *     convention (see `apps.fleet.serializers.FleetListQuerySerializer`'s
+         *     own docstring) rather than a cross-app import.
+         */
+        LiveTrip: {
+            /** Format: uuid */
+            id: string;
+            route: string;
+            trip_class: string;
+            /** Format: date */
+            service_date: string;
+            /** Format: date-time */
+            scheduled_departure_at: string;
+            status: string;
+            booking_mode: string;
+            fare_collection_mode: string;
+            vehicle: string | null;
+            driver: string | null;
+        };
+        ManifestJourneyRow: {
+            /** Format: uuid */
+            journey_id: string;
+            passenger_name: string;
+            board_stop: string;
+            alight_stop: string | null;
+            journey_status: string;
+            /** Format: decimal */
+            fare: string | null;
+            currency: string;
+            /** Format: date-time */
+            boarded_at: string;
+            /** Format: date-time */
+            alighted_at: string | null;
+        };
+        /**
+         * @description * `prepaid` - Prepaid
+         *     * `pay_as_you_go` - Pay as you go
+         * @enum {string}
+         */
+        ManifestKindEnum: "prepaid" | "pay_as_you_go";
+        ManifestPrepaidRow: {
+            /** Format: uuid */
+            ticket_id: string | null;
+            /** Format: uuid */
+            booking_id: string;
+            booking_reference: string;
+            passenger_name: string;
+            seat_number: string | null;
+            ticket_status: string | null;
+            booking_status: string;
+            /** Format: decimal */
+            fare: string | null;
+            currency: string;
+            /** Format: date-time */
+            boarded_at: string | null;
+            is_cancelled: boolean;
+        };
+        ManifestRow: components["schemas"]["ManifestPrepaidRow"] | components["schemas"]["ManifestJourneyRow"];
+        ManifestTotals: {
+            passengers: number;
+            boarded: number;
+            capacity: number | null;
+        };
+        ManifestTrip: {
+            /** Format: uuid */
+            id: string;
+            route: string;
+            trip_class: string;
+            /** Format: date */
+            service_date: string;
+            /** Format: date-time */
+            scheduled_departure_at: string;
+            status: string;
+            booking_mode: string;
+            fare_collection_mode: string;
+            vehicle: string | null;
+            driver: string | null;
+        };
         /**
          * @description `permissions` is additive to the Phase 0 contract (§4) — passengers
          *     get `["customer:access"]`, platform staff get `["super-admin:access"]`,
@@ -2414,6 +3462,23 @@ export interface components {
             readonly role_name: string | null;
             readonly client_name: string | null;
         };
+        /**
+         * @description One currency's totals. **Always a list, never a scalar** — a
+         *     Client can run an NGN and a BWP Business at once, and adding those
+         *     two numbers produces a figure that is not money.
+         */
+        MoneyEntry: {
+            currency: string;
+            /** Format: decimal */
+            revenue: string;
+            /** Format: decimal */
+            gross: string;
+            /** Format: decimal */
+            commission: string;
+            transaction_volume: number;
+            /** Format: decimal */
+            average_ticket_value: string;
+        };
         Notification: {
             /** Format: uuid */
             readonly id: string;
@@ -2438,14 +3503,31 @@ export interface components {
          *     * `ticket_unused_reminder` - Unused ticket reminder
          *     * `kyc_document_submitted` - New KYC document submitted
          *     * `kyb_document_submitted` - New KYB document submitted
+         *     * `incident_reported` - Incident reported
+         *     * `incident_escalated` - Incident escalated
          * @enum {string}
          */
-        NotificationTypeEnum: "license_expiring" | "insurance_expiring" | "roadworthiness_expiring" | "ticket_unused_reminder" | "kyc_document_submitted" | "kyb_document_submitted";
+        NotificationTypeEnum: "license_expiring" | "insurance_expiring" | "roadworthiness_expiring" | "ticket_unused_reminder" | "kyc_document_submitted" | "kyb_document_submitted" | "incident_reported" | "incident_escalated";
         /**
          * @description * `row_letter` - row_letter
          * @enum {string}
          */
         NumberingSchemeEnum: "row_letter";
+        PaginatedAssignableUserList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=400&limit=100
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=200&limit=100
+             */
+            previous?: string | null;
+            results: components["schemas"]["AssignableUser"][];
+        };
         PaginatedBookingList: {
             /** @example 123 */
             count: number;
@@ -2596,6 +3678,21 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["FareSegmentRule"][];
         };
+        PaginatedIncidentList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=400&limit=100
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=200&limit=100
+             */
+            previous?: string | null;
+            results: components["schemas"]["Incident"][];
+        };
         PaginatedJournalEntryList: {
             /** @example 123 */
             count: number;
@@ -2640,6 +3737,21 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["Notification"][];
+        };
+        PaginatedPassengerIncidentList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=400&limit=100
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=200&limit=100
+             */
+            previous?: string | null;
+            results: components["schemas"]["PassengerIncident"][];
         };
         PaginatedPaymentIntentList: {
             /** @example 123 */
@@ -2776,6 +3888,21 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["TapCredential"][];
         };
+        PaginatedTelemetryDeviceList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=400&limit=100
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=200&limit=100
+             */
+            previous?: string | null;
+            results: components["schemas"]["TelemetryDevice"][];
+        };
         PaginatedTicketList: {
             /** @example 123 */
             count: number;
@@ -2836,6 +3963,47 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["VehicleType"][];
         };
+        /**
+         * @description What a counter agent is allowed to see about a passenger they
+         *     just resolved: enough to confirm the right person and to book for
+         *     them, and no more.
+         *
+         *     `email` is masked (`apps.identity.services.mask_email`) — the agent
+         *     typed the address to get here, so this withholds nothing they did
+         *     not already have, while keeping a full address off a screen a queue
+         *     of other passengers can read.
+         */
+        Passenger: {
+            /** Format: uuid */
+            id: string;
+            first_name: string;
+            last_name: string;
+            /** @description Masked — e.g. `a••••••@example.com`. */
+            email: string;
+        };
+        /**
+         * @description `GET /incidents/mine/`.
+         *
+         *     A **separate class**, not a field-exclusion list on the shared one.
+         *     An exclusion list is one careless edit away from leaking staff
+         *     discussion of a safety report to the passenger who filed it; a
+         *     separate class can only leak a field someone deliberately adds.
+         *     `assigned_to`, `resolution_notes` and the trail are all absent, and
+         *     a test asserts their absence by key rather than by shape.
+         */
+        PassengerIncident: {
+            /** Format: uuid */
+            readonly id: string;
+            readonly reference: string;
+            readonly title: string;
+            readonly description: string;
+            readonly category: components["schemas"]["CategoryEnum"];
+            readonly status: components["schemas"]["IncidentStatusEnum"];
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly resolved_at: string | null;
+        };
         PatchedBusiness: {
             /** Format: uuid */
             readonly id?: string;
@@ -2844,7 +4012,7 @@ export interface components {
             currency?: components["schemas"]["CurrencyEnum"];
             timezone?: string;
             booking_mode_default?: components["schemas"]["BookingModeDefaultEnum"];
-            fare_collection_mode?: components["schemas"]["FareCollectionModeEnum"];
+            fare_collection_mode?: components["schemas"]["ManifestKindEnum"];
             seat_selection_enabled?: boolean;
             capacity_enforced?: boolean;
             fare_pricing_mode?: components["schemas"]["FarePricingModeEnum"];
@@ -2920,6 +4088,40 @@ export interface components {
             /** Format: date-time */
             effective_from?: string;
         };
+        /**
+         * @description `PATCH /incidents/{id}/`.
+         *
+         *     `status` is **not declared here**, and that is not the whole
+         *     enforcement: an undeclared field would simply be dropped, leaving an
+         *     operator believing they had closed an incident they had not.
+         *     `apps.incidents.services.update_incident` is handed the raw submitted
+         *     key set and refuses `status` by name with a 400 that says where to go
+         *     instead.
+         */
+        PatchedIncidentUpdate: {
+            title?: string;
+            description?: string;
+            category?: components["schemas"]["CategoryEnum"];
+            severity?: components["schemas"]["SeverityEnum"];
+            /** Format: uuid */
+            trip?: string | null;
+            /** Format: uuid */
+            route?: string | null;
+            /** Format: uuid */
+            vehicle?: string | null;
+            /** Format: uuid */
+            driver?: string | null;
+            /** Format: uuid */
+            stop?: string | null;
+            device_reference?: string;
+            /** Format: uuid */
+            assigned_to?: string | null;
+            /** Format: decimal */
+            latitude?: string | null;
+            /** Format: decimal */
+            longitude?: string | null;
+            resolution_notes?: string;
+        };
         PatchedPaystackAccount: {
             /** Format: uuid */
             readonly id?: string;
@@ -2946,7 +4148,11 @@ export interface components {
             name?: string;
             code?: string;
             description?: string;
-            is_active?: boolean;
+            available_trip_classes?: string[];
+            readonly status?: components["schemas"]["RouteStatusEnum"];
+            /** Format: decimal */
+            distance_km?: string | null;
+            estimated_duration_minutes?: number | null;
             readonly stops?: components["schemas"]["RouteStopEntry"][];
             /** Format: date-time */
             readonly created_at?: string;
@@ -2956,6 +4162,7 @@ export interface components {
             readonly id?: string;
             /** Format: uuid */
             readonly route?: string;
+            readonly route_name?: string;
             /** Format: uuid */
             readonly business?: string;
             days_of_week?: unknown;
@@ -2965,6 +4172,7 @@ export interface components {
             effective_from?: string;
             /** Format: date */
             effective_until?: string | null;
+            trip_class?: components["schemas"]["TripClassEnum"];
             is_active?: boolean;
             /** Format: date-time */
             readonly created_at?: string;
@@ -3003,6 +4211,16 @@ export interface components {
             is_active?: boolean;
         };
         /**
+         * @description PATCH /telemetry/devices/{id}/ — revoke (`is_active=False`) and/or
+         *     reassign (`vehicle=`, nullable to unassign). Both optional so a
+         *     caller can send just the one field they mean to change.
+         */
+        PatchedTelemetryDeviceUpdate: {
+            is_active?: boolean;
+            /** Format: uuid */
+            vehicle?: string | null;
+        };
+        /**
          * @description PATCH /trips/{id}/ body — assignment only, both nullable (a null
          *     clears the current assignment).
          */
@@ -3036,6 +4254,7 @@ export interface components {
             readonly business?: string;
             name?: string;
             capacity?: number;
+            trip_class?: components["schemas"]["TripClassEnum"];
             is_active?: boolean;
             /** Format: date-time */
             readonly created_at?: string;
@@ -3104,6 +4323,7 @@ export interface components {
             readonly psp_provider: string;
             readonly psp_reference: string;
             readonly psp_authorization_url: string;
+            readonly channel: string;
             /** Format: date-time */
             readonly succeeded_at: string | null;
             /** Format: date-time */
@@ -3111,6 +4331,26 @@ export interface components {
             readonly requires_manual_refund: boolean;
             /** Format: date-time */
             readonly created_at: string;
+        };
+        PaymentSummary: {
+            period: components["schemas"]["Period"];
+            counts: components["schemas"]["PaymentSummaryCounts"];
+            money: components["schemas"]["PaymentSummaryMoney"][];
+            channels: components["schemas"]["ChannelBreakdown"][];
+        };
+        PaymentSummaryCounts: {
+            total: number;
+            succeeded: number;
+            pending: number;
+            failed: number;
+            cancelled: number;
+            requires_manual_refund: number;
+        };
+        PaymentSummaryMoney: {
+            currency: string;
+            /** Format: decimal */
+            collected: string;
+            transaction_volume: number;
         };
         PaystackAccount: {
             /** Format: uuid */
@@ -3123,9 +4363,71 @@ export interface components {
             /** Format: date-time */
             readonly verified_at: string | null;
         };
+        /**
+         * @description Echoed by every endpoint. Without it a screen cannot tell "no
+         *     revenue in this period" from "no data at all" — the distinction
+         *     spec 10's availability envelope exists for, applied here.
+         */
+        Period: {
+            /** Format: date */
+            to: string;
+            timezone: string;
+            granularity: string;
+            /** Format: date */
+            from: string;
+        };
         Readiness: {
             status: string;
             database?: string;
+        };
+        /**
+         * @description Was `ListField(child=DictField())` while the list was always
+         *     empty, which generated as an untyped record in `schema.ts`. Declared
+         *     properly now that it carries rows the operator UI has to render.
+         */
+        RecentIncident: {
+            /** Format: uuid */
+            id: string;
+            reference: string;
+            title: string;
+            category: string;
+            severity: string;
+            status: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        RecentTransaction: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            business: string;
+            /** Format: decimal */
+            amount: string;
+            currency: string;
+            status: string;
+            channel: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        RevenueReport: {
+            period: components["schemas"]["Period"];
+            money: components["schemas"]["MoneyEntry"][];
+            trend: components["schemas"]["RevenueTrendPoint"][];
+            by_route: components["schemas"]["RouteRevenue"][];
+            by_trip_class: components["schemas"]["TripClassRevenue"][];
+            by_channel: components["schemas"]["ChannelBreakdown"][];
+        };
+        /**
+         * @description Only buckets with data appear. A zero-revenue day and a day
+         *     before the Business existed must not render identically, so the
+         *     client draws gaps rather than zeros.
+         */
+        RevenueTrendPoint: {
+            /** Format: date */
+            date: string;
+            currency: string;
+            /** Format: decimal */
+            amount: string;
         };
         /** @description Schema-only shape for `GET /ticketing/revoked/`. */
         RevokedTicketsResponse: {
@@ -3152,7 +4454,11 @@ export interface components {
             name: string;
             code: string;
             description?: string;
-            is_active?: boolean;
+            available_trip_classes?: string[];
+            readonly status: components["schemas"]["RouteStatusEnum"];
+            /** Format: decimal */
+            distance_km?: string | null;
+            estimated_duration_minutes?: number | null;
             readonly stops: components["schemas"]["RouteStopEntry"][];
             /** Format: date-time */
             readonly created_at: string;
@@ -3180,7 +4486,11 @@ export interface components {
             name: string;
             code?: string;
             description?: string;
-            is_active?: boolean;
+            available_trip_classes?: string[];
+            readonly status: components["schemas"]["RouteStatusEnum"];
+            /** Format: decimal */
+            distance_km?: string | null;
+            estimated_duration_minutes?: number | null;
             readonly stops: components["schemas"]["RouteStopEntry"][];
             /** Format: date-time */
             readonly created_at: string;
@@ -3196,6 +4506,10 @@ export interface components {
             id: string;
             name: string;
         };
+        RouteCounts: {
+            active: number;
+            inactive: number;
+        };
         RouteCreate: {
             /** Format: uuid */
             business: string;
@@ -3204,7 +4518,81 @@ export interface components {
             code: string;
             /** @default  */
             description: string;
+            available_trip_classes?: string[];
         };
+        /**
+         * @description GET /routes/{id}/ — docs/specs/19-route-lifecycle.md. Adds the
+         *     counts and fare summary an operator needs to judge a single route,
+         *     which the list/PATCH shape doesn't carry on every row.
+         */
+        RouteDetail: {
+            /** Format: uuid */
+            readonly id: string;
+            /** Format: uuid */
+            readonly business: string;
+            name: string;
+            code: string;
+            description?: string;
+            available_trip_classes?: string[];
+            readonly status: components["schemas"]["RouteStatusEnum"];
+            /** Format: decimal */
+            distance_km?: string | null;
+            estimated_duration_minutes?: number | null;
+            readonly stops: components["schemas"]["RouteStopEntry"][];
+            /** Format: date-time */
+            readonly created_at: string;
+            readonly stop_count: number;
+            readonly schedule_count: number;
+            readonly current_fare_summary: components["schemas"]["RouteFareSummary"];
+        };
+        /**
+         * @description Schema-only shape for `RouteDetailSerializer.get_current_fare_summary`
+         *     — mirrors `RouteBusinessSerializer`'s own {id, name} precedent for why
+         *     this needs a real Serializer: without one drf-spectacular infers
+         *     `Any`. Deliberately does not reduce to a single amount: a route can
+         *     have several currently-effective rules at once (one per trip class,
+         *     or one per segment), and picking one to call "the" fare would either
+         *     be arbitrary or silently wrong the moment a Business prices more than
+         *     one class. `configured` is what the `-> active` guard actually
+         *     checks; `rule_count` is context, not a promise about what any one
+         *     journey costs.
+         */
+        RouteFareSummary: {
+            pricing_mode: components["schemas"]["FarePricingModeEnum"];
+            configured: boolean;
+            rule_count: number;
+        };
+        RouteRevenue: {
+            route: string;
+            currency: string;
+            /** Format: decimal */
+            amount: string;
+            transaction_volume: number;
+        };
+        /**
+         * @description POST /routes/{id}/status/ body — mirrors
+         *     apps.scheduling.serializers.TripStatusSerializer's `{status, reason}`
+         *     shape so operators and code meet the same pattern twice rather than
+         *     two different ones. Unlike that serializer, transition legality is
+         *     **not** checked here: docs/specs/19-route-lifecycle.md makes
+         *     apps.network.services.set_route_status the sole owner of that,
+         *     because its guards need database queries a serializer shouldn't run.
+         *     `reason` is accepted for audit-trail symmetry with the Trip endpoint
+         *     (useful on an archive, say) but no Route transition currently
+         *     requires one.
+         */
+        RouteStatus: {
+            status: components["schemas"]["RouteStatusEnum"];
+            reason?: string;
+        };
+        /**
+         * @description * `draft` - Draft
+         *     * `active` - Active
+         *     * `inactive` - Inactive
+         *     * `archived` - Archived
+         * @enum {string}
+         */
+        RouteStatusEnum: "draft" | "active" | "inactive" | "archived";
         /**
          * @description Schema-only shape for `RouteSerializer.get_stops` — a Stop plus
          *     its position on this Route. A plain Serializer, not a ModelSerializer
@@ -3246,6 +4634,7 @@ export interface components {
             readonly id: string;
             /** Format: uuid */
             readonly route: string;
+            readonly route_name: string;
             /** Format: uuid */
             readonly business: string;
             days_of_week?: unknown;
@@ -3255,6 +4644,7 @@ export interface components {
             effective_from: string;
             /** Format: date */
             effective_until?: string | null;
+            trip_class?: components["schemas"]["TripClassEnum"];
             is_active?: boolean;
             /** Format: date-time */
             readonly created_at: string;
@@ -3269,6 +4659,7 @@ export interface components {
             effective_from: string;
             /** Format: date */
             effective_until?: string | null;
+            trip_class?: components["schemas"]["TripClassEnum"];
         };
         Seat: {
             /** Format: uuid */
@@ -3336,6 +4727,14 @@ export interface components {
             /** Format: date */
             period_end: string;
         };
+        /**
+         * @description * `low` - Low
+         *     * `medium` - Medium
+         *     * `high` - High
+         *     * `critical` - Critical
+         * @enum {string}
+         */
+        SeverityEnum: "low" | "medium" | "high" | "critical";
         SigningKeyEntry: {
             kid: string;
             public_key: string;
@@ -3348,6 +4747,12 @@ export interface components {
         SigningKeysResponse: {
             keys: components["schemas"]["SigningKeyEntry"][];
         };
+        /**
+         * @description * `operator` - Operator
+         *     * `passenger` - Passenger
+         * @enum {string}
+         */
+        SourceEc5Enum: "operator" | "passenger";
         Staff: {
             /** Format: uuid */
             readonly id: string;
@@ -3358,6 +4763,70 @@ export interface components {
             readonly role: components["schemas"]["Role"];
             is_active?: boolean;
         };
+        /**
+         * @description `POST /bookings/staff/`'s response: the booking, and separately
+         *     what happened to the money.
+         *
+         *     Two top-level keys rather than a `payment_status` field on the
+         *     booking. The booking is a `Booking` and belongs to every other
+         *     endpoint that returns one; the payment outcome is about *this
+         *     request*. Flattening them would put a field on the shared shape that
+         *     only one endpoint ever fills in.
+         */
+        StaffBooking: {
+            booking: components["schemas"]["Booking"];
+            payment: components["schemas"]["StaffBookingPayment"];
+        };
+        /**
+         * @description POST /bookings/staff/ body — docs/specs/18-manifest-and-staff-booking.md
+         *     slice 2.
+         *
+         *     Everything about *what may be booked* is inherited unchanged, which
+         *     is the point: a pay-as-you-go trip is refused, an open-seating trip
+         *     wants `passenger_count` rather than `seats`, stops must be on the
+         *     route and in order. A counter agent gets exactly the rules a
+         *     passenger gets, because they are booking the same thing.
+         *
+         *     Two fields are added — **for whom**, and **who pays now**.
+         */
+        StaffBookingCreate: {
+            /** Format: uuid */
+            trip: string;
+            seats?: components["schemas"]["BookingSeatRequest"][];
+            passenger_count?: number;
+            /** Format: uuid */
+            from_stop?: string;
+            /** Format: uuid */
+            to_stop?: string;
+            /**
+             * Format: uuid
+             * @description The passenger's id, from `GET /passengers/lookup/`.
+             */
+            passenger: string;
+            /**
+             * @description Settle immediately from the passenger's wallet. A shortfall leaves the booking `pending_payment` with the seats still held, and is reported in the response's `payment` rather than raised.
+             * @default false
+             */
+            pay_from_wallet: boolean;
+        };
+        /**
+         * @description What happened to the money — always present, never left for the
+         *     caller to infer from the booking's status.
+         */
+        StaffBookingPayment: {
+            status: components["schemas"]["StaffBookingPaymentStatusEnum"];
+            /** @description Empty unless something needs explaining. */
+            reason: string;
+            /** Format: uuid */
+            payment_intent: string | null;
+        };
+        /**
+         * @description * `not_attempted` - Not attempted
+         *     * `succeeded` - Succeeded
+         *     * `failed` - Failed
+         * @enum {string}
+         */
+        StaffBookingPaymentStatusEnum: "not_attempted" | "succeeded" | "failed";
         StaffInvitationAccept: {
             password: string;
         };
@@ -3520,6 +4989,59 @@ export interface components {
          * @enum {string}
          */
         TapTypeEnum: "board" | "alight";
+        TelemetryDevice: {
+            /** Format: uuid */
+            readonly id: string;
+            /** Format: uuid */
+            readonly business: string;
+            readonly label: string;
+            /** Format: uuid */
+            readonly vehicle: string | null;
+            readonly is_active: boolean;
+            /** Format: date-time */
+            readonly last_seen_at: string | null;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /**
+         * @description POST /telemetry/devices/ body — request validation only. The view
+         *     calls `issue_device()` itself and builds the response from
+         *     `TelemetryDeviceIssuedSerializer`, the same split
+         *     `apps.tapngo.views.TapCredentialIssueView` uses, because the
+         *     response needs `token` from context, not from an instance this
+         *     serializer's own `create()` would produce.
+         */
+        TelemetryDeviceCreate: {
+            /** Format: uuid */
+            business: string;
+            label: string;
+            /** Format: uuid */
+            vehicle?: string | null;
+        };
+        /**
+         * @description Response shape for POST /telemetry/devices/ only — the one place
+         *     `token` is ever exposed. Not a model field (only `token_hash` is),
+         *     so it's sourced from serializer context rather than the instance.
+         */
+        TelemetryDeviceIssued: {
+            /** Format: uuid */
+            readonly id: string;
+            readonly token: string;
+            /** Format: uuid */
+            readonly business: string;
+            readonly label: string;
+            /** Format: uuid */
+            readonly vehicle: string | null;
+            readonly is_active: boolean;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        /**
+         * @description * `device` - Device
+         *     * `simulated` - Simulated
+         * @enum {string}
+         */
+        TelemetrySourceEnum: "device" | "simulated";
         Ticket: {
             /** Format: uuid */
             readonly id: string;
@@ -3531,6 +5053,7 @@ export interface components {
             readonly expires_at: string;
             /** Format: date-time */
             readonly boarded_at: string | null;
+            readonly trip_class: string;
         };
         /**
          * @description * `issued` - Issued
@@ -3608,10 +5131,15 @@ export interface components {
             readonly status: components["schemas"]["Status61dEnum"];
             /** Format: date-time */
             readonly status_changed_at: string | null;
+            /** Format: date-time */
+            readonly actual_departure_at: string | null;
+            /** Format: date-time */
+            readonly actual_arrival_at: string | null;
             readonly vehicle: components["schemas"]["TripVehicle"] | null;
             readonly driver: components["schemas"]["TripDriver"] | null;
             readonly booking_mode: components["schemas"]["BookingModeEnum"];
-            readonly fare_collection_mode: components["schemas"]["FareCollectionModeEnum"];
+            readonly fare_collection_mode: components["schemas"]["ManifestKindEnum"];
+            readonly trip_class: components["schemas"]["TripClassEnum"];
             readonly cancellation_reason: string;
             readonly compliance_warnings: string[];
             /** Format: date-time */
@@ -3632,10 +5160,51 @@ export interface components {
          */
         TripBookability: {
             booking_mode: string;
+            trip_class: string;
             status: string;
             seats: components["schemas"]["SeatAvailability"][];
             capacity_remaining: number | null;
             seat_selection_enabled: boolean;
+        };
+        TripCapacity: {
+            total_seats: number | null;
+            seats_sold: number;
+            /** Format: decimal */
+            occupancy_rate: string | null;
+        };
+        /**
+         * @description POST /trips/{id}/class/ body — docs/specs/15-trip-classes.md.
+         *
+         *     Its own endpoint rather than a field on the assignment PATCH: that
+         *     body's `vehicle` and `driver` both default to None and therefore
+         *     *clear* on omission, so a class edit that forgot to resend the
+         *     vehicle would silently unassign it. Mirrors TripStatusSerializer's
+         *     shape, which is the other guarded single-field Trip mutation.
+         */
+        TripClass: {
+            trip_class: components["schemas"]["TripClassEnum"];
+        };
+        /**
+         * @description * `premium` - Premium
+         *     * `exclusive` - Exclusive
+         *     * `standard` - Standard
+         *     * `mini` - Mini
+         * @enum {string}
+         */
+        TripClassEnum: "premium" | "exclusive" | "standard" | "mini";
+        TripClassRevenue: {
+            trip_class: string;
+            currency: string;
+            /** Format: decimal */
+            amount: string;
+            transaction_volume: number;
+        };
+        TripCounts: {
+            scheduled: number;
+            in_progress: number;
+            completed: number;
+            cancelled: number;
+            completed_today: number;
         };
         /**
          * @description Manual (one-off) Trip creation. `schedule` is never accepted here
@@ -3652,6 +5221,7 @@ export interface components {
             vehicle?: string | null;
             /** Format: uuid */
             driver?: string | null;
+            trip_class?: components["schemas"]["TripClassEnum"];
         };
         TripDriver: {
             /** Format: uuid */
@@ -3662,6 +5232,83 @@ export interface components {
             /** Format: decimal */
             amount: string;
             currency: string;
+        };
+        /**
+         * @description One `GET /trips/live/` row, and the whole body of
+         *     `GET /trips/{id}/live/`. `position`/`progress`/`eta` are `None`
+         *     together whenever the trip has no telemetry at all — see
+         *     `apps.telemetry.live.trip_live_envelope`.
+         */
+        TripLiveEnvelope: {
+            trip: components["schemas"]["LiveTrip"];
+            position: components["schemas"]["LivePosition"] | null;
+            progress: components["schemas"]["LiveProgress"] | null;
+            eta: components["schemas"]["LiveEta"] | null;
+            punctuality: components["schemas"]["LivePunctuality"];
+            occupancy: components["schemas"]["LiveOccupancy"];
+            incidents_open: number;
+        };
+        /**
+         * @description The envelope.
+         *
+         *     `kind` is what makes this readable: a pay-as-you-go trip sells no
+         *     bookings and issues no tickets, so an empty `results` on one would
+         *     say "nobody is aboard" when the bus is full. `results` is typed as
+         *     the prepaid row here because a schema needs one shape; the PAYG
+         *     branch is documented on the endpoint and carries
+         *     `ManifestJourneyRowSerializer` rows.
+         */
+        TripManifest: {
+            trip: components["schemas"]["ManifestTrip"];
+            kind: components["schemas"]["ManifestKindEnum"];
+            totals: components["schemas"]["ManifestTotals"];
+            count: number;
+            next: string | null;
+            previous: string | null;
+            readonly results: components["schemas"]["ManifestRow"][];
+        };
+        TripMoney: {
+            currency: string;
+            /** Format: decimal */
+            revenue: string;
+            /** Format: decimal */
+            gross: string;
+            /** Format: decimal */
+            revenue_per_seat: string | null;
+        };
+        TripPerformance: {
+            trip: components["schemas"]["TripPerformanceTrip"];
+            capacity: components["schemas"]["TripCapacity"];
+            punctuality: components["schemas"]["TripPunctuality"] | null;
+            money: components["schemas"]["TripMoney"][];
+            incidents: number;
+            cancelled: boolean;
+        };
+        TripPerformanceTrip: {
+            /** Format: uuid */
+            id: string;
+            route: string;
+            trip_class: string;
+            status: string;
+            booking_mode: string;
+            /** Format: date */
+            service_date: string;
+        };
+        /**
+         * @description Null in full before the trip departs — a trip that has not left
+         *     is not "0 minutes late". Measured at departure only: no scheduled
+         *     arrival time exists anywhere in the model, which this spec names as
+         *     a gap rather than inventing one.
+         */
+        TripPunctuality: {
+            /** Format: date-time */
+            scheduled_departure_at: string;
+            /** Format: date-time */
+            actual_departure_at: string;
+            /** Format: date-time */
+            actual_arrival_at: string | null;
+            delay_minutes: number;
+            on_time: boolean;
         };
         TripRoute: {
             /** Format: uuid */
@@ -3686,6 +5333,20 @@ export interface components {
             id: string;
             registration_number: string;
         };
+        TripsLiveResponse: {
+            results: components["schemas"]["TripLiveEnvelope"][];
+            poll_interval_seconds: number;
+            /** Format: date-time */
+            server_time: string;
+        };
+        /**
+         * @description * `wallet_topup` - wallet_topup
+         *     * `booking_paid` - booking_paid
+         *     * `ticket_boarded` - ticket_boarded
+         *     * `fare_deducted` - fare_deducted
+         * @enum {string}
+         */
+        TypeEnum: "wallet_topup" | "booking_paid" | "ticket_boarded" | "fare_deducted";
         Vehicle: {
             /** Format: uuid */
             readonly id: string;
@@ -3721,6 +5382,7 @@ export interface components {
             readonly business: string;
             name: string;
             capacity: number;
+            trip_class?: components["schemas"]["TripClassEnum"];
             is_active?: boolean;
             /** Format: date-time */
             readonly created_at: string;
@@ -3730,6 +5392,7 @@ export interface components {
             business: string;
             name: string;
             capacity: number;
+            trip_class?: components["schemas"]["TripClassEnum"];
         };
         /**
          * @description Body for POST /vehicle-types/{id}/seats/generate/ —
@@ -3817,6 +5480,160 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    activity_mine_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityResponse"];
+                };
+            };
+        };
+    };
+    analytics_dashboard_retrieve: {
+        parameters: {
+            query?: {
+                /** @description Booking status. Separate from `status`, which is a PaymentIntent status — one field validated against two enums cannot validate either. */
+                booking_status?: string;
+                /** @description Scope to one Business. */
+                business?: string;
+                /** @description Payment channel. `wallet` and `unknown` are accepted alongside the values Paystack reports. */
+                channel?: string;
+                /** @description Inclusive start, as a local date in the resolved timezone. Defaults to 29 days before date_to. */
+                date_from?: string;
+                /** @description Inclusive end, as a local date. Defaults to today. */
+                date_to?: string;
+                /** @description Trend bucket size. Each has its own range cap; a longer range is a 400 naming the coarser granularity that would answer it. */
+                granularity?: "day" | "month" | "week";
+                /** @description Scope to one Route. */
+                route?: string;
+                /** @description PaymentIntent status. */
+                status?: string;
+                /** @description Scope to one class. */
+                trip_class?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Dashboard"];
+                };
+            };
+        };
+    };
+    analytics_payments_summary_retrieve: {
+        parameters: {
+            query?: {
+                /** @description Booking status. Separate from `status`, which is a PaymentIntent status — one field validated against two enums cannot validate either. */
+                booking_status?: string;
+                /** @description Scope to one Business. */
+                business?: string;
+                /** @description Payment channel. `wallet` and `unknown` are accepted alongside the values Paystack reports. */
+                channel?: string;
+                /** @description Inclusive start, as a local date in the resolved timezone. Defaults to 29 days before date_to. */
+                date_from?: string;
+                /** @description Inclusive end, as a local date. Defaults to today. */
+                date_to?: string;
+                /** @description Trend bucket size. Each has its own range cap; a longer range is a 400 naming the coarser granularity that would answer it. */
+                granularity?: "day" | "month" | "week";
+                /** @description Scope to one Route. */
+                route?: string;
+                /** @description PaymentIntent status. */
+                status?: string;
+                /** @description Scope to one class. */
+                trip_class?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentSummary"];
+                };
+            };
+        };
+    };
+    analytics_revenue_retrieve: {
+        parameters: {
+            query?: {
+                /** @description Booking status. Separate from `status`, which is a PaymentIntent status — one field validated against two enums cannot validate either. */
+                booking_status?: string;
+                /** @description Scope to one Business. */
+                business?: string;
+                /** @description Payment channel. `wallet` and `unknown` are accepted alongside the values Paystack reports. */
+                channel?: string;
+                /** @description Inclusive start, as a local date in the resolved timezone. Defaults to 29 days before date_to. */
+                date_from?: string;
+                /** @description Inclusive end, as a local date. Defaults to today. */
+                date_to?: string;
+                /** @description Trend bucket size. Each has its own range cap; a longer range is a 400 naming the coarser granularity that would answer it. */
+                granularity?: "day" | "month" | "week";
+                /** @description Scope to one Route. */
+                route?: string;
+                /** @description PaymentIntent status. */
+                status?: string;
+                /** @description Scope to one class. */
+                trip_class?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevenueReport"];
+                };
+            };
+        };
+    };
+    analytics_trips_performance_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripPerformance"];
+                };
+            };
+        };
+    };
     auth_client_admin_token_create: {
         parameters: {
             query?: never;
@@ -3939,10 +5756,18 @@ export interface operations {
     bookings_list: {
         parameters: {
             query?: {
+                /** @description Filter to a single Business's bookings. An unknown or another Client's Business id returns 400. */
+                business?: string;
+                /** @description Inclusive start, as a local date. Omitting both dates lists every booking rather than defaulting to a period — a list is bounded by its pagination, not by a window nothing on screen mentions. */
+                date_from?: string;
+                /** @description Inclusive end. */
+                date_to?: string;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match on the route name or the passenger's email. */
+                search?: string;
                 /** @description Filter to a single status. */
                 status?: string;
                 /** @description Filter to a single Trip. */
@@ -4069,6 +5894,34 @@ export interface operations {
             };
         };
     };
+    bookings_staff_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated key. A retried request with the same key and body returns the original Booking rather than creating a second one. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaffBookingCreate"];
+                "application/x-www-form-urlencoded": components["schemas"]["StaffBookingCreate"];
+                "multipart/form-data": components["schemas"]["StaffBookingCreate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffBooking"];
+                };
+            };
+        };
+    };
     businesses_list: {
         parameters: {
             query?: {
@@ -4076,6 +5929,8 @@ export interface operations {
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match on the business name. */
+                search?: string;
             };
             header?: never;
             path?: never;
@@ -4393,10 +6248,14 @@ export interface operations {
             query?: {
                 /** @description Filter to a single Business's rows. An unknown or another Client's Business id returns 400. */
                 business?: string;
+                /** @description Filter to active or inactive rows. Omit for both. */
+                is_active?: boolean;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match. Vehicle types match on name; vehicles on registration number; drivers on name, phone or licence number. */
+                search?: string;
             };
             header?: never;
             path?: never;
@@ -4466,9 +6325,70 @@ export interface operations {
             };
         };
     };
+    exports_retrieve: {
+        parameters: {
+            query?: {
+                /** @description Booking status. Separate from `status`, which is a PaymentIntent status — one field validated against two enums cannot validate either. */
+                booking_status?: string;
+                /** @description Scope to one Business. */
+                business?: string;
+                /** @description Payment channel. `wallet` and `unknown` are accepted alongside the values Paystack reports. */
+                channel?: string;
+                /** @description Inclusive start, as a local date in the resolved timezone. Defaults to 29 days before date_to. */
+                date_from?: string;
+                /** @description Inclusive end, as a local date. Defaults to today. */
+                date_to?: string;
+                format?: "csv" | "json";
+                /** @description Trend bucket size. Each has its own range cap; a longer range is a 400 naming the coarser granularity that would answer it. */
+                granularity?: "day" | "month" | "week";
+                /** @description Scope to one Route. */
+                route?: string;
+                /** @description PaymentIntent status. */
+                status?: string;
+                /** @description Scope to one class. */
+                trip_class?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Which surface to export. */
+                resource: "bookings" | "manifest" | "revenue" | "revenue-trend" | "route-revenue" | "transactions" | "trip-class-revenue" | "trip-performance";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rows matching the current filters, as CSV — UTF-8 with a BOM, RFC 4180 line endings. Every row that matches, not one page. */
+            200: {
+                headers: {
+                    /** @description attachment; filename="integra-<resource>-<from>-to-<to>.csv" */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": string;
+                };
+            };
+            /** @description Invalid filters, or more rows than EXPORT_MAX_ROWS. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown export resource. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     fare_journeys_list: {
         parameters: {
             query?: {
+                /** @description Filter to a single Business's journeys, through their Trip. An unknown or another Client's Business id returns 400. */
+                business?: string;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */
@@ -4697,6 +6617,250 @@ export interface operations {
             };
         };
     };
+    incidents_list: {
+        parameters: {
+            query?: {
+                assigned_to?: string;
+                business?: string;
+                category?: string;
+                date_from?: string;
+                date_to?: string;
+                driver?: string;
+                /** @description Number of results to return per page. */
+                limit?: number;
+                /** @description The initial index from which to return the results. */
+                offset?: number;
+                open_only?: string;
+                route?: string;
+                search?: string;
+                severity?: string;
+                source?: string;
+                status?: string;
+                trip?: string;
+                vehicle?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedIncidentList"];
+                };
+            };
+        };
+    };
+    incidents_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated key. A retried request with the same key and body returns the original Incident rather than filing a second one. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncidentCreate"];
+                "application/x-www-form-urlencoded": components["schemas"]["IncidentCreate"];
+                "multipart/form-data": components["schemas"]["IncidentCreate"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Incident"];
+                };
+            };
+        };
+    };
+    incidents_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentDetail"];
+                };
+            };
+        };
+    };
+    incidents_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedIncidentUpdate"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedIncidentUpdate"];
+                "multipart/form-data": components["schemas"]["PatchedIncidentUpdate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentDetail"];
+                };
+            };
+        };
+    };
+    incidents_notes_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncidentNote"];
+                "application/x-www-form-urlencoded": components["schemas"]["IncidentNote"];
+                "multipart/form-data": components["schemas"]["IncidentNote"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentActivity"];
+                };
+            };
+        };
+    };
+    incidents_transition_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncidentTransition"];
+                "application/x-www-form-urlencoded": components["schemas"]["IncidentTransition"];
+                "multipart/form-data": components["schemas"]["IncidentTransition"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentDetail"];
+                };
+            };
+        };
+    };
+    incidents_assignable_users_list: {
+        parameters: {
+            query?: {
+                /** @description Number of results to return per page. */
+                limit?: number;
+                /** @description The initial index from which to return the results. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedAssignableUserList"];
+                };
+            };
+        };
+    };
+    incidents_mine_list: {
+        parameters: {
+            query?: {
+                /** @description Number of results to return per page. */
+                limit?: number;
+                /** @description The initial index from which to return the results. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedPassengerIncidentList"];
+                };
+            };
+        };
+    };
+    incidents_report_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated key. A retried request with the same key and body returns the original Incident rather than filing a second one. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncidentReport"];
+                "application/x-www-form-urlencoded": components["schemas"]["IncidentReport"];
+                "multipart/form-data": components["schemas"]["IncidentReport"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PassengerIncident"];
+                };
+            };
+        };
+    };
     ledger_accounts_list: {
         parameters: {
             query: {
@@ -4817,6 +6981,28 @@ export interface operations {
             };
         };
     };
+    passengers_lookup_retrieve: {
+        parameters: {
+            query: {
+                /** @description Exact (case-insensitive) email address. Not a search — a partial address matches nothing. */
+                email: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Passenger"];
+                };
+            };
+        };
+    };
     payments_list: {
         parameters: {
             query?: {
@@ -4826,6 +7012,8 @@ export interface operations {
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match on the PSP reference. */
+                search?: string;
                 /** @description Filter to one status. */
                 status?: string;
             };
@@ -4946,6 +7134,10 @@ export interface operations {
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match. Routes match on name or code; stops on name or address. */
+                search?: string;
+                /** @description Filter to a single status. Omit to see every status except archived. */
+                status?: string;
             };
             header?: never;
             path?: never;
@@ -4988,6 +7180,27 @@ export interface operations {
             };
         };
     };
+    routes_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteDetail"];
+                };
+            };
+        };
+    };
     routes_partial_update: {
         parameters: {
             query?: never;
@@ -5015,9 +7228,33 @@ export interface operations {
             };
         };
     };
-    routes_fare_matrix_retrieve: {
+    routes_duplicate_create: {
         parameters: {
             query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Route"];
+                };
+            };
+        };
+    };
+    routes_fare_matrix_retrieve: {
+        parameters: {
+            query: {
+                /** @description Which class's grid to read or write. The empty string is the wildcard grid, whose prices apply to any class with no grid of its own. Required — see docs/specs/15-trip-classes.md for why this is not defaulted. */
+                trip_class: string;
+            };
             header?: never;
             path: {
                 id: string;
@@ -5038,7 +7275,10 @@ export interface operations {
     };
     routes_fare_matrix_update: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description Which class's grid to read or write. The empty string is the wildcard grid, whose prices apply to any class with no grid of its own. Required — see docs/specs/15-trip-classes.md for why this is not defaulted. */
+                trip_class: string;
+            };
             header?: never;
             path: {
                 id: string;
@@ -5059,6 +7299,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FareMatrixSaveResult"];
+                };
+            };
+        };
+    };
+    routes_status_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteStatus"];
+                "application/x-www-form-urlencoded": components["schemas"]["RouteStatus"];
+                "multipart/form-data": components["schemas"]["RouteStatus"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Route"];
                 };
             };
         };
@@ -5121,10 +7388,14 @@ export interface operations {
             query?: {
                 /** @description Filter to a single Business's rows. An unknown or another Client's Business id returns 400. */
                 business?: string;
+                /** @description Filter to active or inactive schedules. Omit for both. */
+                is_active?: boolean;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match on the schedule's route name. A Schedule has no name of its own. */
+                search?: string;
             };
             header?: never;
             path?: never;
@@ -5252,6 +7523,8 @@ export interface operations {
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match on the staff member's email. */
+                search?: string;
             };
             header?: never;
             path?: never;
@@ -5398,10 +7671,14 @@ export interface operations {
             query?: {
                 /** @description Filter to a single Business's rows. An unknown or another Client's Business id returns 400. */
                 business?: string;
+                /** @description Filter to active or inactive rows. Omit for both. */
+                is_active?: boolean;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match. Routes match on name or code; stops on name or address. */
+                search?: string;
             };
             header?: never;
             path?: never;
@@ -5796,6 +8073,82 @@ export interface operations {
             };
         };
     };
+    telemetry_devices_list: {
+        parameters: {
+            query?: {
+                /** @description Number of results to return per page. */
+                limit?: number;
+                /** @description The initial index from which to return the results. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTelemetryDeviceList"];
+                };
+            };
+        };
+    };
+    telemetry_devices_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TelemetryDeviceCreate"];
+                "application/x-www-form-urlencoded": components["schemas"]["TelemetryDeviceCreate"];
+                "multipart/form-data": components["schemas"]["TelemetryDeviceCreate"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetryDeviceIssued"];
+                };
+            };
+        };
+    };
+    telemetry_devices_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedTelemetryDeviceUpdate"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedTelemetryDeviceUpdate"];
+                "multipart/form-data": components["schemas"]["PatchedTelemetryDeviceUpdate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TelemetryDevice"];
+                };
+            };
+        };
+    };
     ticketing_revoked_retrieve: {
         parameters: {
             query?: never;
@@ -5847,10 +8200,14 @@ export interface operations {
                 route?: string;
                 /** @description Filter to a single Schedule. */
                 schedule?: string;
+                /** @description Case-insensitive substring match on the trip's route name. A Trip has no name of its own. */
+                search?: string;
                 /** @description Filter to a single service_date (YYYY-MM-DD). */
                 service_date?: string;
                 /** @description Filter to a single status. */
                 status?: string;
+                /** @description Filter to a single service class (premium/exclusive/standard/mini). */
+                trip_class?: string;
             };
             header?: never;
             path?: never;
@@ -5944,6 +8301,33 @@ export interface operations {
             };
         };
     };
+    trips_class_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TripClass"];
+                "application/x-www-form-urlencoded": components["schemas"]["TripClass"];
+                "multipart/form-data": components["schemas"]["TripClass"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Trip"];
+                };
+            };
+        };
+    };
     trips_fare_retrieve: {
         parameters: {
             query: {
@@ -5964,6 +8348,51 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TripFareQuote"];
+                };
+            };
+        };
+    };
+    trip_live_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripLiveEnvelope"];
+                };
+            };
+        };
+    };
+    trips_manifest_retrieve: {
+        parameters: {
+            query?: {
+                /** @description Include cancelled and expired bookings, each flagged with `is_cancelled`. Excluded by default. `pending_payment` bookings are always included regardless — an operator needs to know a held seat is unpaid. */
+                include_cancelled?: boolean;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripManifest"];
                 };
             };
         };
@@ -6055,6 +8484,28 @@ export interface operations {
             };
         };
     };
+    trips_live_list: {
+        parameters: {
+            query?: {
+                /** @description ISO-8601 timestamp. Narrows the response to trips whose live state changed after this instant — see `apps.telemetry.live.include_in_delta`. Omit for a full snapshot. */
+                since?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripsLiveResponse"];
+                };
+            };
+        };
+    };
     trips_search_list: {
         parameters: {
             query: {
@@ -6065,6 +8516,8 @@ export interface operations {
                 route: string;
                 /** @description The service date to search (YYYY-MM-DD). */
                 service_date: string;
+                /** @description Filter to a single service class (premium/exclusive/standard/mini). */
+                trip_class?: string;
             };
             header?: never;
             path?: never;
@@ -6087,10 +8540,14 @@ export interface operations {
             query?: {
                 /** @description Filter to a single Business's rows. An unknown or another Client's Business id returns 400. */
                 business?: string;
+                /** @description Filter to active or inactive rows. Omit for both. */
+                is_active?: boolean;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match. Vehicle types match on name; vehicles on registration number; drivers on name, phone or licence number. */
+                search?: string;
             };
             header?: never;
             path?: never;
@@ -6240,10 +8697,14 @@ export interface operations {
             query?: {
                 /** @description Filter to a single Business's rows. An unknown or another Client's Business id returns 400. */
                 business?: string;
+                /** @description Filter to active or inactive rows. Omit for both. */
+                is_active?: boolean;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match. Vehicle types match on name; vehicles on registration number; drivers on name, phone or licence number. */
+                search?: string;
             };
             header?: never;
             path?: never;

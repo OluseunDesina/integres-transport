@@ -1,10 +1,31 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Dialog } from '@angular/cdk/dialog';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  TemplateRef,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore, HasPermissionDirective } from '@auth';
-import { Alert, Button, EmptyState, TextField } from '@shared-ui';
+import { HasPermissionDirective } from '@auth';
+import {
+  Alert,
+  Button,
+  CONFIRM_DIALOG_TITLE_ID,
+  ConfirmDialog,
+  EmptyState,
+  FormSection,
+  PageHeader,
+  TextField,
+  plural,
+} from '@shared-ui';
+import type { ConfirmDialogData, ConfirmDialogResult } from '@shared-ui';
 
 import { VehicleTypeStore, type VehicleType } from '../../shared/data/store/vehicle-type.store';
 
@@ -80,7 +101,11 @@ function computeLayoutPreview(
       if (aisleAfterColumn !== null && column === aisleAfterColumn + 1) {
         column += 1;
       }
-      seats.push({ seatNumber: `${row}${SEAT_LETTERS[seatIndex - 1]}`, row, column });
+      seats.push({
+        seatNumber: `${row}${SEAT_LETTERS[seatIndex - 1]}`,
+        row,
+        column,
+      });
     }
   }
   return seats;
@@ -111,14 +136,26 @@ function toErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-seat-map',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, HasPermissionDirective, Alert, Button, EmptyState, TextField],
+  imports: [
+    FormsModule,
+    RouterLink,
+    HasPermissionDirective,
+    Alert,
+    Button,
+    EmptyState,
+    FormSection,
+    PageHeader,
+    TextField,
+  ],
   templateUrl: './seat-map.html',
 })
 export class SeatMap implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
+  private readonly dialog = inject(Dialog);
   protected readonly store = inject(VehicleTypeStore);
+
+  private readonly confirmBody = viewChild.required<TemplateRef<unknown>>('confirmBody');
 
   private readonly vehicleTypeId = this.route.snapshot.paramMap.get('id') ?? '';
   protected readonly notFound = signal(false);
@@ -145,6 +182,15 @@ export class SeatMap implements OnInit {
   protected readonly generating = signal(false);
   protected readonly generateError = signal<string | null>(null);
 
+  /** Replacing an existing layout destroys seats; generating a first one
+   * does not, and colouring both red would train people to ignore red. */
+  protected readonly confirmDanger = computed(() => this.existingSeats().length > 0);
+  protected readonly confirmLabel = computed(() =>
+    this.existingSeats().length > 0 ? 'Replace layout' : 'Generate layout'
+  );
+  protected readonly confirmDisabled = signal(false);
+
+
   protected readonly rows = computed(() => Number.parseInt(this.rowsInput(), 10) || 0);
   protected readonly columns = computed(() => Number.parseInt(this.columnsInput(), 10) || 0);
   protected readonly aisleAfterColumn = computed(() =>
@@ -152,6 +198,9 @@ export class SeatMap implements OnInit {
   );
 
   protected readonly totalSeats = computed(() => this.rows() * this.columns());
+
+  protected readonly seatCountLabel = computed(() => plural(this.existingSeats().length, 'seat'));
+  protected readonly totalSeatsLabel = computed(() => plural(this.totalSeats(), 'seat'));
 
   protected readonly exceedsCapacity = computed(() => {
     const vehicleType = this.vehicleType();
@@ -204,7 +253,6 @@ export class SeatMap implements OnInit {
     this.seatsError.set(null);
     const { data, error } = await this.api.GET('/api/v1/vehicle-types/{id}/seats/', {
       params: { path: { id: this.vehicleTypeId } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.loadingSeats.set(false);
     if (!data) {
@@ -226,9 +274,52 @@ export class SeatMap implements OnInit {
     this.aisleInput.set(value);
   }
 
-  protected async generate(): Promise<void> {
+  /**
+   * Generation is a replace-the-set write: the backend hard-deletes every
+   * existing `Seat` for this vehicle type, and `SeatReservation` points
+   * at `Seat`. The screen said so in a paragraph and then fired on one
+   * click — the same one-mis-tap shape docs/specs/14 called its one
+   * behavioural change for the in-table write toggles, in a screen that
+   * slice never reached.
+   *
+   * Confirmed, and marked destructive only when there is something to
+   * destroy: generating a first layout for a vehicle type with no seats
+   * takes nothing away.
+   */
+  protected confirmGenerate(): void {
     if (!this.canGenerate()) {
       return;
+    }
+    this.generateError.set(null);
+
+    const replacing = this.existingSeats().length;
+    const ref = this.dialog.open<boolean, ConfirmDialogData>(ConfirmDialog, {
+      ariaModal: true,
+      ariaLabelledBy: CONFIRM_DIALOG_TITLE_ID,
+      data: {
+        title: replacing > 0 ? 'Replace this seat map?' : 'Generate this seat map?',
+        bodyTemplate: this.confirmBody(),
+        confirmLabel: this.confirmLabel,
+        danger: this.confirmDanger,
+        confirmDisabled: this.confirmDisabled,
+        onConfirm: () => this.submitGenerate(),
+      },
+    });
+
+    // Deferred a tick, matching every other confirmed action in this
+    // console: refetching in the same synchronous tick as the dialog's
+    // own close/focus-restoration sequence races it.
+    ref.closed.subscribe(() => undefined);
+  }
+
+  private async submitGenerate(): Promise<ConfirmDialogResult> {
+    const ok = await this.generate();
+    return ok ? { ok: true } : { ok: false, error: this.generateError() ?? 'Could not generate.' };
+  }
+
+  protected async generate(): Promise<boolean> {
+    if (!this.canGenerate()) {
+      return false;
     }
     this.generating.set(true);
     this.generateError.set(null);
@@ -240,15 +331,13 @@ export class SeatMap implements OnInit {
         aisle_after_column: this.aisleAfterColumn(),
         numbering_scheme: 'row_letter',
       },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.generating.set(false);
     if (!data) {
-      this.generateError.set(
-        toErrorMessage(error, 'Could not generate this seat map. Try again.')
-      );
-      return;
+      this.generateError.set(toErrorMessage(error, 'Could not generate this seat map. Try again.'));
+      return false;
     }
     this.existingSeats.set(data);
+    return true;
   }
 }

@@ -27,9 +27,8 @@ export function multiplyDecimal(amount: string, count: number): string {
   return `${negative ? '-' : ''}${digits.slice(0, splitAt)}.${digits.slice(splitAt)}`;
 }
 
-/** `"1500.00"` + `"NGN"` → `"NGN 1500.00"`. Currency comes from the
- * Business (`GET /trips/{id}/fare/`), never a platform-wide constant —
- * Lagos and Gaborone coexist in one install. */
-export function formatMoney(amount: string, currency: string): string {
-  return `${currency} ${amount}`;
-}
+/* `formatMoney` moved to `@shared-ui` in spec 14 slice 6b, when
+ * `validator-app` turned out to be rendering the same amounts in the
+ * opposite order. Re-exported here so this app's twelve call sites keep
+ * importing money helpers from one place. */
+export { formatMoney } from '@shared-ui';

@@ -1,44 +1,71 @@
-<div class="mx-auto max-w-lg">
+<div class="mx-auto max-w-2xl">
   @if (notFound()) {
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       That stop couldn't be found.
-      <a routerLink="/stops" class="font-medium text-slate-900 underline">Back to stops</a>
+      <a routerLink="/stops" class="font-medium text-strong underline">Back to stops</a>
     </p>
   } @else {
-    <h1 class="mb-6 text-lg font-semibold text-slate-900">
-      {{ editing() ? 'Edit stop' : 'New stop' }}
-    </h1>
+    <ui-page-header
+      class="mb-6"
+      [title]="editing() ? 'Edit stop' : 'New stop'"
+      description="A place a route can pick up or set down. Stops are shared across every route this business runs."
+    />
 
     @if (errorMessage(); as message) {
       <ui-alert class="mb-4">{{ message }}</ui-alert>
     }
 
-    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-text-field
-        label="Stop name"
-        formControlName="name"
-        [invalid]="!!fieldError('name')"
-        [errorMessage]="fieldError('name')"
-      />
-      <ui-text-field label="Address" formControlName="address" />
-      <div class="grid grid-cols-2 gap-4">
-        <ui-text-field label="Latitude" formControlName="latitude" />
-        <ui-text-field label="Longitude" formControlName="longitude" />
-      </div>
-      <p class="-mt-2 text-sm text-slate-500">Provide an address or both latitude and longitude.</p>
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      <ui-form-section title="Identity" description="How this stop is named for passengers and staff.">
+        <ui-text-field
+          label="Stop name"
+          formControlName="name"
+          [invalid]="!!fieldError('name')"
+          [errorMessage]="fieldError('name')"
+        />
+      </ui-form-section>
 
-      <!-- No Active checkbox: activating/deactivating is a one-click
-           switch on the list table now. `is_active` is not sent from
-           this form at all, so a details-only save can't clobber a
-           toggle made elsewhere in the meantime. -->
+      <ui-form-section
+        title="Location"
+        description="Provide an address or both latitude and longitude — either is enough to place the stop."
+      >
+        <ui-text-field
+          label="Address"
+          formControlName="address"
+          [invalid]="!!fieldError('address')"
+          [errorMessage]="fieldError('address')"
+        />
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <ui-text-field
+            label="Latitude"
+            hint="Decimal degrees, e.g. 6.5244."
+            formControlName="latitude"
+            [invalid]="!!fieldError('latitude')"
+            [errorMessage]="fieldError('latitude')"
+          />
+          <ui-text-field
+            label="Longitude"
+            hint="Decimal degrees, e.g. 3.3792."
+            formControlName="longitude"
+            [invalid]="!!fieldError('longitude')"
+            [errorMessage]="fieldError('longitude')"
+          />
+        </div>
+      </ui-form-section>
 
-      <div class="mt-2 flex gap-3">
+      <!-- No Active control: activating or deactivating a stop is an
+           explicit, confirmed action in the Stops list's row menu
+           (docs/specs/14's one behavioural change). `is_active` is not
+           sent from this form at all, so a details-only save cannot
+           clobber a status change made elsewhere in the meantime. -->
+
+      <div class="flex gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
           {{ editing() ? 'Save changes' : 'Create stop' }}
         </ui-button>
         <a
           routerLink="/stops"
-          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
           >Cancel</a
         >
       </div>

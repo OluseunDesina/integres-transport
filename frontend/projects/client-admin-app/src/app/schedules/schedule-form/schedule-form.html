@@ -1,82 +1,114 @@
-<div class="mx-auto max-w-lg">
+<div class="mx-auto max-w-2xl">
   @if (notFound()) {
-    <p class="text-sm text-slate-500">
+    <p class="text-sm text-muted">
       That schedule couldn't be found.
-      <a routerLink="/schedules" class="font-medium text-slate-900 underline">Back to schedules</a>
+      <a routerLink="/schedules" class="font-medium text-strong underline">Back to schedules</a>
     </p>
   } @else {
-    <h1 class="mb-6 text-lg font-semibold text-slate-900">
-      {{ editing() ? 'Edit schedule' : 'New schedule' }}
-    </h1>
+    <ui-page-header
+      class="mb-6"
+      [title]="editing() ? 'Edit schedule' : 'New schedule'"
+      description="A repeating departure. The nightly job turns each schedule into trips for the days it covers."
+    />
 
     @if (errorMessage(); as message) {
       <ui-alert class="mb-4">{{ message }}</ui-alert>
     }
 
-    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-select
-        label="Route"
-        [options]="routeOptionsList()"
-        formControlName="route"
-        [invalid]="!!fieldError('route')"
-        [errorMessage]="fieldError('route')"
-      />
-      @if (noRoutesAvailable()) {
-        <p class="-mt-2 text-sm text-slate-500">
-          This Business has no Routes yet.
-          <a routerLink="/routes/new" class="font-medium text-slate-900 underline">Create one first</a
-          >, then come back here.
-        </p>
-      }
-
-      <fieldset class="flex flex-col gap-2">
-        <legend class="text-sm font-medium text-slate-700">Days of week</legend>
-        <div class="flex flex-wrap gap-3">
-          @for (day of dayLabels; track day.value) {
-            <label class="flex min-h-11 items-center gap-1.5 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                [checked]="isDaySelected(day.value)"
-                (change)="toggleDay(day.value)"
-                class="h-4 w-4 rounded border-slate-300"
-              />
-              {{ day.label }}
-            </label>
-          }
-        </div>
-      </fieldset>
-
-      <ui-text-field
-        label="Departure time"
-        type="time"
-        formControlName="departure_time"
-        [invalid]="!!fieldError('departure_time')"
-        [errorMessage]="fieldError('departure_time')"
-      />
-
-      <div class="grid grid-cols-2 gap-4">
-        <ui-text-field
-          label="Effective from"
-          type="date"
-          formControlName="effective_from"
-          [invalid]="!!fieldError('effective_from')"
-          [errorMessage]="fieldError('effective_from')"
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      <ui-form-section title="Journey" description="Which route this schedule runs.">
+        <ui-select
+          label="Route"
+          [options]="routeOptionsList()"
+          formControlName="route"
+          [invalid]="!!fieldError('route')"
+          [errorMessage]="fieldError('route')"
         />
-        <ui-text-field label="Effective until" type="date" formControlName="effective_until" />
-      </div>
+        @if (noRoutesAvailable()) {
+          <ui-alert variant="warning">
+            This business has no routes yet.
+            <a routerLink="/routes/new" class="font-medium underline">Create one first</a>, then
+            come back here.
+          </ui-alert>
+        }
+        <!-- Narrowed to what the chosen route actually allows, so a
+             class this route refuses is never offered rather than being
+             offered and then 400'd on submit. -->
+        <ui-select
+          label="Service class"
+          hint="Every trip this schedule generates is sold as this class."
+          [options]="tripClassOptions()"
+          formControlName="trip_class"
+          [invalid]="!!fieldError('trip_class')"
+          [errorMessage]="fieldError('trip_class')"
+        />
+      </ui-form-section>
 
-      <!-- No Active checkbox: activating/deactivating is a one-click
-           switch on the list table now. `is_active` is not sent from
-           this form at all, so a details-only save can't clobber a
-           toggle made elsewhere in the meantime. -->
+      <ui-form-section
+        title="When it runs"
+        description="The days of the week and the time trips depart."
+      >
+        <fieldset class="flex flex-col gap-2">
+          <legend class="text-sm font-medium text-default">Days of week</legend>
+          <div class="flex flex-wrap gap-3">
+            @for (day of dayLabels; track day.value) {
+              <label class="flex min-h-11 items-center gap-1.5 text-sm text-default">
+                <input
+                  type="checkbox"
+                  [checked]="isDaySelected(day.value)"
+                  (change)="toggleDay(day.value)"
+                  class="h-4 w-4 rounded border-control"
+                />
+                {{ day.label }}
+              </label>
+            }
+          </div>
+        </fieldset>
 
-      <div class="mt-2 flex gap-3">
+        <ui-text-field
+          label="Departure time"
+          type="time"
+          formControlName="departure_time"
+          [invalid]="!!fieldError('departure_time')"
+          [errorMessage]="fieldError('departure_time')"
+        />
+      </ui-form-section>
+
+      <ui-form-section
+        title="Effective window"
+        description="Trips are generated only for dates inside this window. Leave the end date blank to run indefinitely."
+      >
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <ui-text-field
+            label="Effective from"
+            type="date"
+            formControlName="effective_from"
+            [invalid]="!!fieldError('effective_from')"
+            [errorMessage]="fieldError('effective_from')"
+          />
+          <ui-text-field
+            label="Effective until"
+            type="date"
+            formControlName="effective_until"
+            [invalid]="!!fieldError('effective_until')"
+            [errorMessage]="fieldError('effective_until')"
+          />
+        </div>
+      </ui-form-section>
+
+      <!-- No Active control: activating or deactivating a schedule is an
+           explicit, confirmed action in the Schedules list's row menu
+           (docs/specs/14's one behavioural change). `is_active` is not
+           sent from this form at all, so a details-only save cannot
+           clobber a status change made elsewhere in the meantime. -->
+
+      <div class="flex gap-3">
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
           {{ editing() ? 'Save changes' : 'Create schedule' }}
         </ui-button>
         <a
           routerLink="/schedules"
-          class="inline-flex min-h-11 items-center text-sm font-medium text-slate-700 hover:text-slate-900"
+          class="inline-flex min-h-11 items-center text-sm font-medium text-default hover:text-strong"
           >Cancel</a
         >
       </div>

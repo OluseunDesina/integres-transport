@@ -1,163 +1,413 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Trips</h1>
-    <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewTrip()">New trip</ui-button>
-  </div>
+  <ui-page-header
+    title="Trips"
+    description="Every departure, generated from a schedule or created as a one-off, with the vehicle and driver assigned to it."
+  >
+    <ui-button actions *appHasPermission="'scheduling.manage'" (pressed)="goToNewTrip()"
+      >New trip</ui-button
+    >
+  </ui-page-header>
 
-  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-    <ui-select
-      label="Route"
-      [options]="routeFilterOptions()"
-      [ngModel]="store.query().route ?? ''"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onRouteFilterChange($event)"
-    />
-    <ui-select
-      label="Schedule"
-      [options]="scheduleFilterOptions()"
-      [ngModel]="store.query().schedule ?? ''"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onScheduleFilterChange($event)"
-    />
-    <ui-text-field
-      label="Service date"
-      type="date"
-      [ngModel]="store.query().service_date ?? ''"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onServiceDateFilterChange($event)"
-    />
-    <ui-select
-      label="Status"
-      [options]="statusFilterOptions"
-      [ngModel]="store.query().status ?? ''"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onStatusFilterChange($event)"
-    />
-  </div>
-
+  <!-- A failed assignment is transient and must not replace the table —
+       the row it came from still needs to be visible. -->
   @if (assignmentError(); as message) {
     <ui-alert>{{ message }}</ui-alert>
   }
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state
-      title="No trips found"
-      description="Trips generated from a Schedule will appear here, or create a manual one-off trip."
-    >
-      <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewTrip()">New trip</ui-button>
-    </ui-empty-state>
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Route</th>
-          <th class="px-4 py-2">Service date</th>
-          <th class="px-4 py-2">Departure</th>
-          <th class="px-4 py-2">Status</th>
-          <th class="px-4 py-2">Vehicle</th>
-          <th class="px-4 py-2">Driver</th>
-          <th class="px-4 py-2">Compliance</th>
-          <th class="sticky right-0 bg-white px-4 py-2 shadow-[-6px_0_6px_-4px_rgba(15,23,42,0.15)]">
-            <span class="sr-only">Actions</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (trip of store.items(); track trip.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ trip.route.name }}</td>
-            <td class="px-4 py-2">{{ trip.service_date }}</td>
-            <td class="px-4 py-2">{{ trip.scheduled_departure_at | date: 'short' }}</td>
-            <td class="px-4 py-2">
-              <!-- No `?? trip.status` fallback: STATUS_LABEL is keyed by
-                   the full status union, so the compiler (NG8102) proves
-                   the fallback dead. A new status breaks the map's own
-                   type instead, which is the guard we actually want. -->
-              <ui-status-pill [tone]="statusTone[trip.status]" [label]="statusLabel[trip.status]" />
-            </td>
-            <td class="max-w-40 px-4 py-2 [&_label]:sr-only">
-              @if (assignmentOptionsReady(trip.business)) {
-                <ui-select
-                  label="Vehicle"
-                  [options]="vehicleOptionsFor(trip.business)"
-                  [ngModel]="trip.vehicle?.id ?? ''"
-                  [ngModelOptions]="{ standalone: true }"
-                  (ngModelChange)="onVehicleChange(trip, $event)"
-                />
-              } @else {
-                <span class="text-sm text-slate-500">{{ trip.vehicle?.registration_number ?? '—' }}</span>
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search trips"
+        placeholder="Search by route name…"
+        ariaLabel="Trip filters"
+        [chips]="filters.chips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      >
+        <div filters class="flex flex-wrap items-end gap-3">
+          <div class="w-44">
+            <ui-select
+              label="Route"
+              [options]="routeFilterOptions()"
+              [ngModel]="filters.extra('route')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('route', $event)"
+            />
+          </div>
+          <div class="w-52">
+            <ui-select
+              label="Schedule"
+              [options]="scheduleFilterOptions()"
+              [ngModel]="filters.extra('schedule')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('schedule', $event)"
+            />
+          </div>
+          <div class="w-40">
+            <ui-text-field
+              label="Service date"
+              type="date"
+              [ngModel]="filters.extra('service_date')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('service_date', $event)"
+            />
+          </div>
+          <div class="w-40">
+            <ui-select
+              label="Class"
+              [options]="tripClassFilterOptions"
+              [ngModel]="filters.extra('trip_class')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('trip_class', $event)"
+            />
+          </div>
+          <div class="w-40">
+            <ui-select
+              label="Status"
+              [options]="statusFilterOptions"
+              [ngModel]="filters.extra('status')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('status', $event)"
+            />
+          </div>
+        </div>
+      </ui-filter-bar>
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No trips yet"
+        description="Trips generated from a Schedule will appear here, or create a manual one-off trip."
+      >
+        <ui-button *appHasPermission="'scheduling.manage'" (pressed)="goToNewTrip()"
+          >New trip</ui-button
+        >
+      </ui-empty-state>
+    } @else {
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Trips"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No trips match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Route</th>
+              <!-- Beside Route, not beside Status. Both render as
+                   neutral pills, and a "Standard" class next to a
+                   "Scheduled" status was two identical grey chips in
+                   adjacent columns — indistinguishable without reading
+                   the headers. Route and Class also belong together:
+                   they say what the service *is*, while date, departure
+                   and status say where it has got to. -->
+              <th class="hidden py-2 md:table-cell">Class</th>
+              <th class="hidden py-2 md:table-cell">Service date</th>
+              <th class="hidden py-2 md:table-cell">Departure</th>
+              <th class="py-2">Status</th>
+              <th class="hidden py-2 lg:table-cell">Vehicle</th>
+              <th class="hidden py-2 lg:table-cell">Driver</th>
+              <th class="hidden py-2 lg:table-cell">Compliance</th>
+              <!-- This screen's own sticky right-hand actions column. It
+                   predates the responsive-column tiers and still earns
+                   its place: from `lg` up this table carries eight
+                   columns, which is wide enough to scroll on a laptop
+                   even though it no longer does on a phone. -->
+              <th
+                class="sticky right-0 bg-surface py-2 shadow-[-6px_0_6px_-4px_rgba(15,23,42,0.15)]"
+              >
+                <span class="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="10rem" /></td>
+                  <!-- Class, then service date, then departure — the
+                       same order as the header and the rows. -->
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="5rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="8rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="5rem" /></td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
               }
-            </td>
-            <td class="max-w-40 px-4 py-2 [&_label]:sr-only">
-              @if (assignmentOptionsReady(trip.business)) {
-                <ui-select
-                  label="Driver"
-                  [options]="driverOptionsFor(trip.business)"
-                  [ngModel]="trip.driver?.id ?? ''"
-                  [ngModelOptions]="{ standalone: true }"
-                  (ngModelChange)="onDriverChange(trip, $event)"
-                />
-              } @else {
-                <span class="text-sm text-slate-500">{{ trip.driver?.name ?? '—' }}</span>
+            } @else {
+              @for (trip of store.items(); track trip.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    <!--
+                      The route name is the link to this departure's
+                      performance — spec 16 slice 4.
+
+                      Deliberately **not** an item in the action menu
+                      below: that menu is wrapped in
+                      `*appHasPermission="'scheduling.manage'"` in its
+                      entirety, and the read-only `scheduling.view` staff
+                      it would hide this from are exactly the people
+                      performance reporting is for. As a link it follows
+                      the route's own `analytics.view` guard instead, and
+                      a user without that codename simply sees plain
+                      text.
+                    -->
+                    @if (canViewPerformance()) {
+                      <!--
+                        `[overflow-wrap:anywhere]` opts back in to what
+                        `ui-table` gives every other cell. That component
+                        resets `overflow-wrap` to `normal` inside a
+                        `<button>` or `<a>`, because a control's *label*
+                        should not be split mid-word — but this link's
+                        text is the route name, which is data. Without
+                        this the column's minimum width grows to the
+                        longest word in a route name and the trips table
+                        needed 16px of sideways scroll at 390px, caught
+                        by `e2e/responsive-tables.ts` rather than by eye.
+
+                        It sits on a `<span>` inside the anchor, not on
+                        the anchor: `ui-table`'s reset is a `::ng-deep`
+                        descendant selector and out-specifies a utility
+                        class on the element it targets. On a child, an
+                        explicit value simply beats the inherited one,
+                        with no `!important` anywhere.
+                      -->
+                      <a
+                        [routerLink]="['/trips', trip.id, 'performance']"
+                        class="underline hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                        ><span class="[overflow-wrap:anywhere]">{{ trip.route.name }}</span></a
+                      >
+                    } @else {
+                      {{ trip.route.name }}
+                    }
+                    @if (canViewManifest()) {
+                      <!-- A second link rather than a menu item; see
+                           `canViewManifest`. Small and secondary: the
+                           route name stays the row's primary link. -->
+                      <a
+                        [routerLink]="['/trips', trip.id, 'manifest']"
+                        [attr.aria-label]="'Manifest for ' + trip.route.name"
+                        class="ml-2 text-xs text-muted underline hover:text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                        >Manifest</a
+                      >
+                    }
+                    <!-- The columns hidden below `md`, re-flowed. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ summaryLine(trip) }}
+                    </span>
+                  </td>
+                  <!-- Neutral tone deliberately: ui-status-pill's other
+                       tones mean something (success, warning, danger)
+                       and a service class means none of them. The label
+                       is the entire signal. -->
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-status-pill tone="neutral" [label]="tripClassLabel(trip.trip_class)" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ trip.service_date }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ trip.scheduled_departure_at | date: 'short' }}
+                  </td>
+                  <td [class]="cellClass()">
+                    <!-- No `?? trip.status` fallback: STATUS_LABEL is keyed by
+                         the full status union, so the compiler (NG8102) proves
+                         the fallback dead. A new status breaks the map's own
+                         type instead, which is the guard we actually want. -->
+                    <ui-status-pill
+                      [tone]="statusTone[trip.status]"
+                      [label]="statusLabel[trip.status]"
+                    />
+                  </td>
+                  <!-- Read-only. Assignment is an explicit action in the
+                       row menu now, opening a drawer — it used to be two
+                       inline selects that reassigned on change. -->
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ trip.vehicle?.registration_number ?? '—' }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ trip.driver?.name ?? '—' }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    @if (trip.compliance_warnings.length > 0) {
+                      <ui-status-pill
+                        tone="negative"
+                        [label]="trip.compliance_warnings.length + ' warning(s)'"
+                      />
+                    } @else {
+                      <ui-status-pill tone="positive" label="Compliant" />
+                    }
+                  </td>
+                  <td
+                    [class]="
+                      cellClass() +
+                      ' sticky right-0 bg-surface text-right shadow-[-6px_0_6px_-4px_rgba(15,23,42,0.15)]'
+                    "
+                  >
+                    <ui-action-menu
+                      *appHasPermission="'scheduling.manage'"
+                      [items]="menuItems(trip)"
+                      [label]="'Actions for ' + trip.route.name + ' on ' + trip.service_date"
+                      (selected)="onMenuSelected(trip, $event)"
+                    />
+                  </td>
+                </tr>
               }
-            </td>
-            <td class="px-4 py-2">
-              @if (trip.compliance_warnings.length > 0) {
-                <ui-status-pill
-                  tone="negative"
-                  [label]="trip.compliance_warnings.length + ' warning(s)'"
-                  [title]="trip.compliance_warnings.join('; ')"
-                />
-              } @else {
-                <ui-status-pill tone="positive" label="Compliant" />
-              }
-            </td>
-            <td class="sticky right-0 bg-white px-4 py-2 text-right shadow-[-6px_0_6px_-4px_rgba(15,23,42,0.15)]">
-              @if (canTransition(trip.status)) {
-                <ui-button
-                  *appHasPermission="'scheduling.manage'"
-                  variant="secondary"
-                  (pressed)="changeStatus(trip)"
-                >
-                  Change status
-                </ui-button>
-              }
-            </td>
-          </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
 
-<ng-template #statusBody>
-  <fieldset class="flex flex-col gap-2">
-    <legend class="text-sm font-medium text-slate-700">New status</legend>
-    @for (option of statusOptions(); track option.target) {
-      <label class="flex items-center gap-2 text-sm">
-        <input
-          type="radio"
-          name="trip-status-target"
-          [checked]="statusTarget() === option.target"
-          (change)="setStatusTarget(option.target)"
+<ng-template #detailBody>
+  @if (viewing(); as trip) {
+    <dl class="flex flex-col gap-4 text-sm">
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Status</dt>
+        <dd>
+          <ui-status-pill [tone]="statusTone[trip.status]" [label]="statusLabel[trip.status]" />
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Departure</dt>
+        <dd class="text-default">
+          {{ trip.service_date }} ·
+          {{ trip.scheduled_departure_at | date: 'shortTime' }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Service class</dt>
+        <dd>
+          <ui-status-pill tone="neutral" [label]="tripClassLabel(trip.trip_class)" />
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Vehicle</dt>
+        <dd class="text-default">
+          {{ trip.vehicle?.registration_number ?? 'Not assigned' }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Driver</dt>
+        <dd class="text-default">{{ trip.driver?.name ?? 'Not assigned' }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Compliance</dt>
+        <dd>
+          @if (trip.compliance_warnings.length > 0) {
+            <ul class="flex flex-col gap-1 text-default">
+              @for (warning of trip.compliance_warnings; track warning) {
+                <li>{{ warning }}</li>
+              }
+            </ul>
+          } @else {
+            <ui-status-pill tone="positive" label="Compliant" />
+          }
+        </dd>
+      </div>
+    </dl>
+  }
+</ng-template>
+
+<ng-template #assignBody>
+  @if (assigning(); as trip) {
+    <div class="flex flex-col gap-4">
+      @if (assignmentOptionsReady(trip.business)) {
+        <ui-select
+          label="Vehicle"
+          [options]="vehicleOptionsFor(trip.business)"
+          [ngModel]="pendingVehicleId()"
+          [ngModelOptions]="{ standalone: true }"
+          (ngModelChange)="setPendingVehicle($event)"
         />
-        {{ option.label }}
-      </label>
-    }
-  </fieldset>
-  @if (statusTarget() === 'cancelled') {
-    <div class="mt-4 flex flex-col gap-1">
-      <label for="trip-status-reason" class="text-sm font-medium text-slate-700">Reason</label>
-      <textarea
-        id="trip-status-reason"
-        rows="3"
-        [value]="statusReason()"
-        (input)="setStatusReason($any($event.target).value)"
-        class="rounded-md border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900"
-      ></textarea>
+        <ui-select
+          label="Driver"
+          [options]="driverOptionsFor(trip.business)"
+          [ngModel]="pendingDriverId()"
+          [ngModelOptions]="{ standalone: true }"
+          (ngModelChange)="setPendingDriver($event)"
+        />
+        <ui-button [loading]="assignSaving()" (pressed)="saveAssignment()"
+          >Save assignment</ui-button
+        >
+      } @else {
+        <!-- The selects must not mount before their options resolve: a
+             <select> bound to an id whose <option> does not exist yet
+             silently falls back to no selection, and adding the option
+             later never re-selects it. -->
+        <p class="text-sm text-muted">Loading vehicles and drivers…</p>
+      }
     </div>
   }
+</ng-template>
+
+<ng-template #classBody>
+  <div class="flex flex-col gap-4">
+    <ui-radio-group
+      label="Service class"
+      [options]="tripClassOptions"
+      [ngModel]="pendingClass()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="setPendingClass($event)"
+    />
+    <!-- Said up front rather than only as a 409 after the attempt: the
+         refusal is the common case on any trip that has run for a
+         while, and an operator should know why before pressing. -->
+    <p class="text-sm text-muted">
+      A trip's class can only change while nothing is sold. It must also be a class this route
+      offers, and match any vehicle already assigned.
+    </p>
+  </div>
+</ng-template>
+
+<ng-template #statusBody>
+  <div class="flex flex-col gap-4">
+    <ui-radio-group
+      label="New status"
+      [options]="statusSelectOptions()"
+      [ngModel]="statusTarget()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="setStatusTarget($event)"
+    />
+    @if (statusTarget() === 'cancelled') {
+      <!-- A textarea, not a single-line field: a cancellation reason is
+           shown to passengers and routinely runs past one line. -->
+      <ui-textarea
+        label="Reason"
+        hint="Passengers on this trip see this."
+        [rows]="3"
+        [ngModel]="statusReason()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="setStatusReason($event)"
+      />
+    }
+  </div>
 </ng-template>

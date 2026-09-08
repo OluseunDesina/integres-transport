@@ -15,10 +15,10 @@ async function signIn(page: Page): Promise<void> {
 test.describe('client-admin-app KYC status', () => {
   test('renders an axe-clean KYC status screen behind the nav shell', async ({ page }) => {
     await signIn(page);
-    await page.getByRole('link', { name: 'KYC Status' }).click();
+    await page.getByRole('link', { name: 'KYC status' }).click();
 
     await expect(page).toHaveURL(/\/kyc$/);
-    await expect(page.getByRole('heading', { name: 'KYC Status' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'KYC status' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Upload document' })).toBeVisible();
 
     const results = await new AxeBuilder({ page }).analyze();
@@ -44,7 +44,11 @@ test.describe('client-admin-app KYC status', () => {
     // the dedicated queue-review Client/Business seed_e2e_users resets) —
     // this only asserts a matching document is present, not that it's
     // the only one.
-    await expect(page.getByText('proof_of_address').first()).toBeVisible();
+    // The label, not the raw enum: slice 4 fixed the document list to
+    // render "Proof of address" (iteration-12 F5) — the same value was
+    // written two ways on one screen — and this assertion was left
+    // behind.
+    await expect(page.getByText('Proof of address').first()).toBeVisible();
     await expect(page.getByText('submitted', { exact: true })).toBeVisible();
 
     // The submit button's `disabled:opacity-50` (ui-button) animates back

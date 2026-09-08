@@ -42,4 +42,53 @@ describe('WhiteLabelResolverService', () => {
 
     expect(service.clientId()).toBeNull();
   });
+
+  // --- Branding (docs/specs/14-design-system-and-ui-rebuild.md) ---
+
+  it('carries the branding the endpoint has always returned', async () => {
+    apiClient.GET.and.resolveTo({
+      data: {
+        client_id: 'client-1',
+        name: 'Acme Transit',
+        logo: 'https://cdn.example/logo.svg',
+        primary_color: '#7c3aed',
+        secondary_color: '#f59e0b',
+      },
+    });
+
+    await service.resolve();
+
+    expect(service.branding()).toEqual({
+      name: 'Acme Transit',
+      logo: 'https://cdn.example/logo.svg',
+      primary: '#7c3aed',
+      secondary: '#f59e0b',
+    });
+  });
+
+  it('normalises unconfigured blank strings to null', async () => {
+    // These are `blank=True` CharFields server-side, so "not configured"
+    // arrives as '' rather than null — passing that on would hand the
+    // theme service a falsy colour to reason about.
+    apiClient.GET.and.resolveTo({
+      data: { client_id: 'client-1', name: 'Acme', logo: '', primary_color: '', secondary_color: '' },
+    });
+
+    await service.resolve();
+
+    expect(service.branding()).toEqual({
+      name: 'Acme',
+      logo: null,
+      primary: null,
+      secondary: null,
+    });
+  });
+
+  it('leaves branding null when the domain is unknown', async () => {
+    apiClient.GET.and.resolveTo({ error: { detail: 'Not found.' } });
+
+    await service.resolve();
+
+    expect(service.branding()).toBeNull();
+  });
 });

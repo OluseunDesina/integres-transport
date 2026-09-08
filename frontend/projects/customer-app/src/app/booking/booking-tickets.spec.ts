@@ -16,6 +16,7 @@ function makeTicket(overrides: Record<string, unknown> = {}) {
     issued_at: '2026-08-18T00:00:00Z',
     expires_at: '2026-08-18T06:00:00Z',
     boarded_at: null,
+    trip_class: 'standard',
     ...overrides,
   };
 }
@@ -80,6 +81,22 @@ describe('BookingTickets', () => {
     expect(images.length).toBe(2);
   });
 
+  it('names the service class on the ticket', async () => {
+    // docs/specs/15-trip-classes.md slice 3. It comes from the API, not
+    // from router state: this screen is deep-linkable by design, so
+    // there is nothing carried into it to read.
+    apiClient.GET.and.resolveTo({
+      data: { count: 1, results: [makeTicket({ trip_class: 'exclusive' })] },
+    });
+
+    await createComponent();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const terms = [...host.querySelectorAll('dt')].map((dt) => dt.textContent?.trim());
+    expect(terms).toContain('Service');
+    expect(host.querySelector('dl')?.textContent).toContain('Exclusive');
+  });
+
   it('shows a loading state before the response resolves', async () => {
     let resolveGet!: (value: { data: { count: number; results: unknown[] } }) => void;
     apiClient.GET.and.returnValue(
@@ -92,7 +109,12 @@ describe('BookingTickets', () => {
     component = fixture.componentInstance;
     fixture.detectChanges();
 
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Loading tickets');
+    // A ui-skeleton now, not the word "Loading…" — the placeholder is
+    // aria-hidden by design, so the wait is announced on the region.
+    const region = (fixture.nativeElement as HTMLElement).querySelector('[aria-busy="true"]');
+    expect(region).not.toBeNull();
+    expect(region?.getAttribute('aria-label')).toBe('Loading tickets');
+    expect(region?.querySelector('ui-skeleton')).not.toBeNull();
 
     resolveGet({ data: { count: 0, results: [] } });
     await fixture.whenStable();

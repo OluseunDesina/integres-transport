@@ -9,19 +9,24 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
 import {
   Alert,
   Button,
   CONFIRM_DIALOG_TITLE_ID,
   ConfirmDialog,
   EmptyState,
+  PageHeader,
   Paginator,
+  RadioGroup,
   StatusPill,
   Table,
+  Textarea,
+  plural,
+  summaryLine,
 } from '@shared-ui';
-import type { ConfirmDialogData, ConfirmDialogResult } from '@shared-ui';
+import type { ConfirmDialogData, ConfirmDialogResult, SelectOption } from '@shared-ui';
 
 import { KycQueueStore, type ClientKycQueueItem } from '../shared/data/store/kyc-queue.store';
 
@@ -42,19 +47,38 @@ function extractFirstErrorMessage(error: unknown): string {
 @Component({
   selector: 'app-kyc-queue',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [Alert, Button, EmptyState, Paginator, StatusPill, Table],
+  imports: [
+    FormsModule,
+    Alert,
+    Button,
+    EmptyState,
+    PageHeader,
+    Paginator,
+    RadioGroup,
+    StatusPill,
+    Table,
+    Textarea,
+  ],
   templateUrl: './kyc-queue.html',
 })
 export class KycQueue implements OnInit {
   protected readonly store = inject(KycQueueStore);
   private readonly dialog = inject(Dialog);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   @ViewChild('decideBody') private readonly decideBody!: TemplateRef<unknown>;
 
+  protected readonly decisionOptions: SelectOption[] = [
+    { value: 'approve', label: 'Approve' },
+    { value: 'reject', label: 'Reject' },
+  ];
+
   protected readonly decision = signal<'approve' | 'reject'>('approve');
   protected readonly reason = signal('');
+  /** Whether the reason box has been touched, so an empty one is not
+   * red the instant Reject is chosen — the confirm button is already
+   * disabled, which is the non-accusatory signal. */
+  protected readonly reasonTouched = signal(false);
   protected readonly confirmDisabled = computed(
     () => this.decision() === 'reject' && !this.reason().trim()
   );
@@ -71,17 +95,35 @@ export class KycQueue implements OnInit {
     void this.store.changePage(offset);
   }
 
+  /** Why the confirm button is disabled, once the reviewer has actually
+   * engaged with the field. `ui-textarea` renders nothing unless the
+   * parent binds both `invalid` and `errorMessage` — spec 11's recorded
+   * trap — so this is what makes the requirement visible rather than
+   * only enforced. */
+  protected reasonError(): string | null {
+    return this.reasonTouched() && !this.reason().trim()
+      ? 'Give a reason — the client sees it.'
+      : null;
+  }
+
   protected setDecision(value: 'approve' | 'reject'): void {
     this.decision.set(value);
   }
 
   protected setReason(value: string): void {
+    this.reasonTouched.set(true);
     this.reason.set(value);
+  }
+
+  /** The columns hidden below `md`, re-flowed under the client name. */
+  protected summaryFor(client: ClientKycQueueItem): string {
+    return summaryLine([client.email, plural(client.documents.length, 'document')]);
   }
 
   protected review(client: ClientKycQueueItem): void {
     this.decision.set('approve');
     this.reason.set('');
+    this.reasonTouched.set(false);
 
     const ref = this.dialog.open<boolean, ConfirmDialogData>(ConfirmDialog, {
       ariaModal: true,
@@ -113,7 +155,6 @@ export class KycQueue implements OnInit {
     const { error } = await this.api.POST('/api/v1/super-admin/kyc-queue/{client_id}/decide/', {
       params: { path: { client_id: clientId } },
       body: { decision: this.decision(), reason: this.reason() || undefined },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     return error ? { ok: false, error: extractFirstErrorMessage(error) } : { ok: true };

@@ -42,12 +42,20 @@ describe('AppShell', () => {
       (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLAnchorElement>('nav a')
     );
     expect(links.map((a) => a.textContent?.trim())).toEqual([
-      'Search trips',
-      'My bookings',
+      'Search',
+      'Bookings',
       'Tap & Go',
       'Journeys',
       'Payments',
       'Wallet',
+      // Spec 17 slice 3. One link, not two: "Report an issue" is a
+      // button on this screen and a row action in my-bookings, because
+      // the destination is the record and reporting is the action.
+      //
+      // The labels lost "My " and "trips" in the same slice — measured,
+      // not guessed: seven of the old labels overflowed the 587px nav
+      // at 1200px and wrapped the bar onto a second row.
+      'Reports',
     ]);
     expect(links.map((a) => a.getAttribute('href'))).toEqual([
       '/search',
@@ -56,6 +64,7 @@ describe('AppShell', () => {
       '/journeys',
       '/payments',
       '/wallet',
+      '/my-reports',
     ]);
   });
 

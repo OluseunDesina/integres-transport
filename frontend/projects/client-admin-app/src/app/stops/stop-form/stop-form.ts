@@ -9,25 +9,17 @@ import {
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  FormSection,
+  PageHeader,
+  TextField,
+} from '@shared-ui';
 
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 import { StopStore } from '../../shared/data/store/stop.store';
-
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
+import { applyServerErrors, clearServerErrors, fieldErrorMessage } from '../../shared/form-errors';
 
 /**
  * One component for create (`stops/new`) and edit (`stops/:id/edit`) —
@@ -39,7 +31,9 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-stop-form',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, RouterLink, Alert, Button, TextField],
+  imports: [ReactiveFormsModule, RouterLink, Alert,
+    FormSection,
+    PageHeader, Button, TextField],
   templateUrl: './stop-form.html',
 })
 export class StopForm implements OnInit {
@@ -47,7 +41,6 @@ export class StopForm implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   protected readonly store = inject(StopStore);
 
@@ -117,10 +110,8 @@ export class StopForm implements OnInit {
 
     this.submitting.set(true);
     this.errorMessage.set(null);
+    clearServerErrors(this.form);
     const values = this.form.getRawValue();
-    const authHeader = {
-      Authorization: `Bearer ${this.authStore.accessToken()}`,
-    };
     const id = this.stopId();
 
     const { data, error } = id
@@ -132,7 +123,6 @@ export class StopForm implements OnInit {
             latitude: values.latitude || null,
             longitude: values.longitude || null,
           },
-          headers: authHeader,
         })
       : await this.api.POST('/api/v1/stops/', {
           body: {
@@ -142,17 +132,17 @@ export class StopForm implements OnInit {
             latitude: values.latitude || null,
             longitude: values.longitude || null,
           },
-          headers: authHeader,
         });
 
     this.submitting.set(false);
 
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(
+        applyServerErrors(
+          this.form,
           error,
-          'Could not save this stop. Check your details and try again.',
-        ),
+          'Could not save this stop. Check your details and try again.'
+        )
       );
       return;
     }
@@ -160,11 +150,10 @@ export class StopForm implements OnInit {
     await this.router.navigate(['/stops']);
   }
 
-  protected fieldError(field: 'business' | 'name'): string | null {
-    const control = this.form.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+  /** Every field, not just those with a validator: any of them can
+   * come back rejected by the server, and `fieldErrorMessage`
+   * surfaces that the same way it surfaces a client-side failure. */
+  protected fieldError(field: 'business' | 'name' | 'address' | 'latitude' | 'longitude'): string | null {
+    return fieldErrorMessage(this.form.controls[field]);
   }
 }

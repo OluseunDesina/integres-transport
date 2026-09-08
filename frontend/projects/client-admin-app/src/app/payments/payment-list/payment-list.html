@@ -1,53 +1,220 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Payments</h1>
-  </div>
+  <ui-page-header
+    title="Payments"
+    description="Every payment passengers have initiated against this business's bookings."
+  />
 
-  <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-    <ui-select
-      label="Status"
-      [options]="statusFilterOptions"
-      [ngModel]="store.query().status ?? ''"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="onStatusFilterChange($event)"
-    />
-  </div>
+  @if (exports.error(); as message) {
+    <!-- Inline, never only transient: an export refusal names what to
+         change, and a message that disappears cannot be acted on. -->
+    <ui-alert>{{ message }}</ui-alert>
+  }
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state
-      title="No payments found"
-      description="Payments initiated by passengers for this business's bookings will appear here."
-    />
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Created</th>
-          <th class="px-4 py-2">Booking</th>
-          <th class="px-4 py-2">Amount</th>
-          <th class="px-4 py-2">Status</th>
-          <th class="px-4 py-2">PSP reference</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (payment of store.items(); track payment.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2">{{ payment.created_at | date: 'short' }}</td>
-            <td class="px-4 py-2 font-mono text-xs text-slate-500">{{ truncatedId(payment.booking) }}</td>
-            <td class="px-4 py-2">{{ amountLabel(payment) }}</td>
-            <td class="px-4 py-2">
-              <ui-status-pill
-                [tone]="statusTone[payment.status]"
-                [label]="statusLabel[payment.status]"
-              />
-            </td>
-            <td class="px-4 py-2 font-mono text-xs text-slate-500">{{ payment.psp_reference || '—' }}</td>
-          </tr>
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search payments"
+        placeholder="Search by PSP reference…"
+        ariaLabel="Payment filters"
+        [chips]="allChips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      >
+        <div filters class="flex flex-wrap items-start gap-3">
+          <div class="w-48">
+            <ui-select
+              label="Status"
+              [options]="statusFilterOptions"
+              [ngModel]="filters.extra('status')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onStatusFilterChange($event)"
+            />
+          </div>
+          <div class="w-44">
+            <ui-text-field
+              label="From"
+              type="date"
+              [ngModel]="period.dateFrom()"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onDateFromChange($event)"
+            />
+          </div>
+          <div class="w-44">
+            <ui-text-field
+              label="To"
+              type="date"
+              hint="Leave both empty to list every payment."
+              [ngModel]="period.dateTo()"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onDateToChange($event)"
+            />
+          </div>
+        </div>
+      </ui-filter-bar>
+      <div class="flex items-center gap-2">
+        <ui-export-button
+          [scopes]="['all']"
+          label="Export these payments as CSV"
+          [pending]="exports.isPending('transactions')"
+          (exportRequested)="exportRows()"
+        />
+        <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+      </div>
+    </div>
+
+    <!--
+      The strip and the table beneath it are refreshed from one query, so
+      they cannot describe different rows — the frontend half of the
+      guarantee the shared backend filter module makes.
+    -->
+    @if (summary.error(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    } @else if (summary.data(); as metrics) {
+      <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <ui-stat label="Payments" [hint]="metrics.counts.succeeded + ' succeeded'">
+          {{ metrics.counts.total }}
+        </ui-stat>
+        @for (money of metrics.money; track money.currency) {
+          <ui-stat label="Collected" [hint]="money.transaction_volume + ' succeeded payments'">
+            {{ money.currency }} {{ money.collected }}
+          </ui-stat>
         }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+        <ui-stat label="Failed" [hint]="metrics.counts.pending + ' still pending'">
+          {{ metrics.counts.failed }}
+        </ui-stat>
+        <!-- Its own facet, not a status: there is no refund service, so
+             nothing is netted off automatically and this is a queue of
+             things a human still has to reconcile. -->
+        <ui-stat label="Needs manual refund" hint="No refund service exists yet.">
+          {{ metrics.counts.requires_manual_refund }}
+        </ui-stat>
+      </div>
+    }
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No payments yet"
+        description="Payments initiated by passengers for this business's bookings will appear here."
+      />
+    } @else {
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Payments"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No payments match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Created</th>
+              <th class="hidden py-2 lg:table-cell">Booking</th>
+              <th class="hidden py-2 md:table-cell">Amount</th>
+              <th class="py-2">Status</th>
+              <th class="hidden py-2 lg:table-cell">PSP reference</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="8rem" /></td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="5rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="5rem" /></td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="10rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
+              }
+            } @else {
+              @for (payment of store.items(); track payment.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    {{ payment.created_at | date: 'short' }}
+                    <!-- The Amount column, hidden below `md`. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ amountLabel(payment) }}
+                    </span>
+                  </td>
+                  <td [class]="cellClass() + ' hidden font-mono text-xs text-muted lg:table-cell'">
+                    {{ truncatedId(payment.booking) }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ amountLabel(payment) }}
+                  </td>
+                  <td [class]="cellClass()">
+                    <ui-status-pill
+                      [tone]="statusTone[payment.status]"
+                      [label]="statusLabel[payment.status]"
+                    />
+                  </td>
+                  <td [class]="cellClass() + ' hidden font-mono text-xs text-muted lg:table-cell'">
+                    {{ payment.psp_reference || '—' }}
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    <ui-action-menu
+                      [items]="menuItems"
+                      [label]="'Actions for payment ' + (payment.psp_reference || payment.id)"
+                      (selected)="onMenuSelected(payment)"
+                    />
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
+
+<!-- The PSP reference is truncated in the table to keep the row
+     scannable; a dispute needs the whole thing, which is what this is
+     for. -->
+<ng-template #detailBody>
+  @if (selected(); as payment) {
+    <dl class="flex flex-col gap-4 text-sm">
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Status</dt>
+        <dd>
+          <ui-status-pill
+            [tone]="statusTone[payment.status]"
+            [label]="statusLabel[payment.status]"
+          />
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">PSP reference</dt>
+        <dd class="font-mono text-xs break-all text-default">
+          {{ payment.psp_reference || 'Not issued' }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Booking</dt>
+        <dd class="font-mono text-xs break-all text-default">
+          {{ payment.booking ?? 'None — this was a wallet top-up' }}
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Created</dt>
+        <dd class="text-default">{{ payment.created_at | date: 'medium' }}</dd>
+      </div>
+    </dl>
+  }
+</ng-template>

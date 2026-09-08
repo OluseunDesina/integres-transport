@@ -1,54 +1,161 @@
 <div class="flex flex-col gap-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-lg font-semibold text-slate-900">Businesses</h1>
-    <ui-button *appHasPermission="'business.manage'" (pressed)="goToNewBusiness()">New business</ui-button>
-  </div>
+  <ui-page-header
+    title="Businesses"
+    description="The operating businesses under this client. Each one has its own routes, fleet and fares."
+  >
+    <ui-button actions *appHasPermission="'business.manage'" (pressed)="goToNewBusiness()"
+      >New business</ui-button
+    >
+  </ui-page-header>
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
-  } @else if (store.isEmpty()) {
-    <ui-empty-state
-      title="No businesses yet"
-      description="Add your first business to start managing routes and bookings."
-    >
-      <ui-button *appHasPermission="'business.manage'" (pressed)="goToNewBusiness()">New business</ui-button>
-    </ui-empty-state>
   } @else {
-    <ui-table [loading]="store.loading()">
-      <thead>
-        <tr class="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-          <th class="px-4 py-2">Name</th>
-          <th class="px-4 py-2">Vertical</th>
-          <th class="px-4 py-2">Currency</th>
-          <th class="px-4 py-2">Timezone</th>
-          <th class="px-4 py-2">Booking mode</th>
-          <th class="px-4 py-2">KYB status</th>
-          <th class="px-4 py-2"><span class="sr-only">Actions</span></th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (business of store.items(); track business.id) {
-          <tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-            <td class="px-4 py-2 font-medium text-slate-900">{{ business.name }}</td>
-            <td class="px-4 py-2">{{ business.vertical }}</td>
-            <td class="px-4 py-2">{{ business.currency }}</td>
-            <td class="px-4 py-2">{{ business.timezone }}</td>
-            <td class="px-4 py-2">{{ business.booking_mode_default }}</td>
-            <td class="px-4 py-2">
-              <ui-status-pill [label]="business.kyb_status" [tone]="kybStatusTone(business.kyb_status)" />
-            </td>
-            <td class="px-4 py-2 text-right">
-              <a
-                *appHasPermission="'business.manage'"
-                [routerLink]="['/businesses', business.id, 'edit']"
-                class="text-sm font-medium text-slate-700 hover:text-slate-900"
-                >Edit</a
-              >
-            </td>
-          </tr>
-        }
-      </tbody>
-    </ui-table>
-    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search businesses"
+        placeholder="Search by name…"
+        ariaLabel="Business filters"
+        [chips]="filters.chips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      />
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No businesses yet"
+        description="Add your first business to start managing routes and bookings."
+      >
+        <ui-button *appHasPermission="'business.manage'" (pressed)="goToNewBusiness()"
+          >New business</ui-button
+        >
+      </ui-empty-state>
+    } @else {
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Businesses"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No businesses match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Name</th>
+              <th class="hidden py-2 md:table-cell">Vertical</th>
+              <th class="hidden py-2 lg:table-cell">Currency</th>
+              <th class="hidden py-2 lg:table-cell">Timezone</th>
+              <th class="hidden py-2 lg:table-cell">Booking mode</th>
+              <th class="py-2">KYB status</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="10rem" /></td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="5rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="3rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="7rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="5rem" /></td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
+              }
+            } @else {
+              @for (business of store.items(); track business.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    {{ business.name }}
+                    <!-- The Vertical column, hidden below `md`. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ business.vertical }}
+                    </span>
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    {{ business.vertical }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ business.currency }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ business.timezone }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ business.booking_mode_default }}
+                  </td>
+                  <td [class]="cellClass()">
+                    <ui-status-pill
+                      [label]="business.kyb_status"
+                      [tone]="kybStatusTone(business.kyb_status)"
+                    />
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    <!-- No longer gated on `canManage`: the menu always
+                         carries "View details", which is where the
+                         columns hidden below `lg` are recoverable. -->
+                    <ui-action-menu
+                      [items]="menuItems()"
+                      [label]="'Actions for ' + business.name"
+                      (selected)="onMenuSelected(business, $event)"
+                    />
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
   }
 </div>
+
+<ng-template #detailBody>
+  @if (selected(); as business) {
+    <dl class="flex flex-col gap-4 text-sm">
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">KYB status</dt>
+        <dd>
+          <ui-status-pill
+            [label]="business.kyb_status"
+            [tone]="kybStatusTone(business.kyb_status)"
+          />
+        </dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Vertical</dt>
+        <dd class="text-default">{{ business.vertical }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Currency</dt>
+        <dd class="text-default">{{ business.currency }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Timezone</dt>
+        <dd class="text-default">{{ business.timezone }}</dd>
+      </div>
+      <div class="flex flex-col gap-1">
+        <dt class="font-medium text-strong">Booking mode</dt>
+        <dd class="text-default">{{ business.booking_mode_default }}</dd>
+      </div>
+    </dl>
+  }
+</ng-template>

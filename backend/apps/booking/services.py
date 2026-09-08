@@ -2,11 +2,13 @@
 docs/specs/4-fares-seating-booking.md §4.
 """
 
+import secrets
 from decimal import Decimal
 from typing import Any, TypedDict
 
 from django.db import IntegrityError, transaction
 
+from apps.businesses.models import Business
 from apps.core.audit import record_audit_event
 from apps.core.idempotency import IdempotencyKeyConflict, hash_request
 from apps.core.models import IdempotencyKey
@@ -16,12 +18,24 @@ from apps.identity.models import User
 from apps.network.models import Stop
 from apps.scheduling.models import Trip
 from apps.seating.models import Seat, SeatReservation
-from apps.seating.services import create_reservation
-from apps.ticketing.services import issue_ticket
+from apps.seating.services import create_reservation, get_availability, segment_sequence_range
+from apps.ticketing.capacity import TripNotConfigured, TripSoldOut, check_capacity
+from apps.ticketing.models import Ticket
+from apps.ticketing.services import issue_open_seating_tickets, issue_ticket
 
 from .models import Booking
 
 _IDEMPOTENCY_ENDPOINT = "booking.create"
+
+# docs/specs/18-manifest-and-staff-booking.md slice 1. Deliberately the
+# same alphabet, length and retry count as `apps.incidents.services` —
+# two references a human reads aloud should not have two different
+# shapes, and Crockford base32 is what that one already chose (no
+# I/L/O/U, so nothing is ambiguous over a phone).
+_REFERENCE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+_REFERENCE_LENGTH = 6
+_REFERENCE_ATTEMPTS = 5
+_REFERENCE_CONSTRAINT = "unique_booking_reference_per_business"
 
 
 class SeatRequest(TypedDict):
@@ -30,7 +44,53 @@ class SeatRequest(TypedDict):
     to_stop: Stop
 
 
-def _booking_request_hash(*, trip: Trip, passenger: User, seats: list[SeatRequest]) -> str:
+def _generate_reference() -> str:
+    body = "".join(secrets.choice(_REFERENCE_ALPHABET) for _ in range(_REFERENCE_LENGTH))
+    return f"BKG-{body}"
+
+
+def _create_booking_row(**fields: Any) -> Booking:
+    """Create a `Booking`, retrying on a reference collision.
+
+    Each attempt gets its own nested `transaction.atomic()`. That is
+    load-bearing twice over here, not once:
+
+    1. An `IntegrityError` poisons the surrounding transaction, so a
+       retry without a savepoint would fail on the very next statement
+       with `TransactionManagementError` rather than succeeding — the
+       reason `apps.incidents.services._create_with_reference` has one.
+    2. `create_booking` runs this **inside** its own
+       `transaction.atomic()`, whose `except IntegrityError` handler
+       exists to reconcile an idempotency-key race. Without the
+       savepoint a reference collision would escape into that handler
+       and be reported as a duplicate submission, which it is not.
+
+    Only a collision on this specific constraint is retried; anything
+    else propagates immediately rather than being tried five times and
+    then reported as if it had been a collision.
+    """
+    for attempt in range(_REFERENCE_ATTEMPTS):
+        try:
+            with transaction.atomic():
+                return Booking.objects.create(reference=_generate_reference(), **fields)
+        except IntegrityError as exc:
+            if _REFERENCE_CONSTRAINT not in str(exc) or attempt == _REFERENCE_ATTEMPTS - 1:
+                raise
+    raise AssertionError("unreachable: the final attempt either returns or raises")
+
+
+def _booking_request_hash(
+    *,
+    trip: Trip,
+    passenger: User,
+    seats: list[SeatRequest],
+    passenger_count: int | None = None,
+    from_stop: Stop | None = None,
+    to_stop: Stop | None = None,
+) -> str:
+    """Covers the open-seating fields too, so a replay under one
+    Idempotency-Key with a *different* passenger count is caught as a
+    conflict rather than quietly returning the first booking."""
     return hash_request(
         {
             "trip": str(trip.id),
@@ -43,6 +103,9 @@ def _booking_request_hash(*, trip: Trip, passenger: User, seats: list[SeatReques
                 }
                 for seat_request in seats
             ],
+            "passenger_count": passenger_count,
+            "from_stop": None if from_stop is None else str(from_stop.id),
+            "to_stop": None if to_stop is None else str(to_stop.id),
         }
     )
 
@@ -52,8 +115,70 @@ def _booking_from_idempotency_record(record: IdempotencyKey) -> Booking:
     return Booking.objects.get(pk=response_body["booking_id"])
 
 
+def is_quick_book(trip: Trip) -> bool:
+    """Reservation mode with seat *choice* turned off — the operator
+    assigns seats, the passenger only says how many
+    (`Business.seat_selection_enabled`, docs/specs/10-booking-modes.md).
+
+    Read live off the Business rather than snapshotted onto the Trip
+    like `booking_mode` and `fare_collection_mode` are. Those two are
+    snapshotted because they describe *what was sold*, and changing
+    them under an existing booking would rewrite its terms. This one
+    describes only how the seat gets picked; a booking made either way
+    ends up holding the same named seats, so an operator who flips it
+    mid-week does not invalidate anything already sold.
+    """
+    return (
+        trip.booking_mode != Business.BookingMode.OPEN_SEATING
+        and not trip.business.seat_selection_enabled
+    )
+
+
+def _allocate_seats(
+    *, trip: Trip, from_stop: Stop, to_stop: Stop, passenger_count: int
+) -> list[SeatRequest]:
+    """Picks `passenger_count` free seats for a quick-book request.
+
+    All-or-nothing (the spec's own edge case): fewer free seats than
+    passengers is refused outright rather than partially allocated, so a
+    group is never split across a booking that half-succeeded.
+
+    Ordering is explicit rather than inherited from `Seat.Meta.ordering`,
+    which is `-created_at` — allocating the most recently *added* seat
+    first would scatter a group around the vehicle and hand out the odd
+    seat a later seat-map edit appended. Row/column order seats a group
+    together, and falls back to seat number for vehicle types with no
+    geometry (both are valid layouts — see `seat-picker`'s own note).
+
+    Unlike open seating, this path has a real database constraint behind
+    it: two concurrent quick books that pick the same seat collide on
+    the GiST exclusion constraint in `create_reservation` and one rolls
+    back whole (docs/adr/0004). No lock is needed here.
+    """
+    availability = get_availability(trip=trip, from_stop=from_stop, to_stop=to_stop)
+    if not availability:
+        raise TripNotConfigured("Seating is not yet configured for this trip.")
+    free = [entry["seat"] for entry in availability if entry["is_available"]]
+    free.sort(
+        key=lambda seat: (seat.row is None, seat.row or 0, seat.column or 0, seat.seat_number)
+    )
+    if len(free) < passenger_count:
+        raise TripSoldOut("There are not enough seats left on this departure.")
+    return [
+        {"seat": seat, "from_stop": from_stop, "to_stop": to_stop}
+        for seat in free[:passenger_count]
+    ]
+
+
 def create_booking(
-    *, trip: Trip, passenger: User, seats: list[SeatRequest], idempotency_key: str
+    *,
+    trip: Trip,
+    passenger: User,
+    seats: list[SeatRequest] | None = None,
+    passenger_count: int | None = None,
+    from_stop: Stop | None = None,
+    to_stop: Stop | None = None,
+    idempotency_key: str,
 ) -> Booking:
     """The transaction described in the spec's §3: resolves each seat's
     fare (all-or-nothing — `FareNotConfigured` on any segment aborts
@@ -88,7 +213,16 @@ def create_booking(
     `apps.seating.services.create_reservation` already established for
     the exclusion constraint.
     """
-    request_hash = _booking_request_hash(trip=trip, passenger=passenger, seats=seats)
+    open_seating = trip.booking_mode == Business.BookingMode.OPEN_SEATING
+    seats = seats or []
+    request_hash = _booking_request_hash(
+        trip=trip,
+        passenger=passenger,
+        seats=seats,
+        passenger_count=passenger_count,
+        from_stop=from_stop,
+        to_stop=to_stop,
+    )
     client_id = str(trip.client_id)
 
     existing = IdempotencyKey.objects.filter(
@@ -104,6 +238,69 @@ def create_booking(
     try:
         with transaction.atomic():
             business = trip.business
+
+            if open_seating:
+                assert passenger_count is not None
+                assert from_stop is not None and to_stop is not None
+                # The Trip row lock, per docs/adr/0008. It cannot
+                # prevent an oversell on its own — see
+                # apps.ticketing.capacity's module docstring for exactly
+                # what it does and does not guarantee — but it makes the
+                # count below consistent between concurrent bookings.
+                Trip.objects.select_for_update().get(pk=trip.pk)
+                from_sequence, to_sequence = segment_sequence_range(
+                    route_id=trip.route_id, from_stop=from_stop, to_stop=to_stop
+                )
+                check_capacity(
+                    trip=trip,
+                    from_sequence=from_sequence,
+                    to_sequence=to_sequence,
+                    places=passenger_count,
+                )
+                unit_fare = get_fare(trip=trip, from_stop=from_stop, to_stop=to_stop)
+                booking = _create_booking_row(
+                    client=trip.client,
+                    business=business,
+                    trip=trip,
+                    passenger=passenger,
+                    status=Booking.Status.PENDING_PAYMENT,
+                    total_amount=unit_fare.amount * passenger_count,
+                    currency=business.currency,
+                    passenger_count=passenger_count,
+                    from_stop=from_stop,
+                    to_stop=to_stop,
+                )
+                total_amount: Decimal = booking.total_amount
+                IdempotencyKey.objects.create(
+                    client_id=client_id,
+                    endpoint=_IDEMPOTENCY_ENDPOINT,
+                    key=idempotency_key,
+                    request_hash=request_hash,
+                    response_status=201,
+                    response_body={"booking_id": str(booking.id)},
+                )
+                record_audit_event(
+                    actor=passenger,
+                    action="booking.created",
+                    target=booking,
+                    total_amount=str(total_amount),
+                )
+                return booking
+
+            if is_quick_book(trip):
+                assert passenger_count is not None
+                assert from_stop is not None and to_stop is not None
+                # Allocated here, inside the transaction, rather than by
+                # the caller: the seats a request is given must be free
+                # at the moment they are reserved, not at the moment the
+                # body was validated.
+                seats = _allocate_seats(
+                    trip=trip,
+                    from_stop=from_stop,
+                    to_stop=to_stop,
+                    passenger_count=passenger_count,
+                )
+
             # Purchase-time quote — `as_of` defaults to now inside
             # get_fare, so a fare scheduled for next month does not
             # affect what this booking pays.
@@ -115,9 +312,9 @@ def create_booking(
                 )
                 for seat_request in seats
             ]
-            total_amount: Decimal = sum((quote.amount for quote in quotes), Decimal("0"))
+            total_amount = sum((quote.amount for quote in quotes), Decimal("0"))
 
-            booking = Booking.objects.create(
+            booking = _create_booking_row(
                 client=trip.client,
                 business=business,
                 trip=trip,
@@ -125,6 +322,10 @@ def create_booking(
                 status=Booking.Status.PENDING_PAYMENT,
                 total_amount=total_amount,
                 currency=business.currency,
+                # One place per seat — the number of passengers on a
+                # reservation booking *is* the number of seats, which is
+                # why the API refuses a body carrying both.
+                passenger_count=len(seats),
             )
             for seat_request, quote in zip(seats, quotes, strict=True):
                 create_reservation(
@@ -223,20 +424,94 @@ def mark_booking_paid(*, booking: Booking) -> tuple[Booking, bool]:
             return booking, False
         booking.status = Booking.Status.PAID
         booking.save(update_fields=["status"])
-        # Fetched before the bulk .update() below, since .update() does
-        # not return individual instances — apps.ticketing.services.issue_ticket
-        # needs one call per SeatReservation (docs/specs/6-ticketing.md:
-        # a Booking may hold several seats, and each needs its own
-        # independently scannable Ticket).
-        held_reservations = list(
-            SeatReservation.all_objects.filter(booking=booking, status=SeatReservation.Status.HELD)
+
+        trip = Trip.all_objects.select_related("route", "business", "vehicle__vehicle_type").get(
+            pk=booking.trip_id
         )
-        SeatReservation.all_objects.filter(
-            booking=booking, status=SeatReservation.Status.HELD
-        ).update(status=SeatReservation.Status.CONFIRMED)
-        for reservation in held_reservations:
-            issue_ticket(booking=booking, seat_reservation=reservation)
+        if trip.booking_mode == Business.BookingMode.OPEN_SEATING:
+            # The same Trip row lock create_booking takes, for the same
+            # reason: it makes the capacity count consistent between
+            # concurrent issuances. It does not refuse — the money is
+            # already taken. See apps.ticketing.capacity.
+            Trip.all_objects.select_for_update().get(pk=trip.pk)
+            # Guard against double issuance: mark_booking_paid already
+            # no-ops on a non-pending booking, but the two paths that
+            # can reach PAID (webhook, wallet) make belt-and-braces
+            # cheap here, and duplicate tickets would each count against
+            # capacity.
+            if not Ticket.all_objects.filter(booking=booking).exists():
+                booking_from_stop = booking.from_stop
+                booking_to_stop = booking.to_stop
+                assert booking_from_stop is not None
+                assert booking_to_stop is not None
+                issue_open_seating_tickets(
+                    booking=booking,
+                    from_stop=booking_from_stop,
+                    to_stop=booking_to_stop,
+                    passenger_count=booking.passenger_count,
+                )
+        else:
+            # Fetched before the bulk .update() below, since .update() does
+            # not return individual instances — apps.ticketing.services.issue_ticket
+            # needs one call per SeatReservation (docs/specs/6-ticketing.md:
+            # a Booking may hold several seats, and each needs its own
+            # independently scannable Ticket).
+            held_reservations = list(
+                SeatReservation.all_objects.filter(
+                    booking=booking, status=SeatReservation.Status.HELD
+                )
+            )
+            SeatReservation.all_objects.filter(
+                booking=booking, status=SeatReservation.Status.HELD
+            ).update(status=SeatReservation.Status.CONFIRMED)
+            for reservation in held_reservations:
+                issue_ticket(booking=booking, seat_reservation=reservation)
         record_audit_event(
             actor=None, action="booking.paid", target=booking, client_id=str(booking.client_id)
+        )
+    return booking, True
+
+
+def mark_booking_completed_if_fully_boarded(*, booking: Booking) -> tuple[Booking, bool]:
+    """Called from `apps.ticketing.services.validate_ticket` right after
+    it boards a Ticket — via a function-local import there, not a
+    module-level one, since this module already imports
+    `apps.ticketing.services` at the top (for `issue_ticket`) and a
+    module-level import in the other direction would be circular.
+
+    Ticket-boarding-driven, not `Trip.status`-driven: a Trip only
+    reaches `COMPLETED` via a manual staff/driver action with no sweep
+    behind it (see `apps.scheduling.services.transition_trip_status`),
+    so tying this to it would mean a booking might never complete even
+    after its passenger genuinely boarded and rode. Boarding every
+    Ticket on a Booking is the one signal that's both automatic and
+    specific to this passenger.
+
+    Same guard-and-no-op, `platform_staff_bypass()` +
+    `select_for_update()` shape as `mark_booking_paid`, above, and the
+    same `(booking, did_transition)` return reasoning: two different
+    validator devices can race to board the last two seats on the same
+    multi-seat booking, so a caller needs to tell "I just completed
+    this booking" apart from "someone else's concurrent scan already
+    did" — proven, not assumed, by this slice's own concurrency test."""
+    with platform_staff_bypass(), transaction.atomic():
+        booking = Booking.all_objects.select_for_update().get(pk=booking.pk)
+        if booking.status != Booking.Status.PAID:
+            return booking, False
+        tickets = Ticket.all_objects.filter(booking=booking)
+        # The `.exists()` check on the unfiltered queryset matters: an
+        # empty queryset's `.exclude(...).exists()` is trivially False,
+        # which would otherwise silently "complete" a ticket-less
+        # booking (shouldn't happen for a paid booking, but this isn't
+        # the place to assume that).
+        if not tickets.exists() or tickets.exclude(status=Ticket.Status.BOARDED).exists():
+            return booking, False
+        booking.status = Booking.Status.COMPLETED
+        booking.save(update_fields=["status"])
+        record_audit_event(
+            actor=None,
+            action="booking.completed",
+            target=booking,
+            client_id=str(booking.client_id),
         )
     return booking, True

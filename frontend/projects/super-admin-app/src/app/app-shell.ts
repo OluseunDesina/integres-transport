@@ -29,11 +29,14 @@ const resolveNotificationRoute: NotificationRouteResolver = (type) => {
 })
 export class AppShell {
   protected readonly resolveNotificationRoute = resolveNotificationRoute;
+  // Sentence case, matching the headings these link to. Four of the
+  // five were Title Case, so the nav read as two lists spliced
+  // together — the same defect slice 4 fixed in client-admin (F4).
   protected readonly navItems: NavItem[] = [
     { label: 'Home', path: '/home', icon: 'home', permissions: [] },
-    { label: 'KYC Queue', path: '/kyc-queue', icon: 'clipboard-document-check', permissions: ['super-admin:access'] },
-    { label: 'KYB Queue', path: '/kyb-queue', icon: 'document-check', permissions: ['super-admin:access'] },
+    { label: 'KYC queue', path: '/kyc-queue', icon: 'clipboard-document-check', permissions: ['super-admin:access'] },
+    { label: 'KYB queue', path: '/kyb-queue', icon: 'document-check', permissions: ['super-admin:access'] },
     { label: 'Businesses', path: '/businesses', icon: 'building-office', permissions: ['super-admin:access'] },
-    { label: 'Invite Client', path: '/invite-client', icon: 'user-plus', permissions: ['super-admin:access'] },
+    { label: 'Invite a client', path: '/invite-client', icon: 'user-plus', permissions: ['super-admin:access'] },
   ];
 }

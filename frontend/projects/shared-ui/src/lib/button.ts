@@ -1,5 +1,26 @@
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 
+/**
+ * Note the two different "text on a solid fill" tokens in the template,
+ * because the split is load-bearing.
+ *
+ * `text-on-primary` is used for the primary variant, whose fill is
+ * whatever colour a white-labelled tenant chose. `BrandThemeService`
+ * swaps that token to a dark ink when white would fail WCAG AA against
+ * their brand.
+ *
+ * `text-on-solid` is fixed white, and is only safe on fills we control
+ * and have measured — danger, success.
+ *
+ * Getting this wrong is not theoretical: an earlier version mapped both
+ * to `on-solid` and shipped white-on-#FFE066 buttons. It was caught by
+ * applying a real pale tenant colour in a browser, and by nothing else —
+ * the token flipped correctly the whole time, it just reached no text.
+ *
+ * The size comes from `--ui-text-body`, not a `text-*` class, so the
+ * label follows the app's surface profile — 14px in the three consoles,
+ * 16px in `customer-app`. See `theme.css`'s surface-profile block.
+ */
 @Component({
   selector: 'ui-button',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -11,17 +32,19 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
       [attr.aria-pressed]="ariaPressed()"
       [attr.aria-label]="ariaLabel()"
       (click)="pressed.emit($event)"
-      class="inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 disabled:cursor-not-allowed"
-      [class.bg-slate-900]="variant() === 'primary' && !isDisabled()"
-      [class.hover:bg-slate-700]="variant() === 'primary' && !isDisabled()"
+      style="font-size: var(--ui-text-body)"
+      class="inline-flex min-h-11 items-center justify-center gap-2 rounded-md px-4 py-2 font-medium transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed"
+      [class.bg-primary]="variant() === 'primary' && !isDisabled()"
+      [class.hover:bg-primary-hover]="variant() === 'primary' && !isDisabled()"
       [class.border]="variant() === 'secondary' && !isDisabled()"
-      [class.border-slate-300]="variant() === 'secondary' && !isDisabled()"
-      [class.hover:bg-slate-50]="variant() === 'secondary' && !isDisabled()"
-      [class.bg-red-700]="variant() === 'danger' && !isDisabled()"
-      [class.hover:bg-red-800]="variant() === 'danger' && !isDisabled()"
-      [class.text-white]="(variant() === 'primary' || variant() === 'danger') && !isDisabled()"
-      [class.bg-slate-100]="isDisabled()"
-      [class.text-slate-700]="(variant() === 'secondary' && !isDisabled()) || isDisabled()"
+      [class.border-control]="variant() === 'secondary' && !isDisabled()"
+      [class.hover:bg-surface-muted]="variant() === 'secondary' && !isDisabled()"
+      [class.bg-danger]="variant() === 'danger' && !isDisabled()"
+      [class.hover:bg-danger-hover]="variant() === 'danger' && !isDisabled()"
+      [class.text-on-primary]="variant() === 'primary' && !isDisabled()"
+      [class.text-on-solid]="variant() === 'danger' && !isDisabled()"
+      [class.bg-surface-sunken]="isDisabled()"
+      [class.text-default]="(variant() === 'secondary' && !isDisabled()) || isDisabled()"
     >
       @if (loading()) {
         <span

@@ -12,6 +12,7 @@ const JOURNEY = {
   scheduledDepartureAt: '2026-09-01T06:30:00Z',
   fromStop: { id: 'stop-a', name: 'Ikeja' },
   toStop: { id: 'stop-c', name: 'CMS' },
+  tripClass: 'premium',
   farePerSeat: '750.00',
   currency: 'NGN',
 };
@@ -95,6 +96,46 @@ describe('BookingConfirm', () => {
     expect(component['fareLabel']()).toBe('NGN 750.00');
     expect(component['totalLabel']()).toBe('NGN 1500.00');
     expect(component['seatNumbers']()).toBe('1A, 1B');
+  });
+
+  // --- service classes, docs/specs/15-trip-classes.md slice 3 ---------
+
+  it('renders the service class in the review list', async () => {
+    await createComponent();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const terms = [...host.querySelectorAll('dt')].map((dt) => dt.textContent?.trim());
+    expect(terms).toContain('Service');
+    expect(host.querySelector('dl')?.textContent).toContain('Premium');
+  });
+
+  it('omits the Service row rather than rendering it blank', async () => {
+    // A state object written by an older build carries no `tripClass`
+    // (see booking-draft.ts). A "Service:" row with nothing after it
+    // reads as a rendering fault.
+    const withoutClass: Record<string, unknown> = { ...REQUEST };
+    delete withoutClass['tripClass'];
+    await createComponent(withoutClass as unknown as BookingRequest);
+
+    // The guard must still accept it — `tripClass` is optional for
+    // exactly this reason. If it were required the screen would bounce
+    // to /search with a half-made booking behind it, which is a much
+    // worse outcome than a missing label.
+    expect(navigateSpy).not.toHaveBeenCalledWith(['/search']);
+    const host = fixture.nativeElement as HTMLElement;
+    const terms = [...host.querySelectorAll('dt')].map((dt) => dt.textContent?.trim());
+    expect(terms).not.toContain('Service');
+    expect(terms).toContain('Route');
+  });
+
+  it('carries the class back to the seat map, so Back does not lose it', async () => {
+    await createComponent();
+
+    await component['backToSeats']();
+
+    expect(navigateSpy).toHaveBeenCalledWith(['/search/seats'], {
+      state: jasmine.objectContaining({ tripClass: 'premium' }),
+    });
   });
 
   it('posts the booking with an Idempotency-Key header', async () => {

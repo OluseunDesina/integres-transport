@@ -42,8 +42,8 @@ export interface ConfirmDialogData {
   host: { class: 'block' },
   imports: [NgTemplateOutlet, Alert, Button],
   template: `
-    <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-      <h2 [id]="titleId" class="text-base font-semibold text-slate-900">{{ data.title }}</h2>
+    <div class="w-full max-w-md rounded-lg bg-surface p-6 shadow-xl">
+      <h2 [id]="titleId" class="text-base font-semibold text-strong">{{ data.title }}</h2>
       <div class="mt-4">
         <ng-container *ngTemplateOutlet="data.bodyTemplate" />
       </div>

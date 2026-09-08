@@ -1,22 +1,20 @@
 """Paying a booking directly from an existing wallet balance —
 docs/specs/7-passenger-wallet.md. `pay_booking_from_wallet()`'s
-success/insufficient-balance paths and the `POST
-/bookings/{id}/pay-from-wallet/` HTTP surface."""
+success/insufficient-balance paths — the service function only; the
+HTTP surface it once had (`POST /bookings/{id}/pay-from-wallet/`) was
+removed when the blended-payment feature unified it into
+`POST /payments/` (see test_blended_payment.py and
+test_payments_views.py's own wallet-covers-it-all case)."""
 
 from decimal import Decimal
 
 import pytest
-from django.urls import reverse
-from rest_framework import status
-from rest_framework.test import APIClient
 
 from apps.booking.models import Booking
 from apps.businesses.tests.factories import BusinessFactory
 from apps.clients.tests.factories import ClientFactory
 from apps.core.rls import platform_staff_bypass
 from apps.core.tests.tenancy import tenant_context
-from apps.identity.models import User
-from apps.identity.serializers import ClientAdminTokenObtainSerializer
 from apps.identity.tests.factories import PassengerUserFactory
 from apps.ledger.models import JournalEntry, LedgerAccount
 from apps.ledger.services import (
@@ -52,13 +50,6 @@ def _fund_wallet(*, client, business, passenger, amount: Decimal) -> None:  # ty
                 JournalLineInput(account=psp_suspense, amount=-amount, currency=business.currency),
             ],
         )
-
-
-def _auth_client(user: User) -> APIClient:
-    token = ClientAdminTokenObtainSerializer.get_token(user)
-    client = APIClient()
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
-    return client
 
 
 def test_pay_booking_from_wallet_succeeds_with_a_sufficient_balance() -> None:
@@ -147,51 +138,3 @@ def test_pay_booking_from_wallet_rejects_another_passengers_booking() -> None:
 
     with tenant_context(str(client.id)), pytest.raises(BookingNotPayable):
         pay_booking_from_wallet(booking=booking, passenger=other)
-
-
-# --- HTTP surface -----------------------------------------------------------
-
-
-def test_post_pay_from_wallet_succeeds_and_returns_the_payment_intent() -> None:
-    client = ClientFactory()
-    with tenant_context(str(client.id)):
-        business = BusinessFactory(client=client)
-    booking, _reservation = booking_with_a_held_seat(client, business, amount="200.00")
-    _fund_wallet(
-        client=client, business=business, passenger=booking.passenger, amount=Decimal("300.00")
-    )
-
-    response = _auth_client(booking.passenger).post(
-        reverse("booking-pay-from-wallet", kwargs={"pk": str(booking.id)})
-    )
-
-    assert response.status_code == status.HTTP_201_CREATED
-    assert response.data["status"] == "succeeded"
-    assert response.data["psp_provider"] == "wallet"
-
-
-def test_post_pay_from_wallet_returns_409_for_an_insufficient_balance() -> None:
-    client = ClientFactory()
-    with tenant_context(str(client.id)):
-        business = BusinessFactory(client=client)
-    booking, _reservation = booking_with_a_held_seat(client, business, amount="200.00")
-
-    response = _auth_client(booking.passenger).post(
-        reverse("booking-pay-from-wallet", kwargs={"pk": str(booking.id)})
-    )
-
-    assert response.status_code == status.HTTP_409_CONFLICT
-
-
-def test_post_pay_from_wallet_returns_403_for_another_passengers_booking() -> None:
-    client = ClientFactory()
-    with tenant_context(str(client.id)):
-        business = BusinessFactory(client=client)
-        other = PassengerUserFactory(client=client)
-    booking, _reservation = booking_with_a_held_seat(client, business, amount="200.00")
-
-    response = _auth_client(other).post(
-        reverse("booking-pay-from-wallet", kwargs={"pk": str(booking.id)})
-    )
-
-    assert response.status_code == status.HTTP_403_FORBIDDEN

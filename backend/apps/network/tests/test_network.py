@@ -140,7 +140,7 @@ def test_patch_updates_mutable_fields_and_is_audit_logged() -> None:
     route = _route(client)
 
     response = _auth_client(staff).patch(
-        reverse("route-update", kwargs={"pk": str(route.id)}), {"name": "Renamed Route"}
+        reverse("route-detail", kwargs={"pk": str(route.id)}), {"name": "Renamed Route"}
     )
 
     assert response.status_code == status.HTTP_200_OK
@@ -156,7 +156,7 @@ def test_patch_cannot_change_business() -> None:
     other_business = _approved_business(client)
 
     response = _auth_client(staff).patch(
-        reverse("route-update", kwargs={"pk": str(route.id)}),
+        reverse("route-detail", kwargs={"pk": str(route.id)}),
         {"business": str(other_business.id)},
     )
 
@@ -173,7 +173,7 @@ def test_cross_client_patch_is_a_404_not_a_403() -> None:
     route_b = _route(client_b)
 
     response = _auth_client(staff_a).patch(
-        reverse("route-update", kwargs={"pk": str(route_b.id)}), {"name": "Hijacked"}
+        reverse("route-detail", kwargs={"pk": str(route_b.id)}), {"name": "Hijacked"}
     )
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
@@ -394,3 +394,150 @@ def test_stop_list_rejects_another_clients_business_query_param() -> None:
     )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+
+# --- ?search= / ?is_active= query filtering ---------------------------
+# docs/specs/14-design-system-and-ui-rebuild.md slice 3a. Added because
+# `ui-filter-bar` needs a real server-side filter behind it — a search
+# box that narrows only the loaded page is the "bounded fetch, silent
+# fallback" family this codebase keeps re-finding.
+
+
+def test_route_list_search_matches_name_case_insensitively() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _approved_business(client)
+    match = _route(client, business=business, name="Ikeja Express")
+    _route(client, business=business, name="Lekki Loop")
+
+    response = _auth_client(staff).get(reverse("route-list-create"), {"search": "ikeja"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+def test_route_list_search_also_matches_code() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _approved_business(client)
+    match = _route(client, business=business, name="Ikeja Express", code="IKJ-1")
+    _route(client, business=business, name="Lekki Loop", code="LEK-1")
+
+    response = _auth_client(staff).get(reverse("route-list-create"), {"search": "IKJ"})
+
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+def test_route_list_search_with_no_match_returns_empty_not_everything() -> None:
+    # The failure that matters: a filter silently falling back to
+    # unfiltered looks like a working search returning everything.
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _approved_business(client)
+    _route(client, business=business, name="Ikeja Express")
+
+    response = _auth_client(staff).get(reverse("route-list-create"), {"search": "nothing here"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 0
+
+
+def test_route_list_blank_search_is_accepted_and_ignored() -> None:
+    # The filter bar emits '' when its box is cleared. A 400 there would
+    # break the way *back* to the unfiltered list.
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _approved_business(client)
+    _route(client, business=business, name="Ikeja Express")
+
+    response = _auth_client(staff).get(reverse("route-list-create"), {"search": ""})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 1
+
+
+def test_route_list_search_never_reaches_another_clients_rows() -> None:
+    # Search narrows an already tenant-scoped queryset; it must not be a
+    # way to probe across the boundary, whatever term is typed.
+    client_a = ClientFactory()
+    client_b = ClientFactory()
+    staff_a = ClientStaffUserFactory(client=client_a)
+    business_b = _approved_business(client_b)
+    _route(client_b, business=business_b, name="Ikeja Express")
+
+    response = _auth_client(staff_a).get(reverse("route-list-create"), {"search": "Ikeja"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["count"] == 0
+
+
+def test_route_list_combines_search_with_business_filter() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business_a = _approved_business(client)
+    business_b = _approved_business(client)
+    match = _route(client, business=business_a, name="Ikeja Express")
+    _route(client, business=business_b, name="Ikeja Express")
+
+    response = _auth_client(staff).get(
+        reverse("route-list-create"), {"business": str(business_a.id), "search": "Ikeja"}
+    )
+
+    assert [row["id"] for row in response.data["results"]] == [str(match.id)]
+
+
+def test_route_list_filters_by_status() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _approved_business(client)
+    active = _route(client, business=business, status=Route.Status.ACTIVE)
+    inactive = _route(client, business=business, status=Route.Status.INACTIVE)
+
+    api = _auth_client(staff)
+    actives = api.get(reverse("route-list-create"), {"status": "active"})
+    inactives = api.get(reverse("route-list-create"), {"status": "inactive"})
+
+    assert [row["id"] for row in actives.data["results"]] == [str(active.id)]
+    assert [row["id"] for row in inactives.data["results"]] == [str(inactive.id)]
+
+
+def test_route_list_without_status_excludes_archived_only() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _approved_business(client)
+    _route(client, business=business, status=Route.Status.DRAFT)
+    _route(client, business=business, status=Route.Status.ACTIVE)
+    _route(client, business=business, status=Route.Status.INACTIVE)
+    _route(client, business=business, status=Route.Status.ARCHIVED)
+
+    response = _auth_client(staff).get(reverse("route-list-create"))
+
+    assert response.data["count"] == 3
+
+
+def test_route_list_status_archived_is_reachable_when_asked() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _approved_business(client)
+    archived = _route(client, business=business, status=Route.Status.ARCHIVED)
+
+    response = _auth_client(staff).get(reverse("route-list-create"), {"status": "archived"})
+
+    assert [row["id"] for row in response.data["results"]] == [str(archived.id)]
+
+
+def test_stop_list_search_matches_name_or_address() -> None:
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    business = _approved_business(client)
+    by_name = _stop(client, business=business, name="Yaba Terminal", address="12 Herbert Road")
+    by_address = _stop(client, business=business, name="Oshodi", address="Yaba Bypass")
+    _stop(client, business=business, name="Lekki Phase 1", address="Admiralty Way")
+
+    response = _auth_client(staff).get(reverse("stop-list-create"), {"search": "yaba"})
+
+    assert response.status_code == status.HTTP_200_OK
+    assert {row["id"] for row in response.data["results"]} == {
+        str(by_name.id),
+        str(by_address.id),
+    }

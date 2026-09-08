@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { expectColumnVisibilityParity } from '@shared-ui';
 import { By } from '@angular/platform-browser';
 
 import { Payments } from './payments';
@@ -20,6 +21,9 @@ function makePaymentIntent(overrides: Partial<PaymentIntent> = {}): PaymentInten
     psp_provider: 'paystack',
     psp_reference: 'ref-1',
     psp_authorization_url: '',
+    // docs/specs/16-operational-analytics.md slice 1 — blank is
+    // what every intent that never succeeded carries.
+    channel: '',
     succeeded_at: '2026-08-10T00:00:00Z',
     failed_at: null,
     requires_manual_refund: false,
@@ -87,4 +91,13 @@ describe('Payments', () => {
 
     expect(store.changePage).toHaveBeenCalledWith(25);
   });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makePaymentIntent()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'payments');
+  });
+
 });

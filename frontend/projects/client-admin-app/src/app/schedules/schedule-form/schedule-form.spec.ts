@@ -11,11 +11,13 @@ function makeSchedule(overrides: Partial<Schedule> = {}): Schedule {
   return {
     id: 'sch-1',
     route: 'route-1',
+    route_name: 'Ikeja Express',
     business: 'biz-1',
     days_of_week: [1, 3, 5],
     departure_time: '07:30:00',
     effective_from: '2026-01-01',
     effective_until: null,
+    trip_class: 'standard',
     is_active: true,
     created_at: '2026-08-06T00:00:00Z',
     ...overrides,
@@ -98,7 +100,7 @@ describe('ScheduleForm', () => {
         '/api/v1/routes/',
         jasmine.objectContaining({
           params: { query: { limit: 100, offset: 0, business: 'biz-1' } },
-        }),
+        })
       );
     });
 
@@ -109,7 +111,134 @@ describe('ScheduleForm', () => {
       fixture.detectChanges();
 
       expect(fixture.componentInstance['noRoutesAvailable']()).toBe(true);
-      expect(fixture.nativeElement.textContent).toContain('has no Routes yet');
+      expect(fixture.nativeElement.textContent).toContain('has no routes yet');
+    });
+
+    // docs/specs/15-trip-classes.md. The narrowing matters because the
+    // backend refuses a class outside the route's allow-list with a
+    // 400: offering it at all means an operator can only discover the
+    // refusal by submitting.
+    describe('service class', () => {
+      async function chooseRouteWithClasses(available: string[]): Promise<void> {
+        apiClient.GET.and.resolveTo({
+          data: {
+            count: 1,
+            results: [
+              {
+                id: 'route-1',
+                name: 'Ikeja Express',
+                available_trip_classes: available,
+              },
+            ],
+          },
+        });
+        fixture.componentInstance['form'].controls.business.setValue('biz-1');
+        await fixture.whenStable();
+        fixture.componentInstance['form'].controls.route.setValue('route-1');
+        fixture.detectChanges();
+      }
+
+      it('offers every class when the route restricts none', async () => {
+        await chooseRouteWithClasses([]);
+
+        expect(fixture.componentInstance['tripClassOptions']().map((o) => o.value)).toEqual([
+          'premium',
+          'exclusive',
+          'standard',
+          'mini',
+        ]);
+      });
+
+      it('narrows the options to the classes the route offers', async () => {
+        await chooseRouteWithClasses(['premium', 'standard']);
+
+        expect(fixture.componentInstance['tripClassOptions']().map((o) => o.value)).toEqual([
+          'premium',
+          'standard',
+        ]);
+      });
+
+      /**
+       * The regression guard for the recorded `computed()` trap: a
+       * computed over `form.controls.route.value` depends on no signal
+       * and caches its first result forever. Selecting a *second* route
+       * is what exposes it — one selection alone passes either way.
+       */
+      it('re-narrows when a different route is chosen', async () => {
+        // Both routes come from **one** fetch, so switching between
+        // them changes only the form control — nothing else. That is
+        // what makes this a real guard: a `computed()` reading
+        // `form.controls.route.value` still depends on `classesByRoute`,
+        // so a version of this test that also refetched would pass
+        // against the bug it is meant to catch.
+        apiClient.GET.and.resolveTo({
+          data: {
+            count: 2,
+            results: [
+              { id: 'route-1', name: 'Ikeja Express', available_trip_classes: ['premium'] },
+              { id: 'route-2', name: 'Yaba Loop', available_trip_classes: ['mini', 'standard'] },
+            ],
+          },
+        });
+        fixture.componentInstance['form'].controls.business.setValue('biz-1');
+        await fixture.whenStable();
+
+        fixture.componentInstance['form'].controls.route.setValue('route-1');
+        expect(fixture.componentInstance['tripClassOptions']().map((o) => o.value)).toEqual([
+          'premium',
+        ]);
+
+        fixture.componentInstance['form'].controls.route.setValue('route-2');
+        expect(fixture.componentInstance['tripClassOptions']().map((o) => o.value)).toEqual([
+          'standard',
+          'mini',
+        ]);
+      });
+
+      /**
+       * Narrowing the options is only half the job. A control still
+       * holding `standard` while the route offers Premium alone renders
+       * a `<select>` with no matching `<option>`: it looks empty, keeps
+       * its old value, and 400s on submit with "this route does not
+       * offer standard services" — the exact failure the narrowing
+       * exists to prevent, reached from the other side. Found by
+       * `e2e/client-admin-app/trip-classes.spec.ts` after the unit
+       * tests here were already green.
+       */
+      it('moves the selection into range when the route excludes it', async () => {
+        expect(fixture.componentInstance['form'].controls.trip_class.value).toBe('standard');
+
+        await chooseRouteWithClasses(['premium']);
+
+        expect(fixture.componentInstance['form'].controls.trip_class.value).toBe('premium');
+      });
+
+      it('leaves an already-allowed selection alone', async () => {
+        await chooseRouteWithClasses(['premium', 'standard']);
+
+        expect(fixture.componentInstance['form'].controls.trip_class.value).toBe('standard');
+      });
+
+      it('sends the chosen class when creating', async () => {
+        await chooseRouteWithClasses([]);
+        apiClient.POST.and.resolveTo({ data: makeSchedule() });
+        spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
+        fixture.componentInstance['toggleDay'](1);
+        fixture.componentInstance['form'].patchValue({
+          departure_time: '07:30',
+          effective_from: '2026-01-01',
+          trip_class: 'premium',
+        });
+
+        await fixture.componentInstance['onSubmit']();
+
+        expect(apiClient.POST).toHaveBeenCalledWith(
+          '/api/v1/schedules/',
+          jasmine.objectContaining({
+            body: jasmine.objectContaining({ trip_class: 'premium' }),
+          })
+        );
+      });
     });
 
     it('toggling a day updates the selected days', () => {
@@ -127,6 +256,7 @@ describe('ScheduleForm', () => {
         departure_time: '07:30',
         effective_from: '2026-01-01',
         effective_until: '',
+        trip_class: 'standard',
       });
 
       await fixture.componentInstance['onSubmit']();
@@ -146,6 +276,7 @@ describe('ScheduleForm', () => {
         departure_time: '07:30',
         effective_from: '2026-01-01',
         effective_until: '',
+        trip_class: 'standard',
       });
       fixture.componentInstance['toggleDay'](1);
 
@@ -158,7 +289,7 @@ describe('ScheduleForm', () => {
             route: 'route-1',
             days_of_week: [1],
           }),
-        }),
+        })
       );
       expect(navigateSpy).toHaveBeenCalledWith(['/schedules']);
     });
@@ -173,13 +304,20 @@ describe('ScheduleForm', () => {
         departure_time: '07:30',
         effective_from: '2026-01-01',
         effective_until: '',
+        trip_class: 'standard',
       });
       fixture.componentInstance['toggleDay'](1);
 
       await fixture.componentInstance['onSubmit']();
       fixture.detectChanges();
 
-      expect(fixture.componentInstance['errorMessage']()).toBe('Unknown route.');
+      // Rendered under the Route select rather than stored in a
+      // page-level alert.
+      const errors = Array.from(
+        (fixture.nativeElement as HTMLElement).querySelectorAll('ui-select [role="alert"]'),
+      ).map((el) => el.textContent?.trim());
+      expect(errors).toContain('Unknown route.');
+      expect(fixture.componentInstance['errorMessage']()).toBeNull();
     });
   });
 
@@ -212,7 +350,7 @@ describe('ScheduleForm', () => {
 
       expect(apiClient.PATCH).toHaveBeenCalledWith(
         '/api/v1/schedules/{id}/',
-        jasmine.objectContaining({ params: { path: { id: 'sch-1' } } }),
+        jasmine.objectContaining({ params: { path: { id: 'sch-1' } } })
       );
     });
 

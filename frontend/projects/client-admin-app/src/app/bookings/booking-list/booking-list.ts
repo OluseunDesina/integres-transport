@@ -2,38 +2,52 @@ import { DatePipe } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
-  OnInit,
+  TemplateRef,
+  computed,
   effect,
   inject,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, EmptyState, Paginator, Select, StatusPill, Table } from '@shared-ui';
-import type { SelectOption, StatusPillTone } from '@shared-ui';
+import { RouterLink } from '@angular/router';
+import { HasPermissionDirective } from '@auth';
+import {
+  ActionMenu,
+  Alert,
+  DensityToggle,
+  DrawerService,
+  EmptyState,
+  FilterBar,
+  PageHeader,
+  Paginator,
+  Select,
+  Skeleton,
+  StatusPill,
+  Table,
+  summaryLine,
+} from '@shared-ui';
+import type { ActionMenuItem, Density, SelectOption, StatusPillTone } from '@shared-ui';
 
 import { BookingStore, type Booking } from '../../shared/data/store/booking.store';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
+import { TableDensityStore } from '../../shared/data/store/table-density.store';
+import { ListFilters } from '../../shared/list-filters';
 
 type BookingStatus = Booking['status'];
-
-const ALL_TRIPS_OPTION: SelectOption = { value: '', label: 'All trips' };
 
 const STATUS_FILTER_OPTIONS: SelectOption[] = [
   { value: '', label: 'All statuses' },
   { value: 'pending_payment', label: 'Pending payment' },
   { value: 'paid', label: 'Paid' },
+  { value: 'completed', label: 'Completed' },
   { value: 'cancelled', label: 'Cancelled' },
   { value: 'expired', label: 'Expired' },
 ];
 
 // Keyed on the closed status union, so a status added to the API fails
 // compilation here rather than rendering a raw `pending_payment`.
-// `paid` (Phase 5) added purely for enum coverage here — this screen
-// stays read-only-list-only, no payments visibility yet (a separate,
-// not-yet-built client-admin frontend slice).
 const STATUS_TONE: Record<BookingStatus, StatusPillTone> = {
   pending_payment: 'warning',
   paid: 'positive',
@@ -52,64 +66,148 @@ const STATUS_LABEL: Record<BookingStatus, string> = {
 
 /**
  * Staff ops visibility over Bookings —
- * docs/specs/4-fares-seating-booking-frontend.md §4.3.
+ * docs/specs/4-fares-seating-booking-frontend.md §4.3, rebuilt in spec
+ * 14 slice 3b.
  *
- * Deliberately list-only. There is no `booking.manage` codename this
- * phase: cancelling is the passenger's own action on their own booking
- * (`POST /bookings/{id}/cancel/` rejects anyone else), so an action
- * column here would be an affordance the server refuses. Staff see, and
- * do not act.
+ * Deliberately read-only. There is no `booking.manage` codename:
+ * cancelling is the passenger's own action on their own booking
+ * (`POST /bookings/{id}/cancel/` rejects anyone else), so a write
+ * affordance here would be one the server refuses. The row menu carries
+ * "View details" and nothing more.
  *
- * No passenger column either — `BookingSerializer` exposes `passenger`
- * as a bare UUID, and a column of UUIDs helps nobody. Showing who
- * booked needs the serializer to nest an email, which is a backend
- * change this slice explicitly does not depend on.
+ * Two things changed in 3b beyond the chrome:
+ *
+ * 1. **The list is scoped to the active Business.** `GET /bookings/` had
+ *    no `business` param, so this screen showed every Business under the
+ *    Client while the header switcher claimed one was active. The param
+ *    exists now, and this effect uses it.
+ * 2. **The trip dropdown is gone**, replaced by search. It fetched
+ *    `limit=100` against ascending `Trip.Meta.ordering`, so a Business
+ *    with more than 100 trips was offered its *oldest* hundred and no
+ *    recent one was selectable — the known-red recorded in
+ *    docs/self-check-2026-08-26-spec11.md. Searching by route name or
+ *    passenger email removes the bounded fetch rather than re-bounding
+ *    it, and matches what a support call actually gives you.
  */
 @Component({
   selector: 'app-booking-list',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Alert, EmptyState, Paginator, Select, StatusPill, Table],
+  imports: [
+    DatePipe,
+    FormsModule,
+    RouterLink,
+    ActionMenu,
+    Alert,
+    DensityToggle,
+    EmptyState,
+    FilterBar,
+    HasPermissionDirective,
+    PageHeader,
+    Paginator,
+    Select,
+    Skeleton,
+    StatusPill,
+    Table,
+  ],
   templateUrl: './booking-list.html',
 })
-export class BookingList implements OnInit {
+export class BookingList {
   protected readonly store = inject(BookingStore);
-  private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
+  private readonly densityStore = inject(TableDensityStore);
+  private readonly drawers = inject(DrawerService);
 
   protected readonly statusTone = STATUS_TONE;
   protected readonly statusLabel = STATUS_LABEL;
   protected readonly statusFilterOptions = STATUS_FILTER_OPTIONS;
-  protected readonly tripFilterOptions = signal<SelectOption[]>([ALL_TRIPS_OPTION]);
 
-  ngOnInit(): void {
-    void this.store.getAll();
-  }
+  protected readonly filters = new ListFilters([
+    {
+      key: 'status',
+      label: 'Status',
+      chipValue: (value) => STATUS_LABEL[value as BookingStatus] ?? value,
+    },
+  ]);
+  protected readonly skeletonRows = [0, 1, 2, 3, 4];
 
-  // The Bookings table itself stays Client-scoped — `GET /bookings/` has
-  // no `business` param and a Booking isn't owned by a Business — but the
-  // Trip dropdown that filters it is scoped, same `effect()`/`untracked()`
-  // pattern as `trip-list`'s own filter options.
-  private readonly syncTripOptions = effect(
+  protected readonly density = this.densityStore.density;
+  protected readonly cellClass = computed(() =>
+    this.density() === 'compact' ? 'py-1' : 'py-3'
+  );
+  protected readonly densityStyle = computed(() =>
+    this.density() === 'compact' ? '--ui-control-height: 1.75rem' : null
+  );
+
+  private readonly detailBody = viewChild.required<TemplateRef<unknown>>('detailBody');
+  protected readonly selected = signal<Booking | null>(null);
+
+  protected readonly menuItems: ActionMenuItem[] = [
+    { id: 'details', label: 'View details', icon: 'document-check' },
+  ];
+
+  // See RouteList's identical wiring for the full untracked()/effect()
+  // reasoning — required on every business-scoped list screen. This is
+  // the only fetch trigger: an ngOnInit calling getAll() would race it
+  // and briefly show every Business's bookings.
+  private readonly syncBusinessFilter = effect(
     () => {
       const businessId = this.selectedBusinessStore.selectedBusinessId();
       if (businessId) {
-        untracked(() => void this.loadTripOptions(businessId));
+        untracked(() => void this.store.updateQuery({ business: businessId }));
       }
     },
-    { allowSignalWrites: true },
+    { allowSignalWrites: true }
   );
 
   protected onPageChange(offset: number): void {
     void this.store.changePage(offset);
   }
 
-  protected onTripFilterChange(value: string): void {
-    void this.store.updateQuery({ trip: value || undefined });
+  protected onDensityChange(next: Density): void {
+    this.densityStore.set(next);
+  }
+
+  protected applyFilters(): void {
+    void this.store.updateQuery({
+      business: this.selectedBusinessStore.selectedBusinessId() ?? undefined,
+      ...this.filters.query(),
+    });
+  }
+
+  protected onSearchChange(value: string): void {
+    this.filters.setSearch(value);
+    this.applyFilters();
   }
 
   protected onStatusFilterChange(value: string): void {
-    void this.store.updateQuery({ status: value || undefined });
+    this.filters.setExtra('status', value);
+    this.applyFilters();
+  }
+
+  protected onChipRemoved(chipId: string): void {
+    this.filters.remove(chipId);
+    this.applyFilters();
+  }
+
+  protected onFiltersCleared(): void {
+    this.filters.clear();
+    this.applyFilters();
+  }
+
+  protected onMenuSelected(booking: Booking): void {
+    this.selected.set(booking);
+    this.drawers.open({
+      title: `${booking.trip.route.name} — ${booking.trip.service_date}`,
+      description: 'Seats, passenger and totals for this booking.',
+      bodyTemplate: this.detailBody(),
+    });
+  }
+
+  /** The Service date and Total columns, hidden below `md` — see
+   * `ui-table`'s note on the responsive-column tiers. Departure, seats
+   * and booked-at are tier 3 and live in the row's detail drawer. */
+  protected summaryLine(booking: Booking): string {
+    return summaryLine([booking.trip.service_date, this.totalLabel(booking)]);
   }
 
   protected seatNumbers(booking: Booking): string {
@@ -120,36 +218,5 @@ export class BookingList implements OnInit {
    * that helper lives in the customer app, not a shared library. */
   protected totalLabel(booking: Booking): string {
     return `${booking.currency} ${booking.total_amount}`;
-  }
-
-  /** Scoped to the selected Business, like every other filter dropdown
-   * in this app.
-   *
-   * This used to be unscoped, and its comment here said `GET /trips/`
-   * had no `business` param to scope it with. That was true when it was
-   * written and is no longer: `TripListQuerySerializer.business` exists
-   * now, and `trip-list` already uses it. Left unscoped, this dropdown
-   * offered every Trip under the Client regardless of which Business
-   * the operator had selected in the header.
-   *
-   * Still bounded at 100 rows, which is a real remaining limitation —
-   * `Trip.Meta.ordering` is ascending by `service_date`, so a Business
-   * with more than 100 Trips offers its *oldest* hundred and no recent
-   * one is selectable at all. Scoping shrinks the problem but does not
-   * remove it; closing it needs either a searchable trip picker or a
-   * date-bounded query, neither of which exists yet.
-   */
-  private async loadTripOptions(businessId: string): Promise<void> {
-    const { data } = await this.api.GET('/api/v1/trips/', {
-      params: { query: { limit: 100, offset: 0, business: businessId } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
-    });
-    this.tripFilterOptions.set([
-      ALL_TRIPS_OPTION,
-      ...(data?.results ?? []).map((trip) => ({
-        value: trip.id,
-        label: `${trip.route.name} — ${trip.service_date}`,
-      })),
-    ]);
   }
 }

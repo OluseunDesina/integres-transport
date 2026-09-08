@@ -1,0 +1,192 @@
+<div class="flex flex-col gap-6">
+  <ui-page-header
+    title="Incidents"
+    description="Faults, safety concerns and passenger reports, and where each one has got to."
+  >
+    <ui-button actions *appHasPermission="'incidents.manage'" (pressed)="goToNewIncident()"
+      >Report an incident</ui-button
+    >
+  </ui-page-header>
+
+  <!-- A refused transition is transient and must not replace the table —
+       the row it came from still needs to be visible. A load error does
+       replace it. -->
+  @if (actionError(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
+  @if (store.error()) {
+    <ui-alert>{{ store.error() }}</ui-alert>
+  } @else {
+    <div class="flex flex-wrap items-end justify-between gap-3">
+      <ui-filter-bar
+        class="flex-1"
+        [searchValue]="filters.search()"
+        searchLabel="Search incidents"
+        placeholder="Search by reference, title or device…"
+        ariaLabel="Incident filters"
+        [chips]="filters.chips()"
+        (searchChange)="onSearchChange($event)"
+        (chipRemoved)="onChipRemoved($event)"
+        (cleared)="onFiltersCleared()"
+      >
+        <div filters class="flex flex-wrap items-start gap-3">
+          <div class="w-44">
+            <ui-select
+              label="Showing"
+              [options]="openOnlyOptions"
+              [ngModel]="filters.extra('open_only')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('open_only', $event)"
+            />
+          </div>
+          <div class="w-44">
+            <ui-select
+              label="Status"
+              [options]="statusOptions"
+              [ngModel]="filters.extra('status')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('status', $event)"
+            />
+          </div>
+          <div class="w-44">
+            <ui-select
+              label="Severity"
+              [options]="severityOptions"
+              [ngModel]="filters.extra('severity')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('severity', $event)"
+            />
+          </div>
+          <div class="w-44">
+            <ui-select
+              label="Category"
+              [options]="categoryOptions"
+              [ngModel]="filters.extra('category')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('category', $event)"
+            />
+          </div>
+          <div class="w-44">
+            <ui-select
+              label="Reported by"
+              [options]="sourceOptions"
+              [ngModel]="filters.extra('source')"
+              [ngModelOptions]="{ standalone: true }"
+              (ngModelChange)="onExtraFilterChange('source', $event)"
+            />
+          </div>
+        </div>
+      </ui-filter-bar>
+      <ui-density-toggle [density]="density()" (densityChange)="onDensityChange($event)" />
+    </div>
+
+    @if (store.isEmpty() && !filters.isFiltered()) {
+      <ui-empty-state
+        title="No incidents reported"
+        description="Faults reported by staff, and issues reported by passengers, both appear here."
+      >
+        <ui-button *appHasPermission="'incidents.manage'" (pressed)="goToNewIncident()"
+          >Report an incident</ui-button
+        >
+      </ui-empty-state>
+    } @else {
+      <div [attr.aria-busy]="store.loading()" [attr.style]="densityStyle()">
+        <ui-table
+          label="Incidents"
+          [stickyHeader]="true"
+          [empty]="store.isEmpty() && !store.loading()"
+          emptyMessage="No incidents match these filters."
+        >
+          <thead>
+            <tr class="border-b border-border text-xs tracking-wide text-muted uppercase">
+              <th class="py-2">Reference</th>
+              <th class="py-2">Title</th>
+              <th class="hidden py-2 md:table-cell">Severity</th>
+              <th class="py-2">Status</th>
+              <th class="hidden py-2 lg:table-cell">Category</th>
+              <th class="hidden py-2 lg:table-cell">Reported</th>
+              <th class="py-2"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (store.loading()) {
+              @for (row of skeletonRows; track row) {
+                <tr class="border-b border-border last:border-0">
+                  <td [class]="cellClass()"><ui-skeleton width="7rem" /></td>
+                  <td [class]="cellClass()"><ui-skeleton width="12rem" /></td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-skeleton width="4rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="5rem" /></td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    <ui-skeleton width="6rem" />
+                  </td>
+                  <td [class]="cellClass()"><ui-skeleton width="2.25rem" /></td>
+                </tr>
+              }
+            } @else {
+              @for (incident of store.items(); track incident.id) {
+                <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+                  <td [class]="cellClass() + ' font-medium text-strong'">
+                    <a
+                      class="text-brand-700 underline underline-offset-2"
+                      [routerLink]="['/incidents', incident.id]"
+                    >
+                      <!-- ui-table resets overflow-wrap inside a link so a
+                           control's label is never split mid-word; a
+                           reference is data, so it goes back on a span
+                           *inside* the anchor — on the anchor itself it
+                           loses to that ::ng-deep selector. -->
+                      <span class="[overflow-wrap:anywhere]">{{ incident.reference }}</span>
+                    </a>
+                    <!-- The columns hidden below `md`, re-flowed. -->
+                    <span class="mt-0.5 block text-xs font-normal text-muted md:hidden">
+                      {{ summaryLine(incident) }}
+                    </span>
+                  </td>
+                  <td [class]="cellClass()">
+                    <span class="[overflow-wrap:anywhere]">{{ incident.title }}</span>
+                  </td>
+                  <td [class]="cellClass() + ' hidden md:table-cell'">
+                    <ui-status-pill
+                      [tone]="severityTone(incident.severity)"
+                      [label]="severityLabel(incident.severity)"
+                    />
+                  </td>
+                  <td [class]="cellClass()">
+                    <ui-status-pill
+                      [tone]="statusTone(incident.status)"
+                      [label]="statusLabel(incident.status)"
+                    />
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ categoryLabel(incident.category) }}
+                  </td>
+                  <td [class]="cellClass() + ' hidden lg:table-cell'">
+                    {{ incident.created_at | date: 'd MMM y' }}
+                  </td>
+                  <td [class]="cellClass() + ' text-right'">
+                    <ui-action-menu
+                      [items]="menuItems(incident)"
+                      [label]="'Actions for ' + incident.reference"
+                      (selected)="onMenuSelected(incident, $event)"
+                    />
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </ui-table>
+      </div>
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
+  }
+</div>

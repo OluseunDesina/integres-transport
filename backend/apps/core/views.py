@@ -15,6 +15,7 @@ from apps.core.serializers import HealthSerializer, ReadinessSerializer
 from apps.notifications.services import sweep_expiring_compliance, sweep_unused_tickets
 from apps.scheduling.tasks import generate_trips
 from apps.seating.tasks import expire_seat_holds
+from apps.telemetry.services import prune_positions
 
 
 @extend_schema(responses=HealthSerializer)
@@ -94,3 +95,16 @@ class NotificationTicketReminderSweepView(_InternalTaskView):
             return Response(status=403)
         sweep_unused_tickets()
         return Response(status=200)
+
+
+@extend_schema(exclude=True)
+class PruneTelemetryView(_InternalTaskView):
+    """docs/specs/20-live-operations.md. Reports what it deleted and the
+    oldest row still standing, in the body (not just a 200) — a silent
+    no-op is the failure mode of every retention job ever written, and a
+    monitoring check needs something to compare against a threshold."""
+
+    def post(self, request: Request) -> Response:
+        if not self._secret_is_valid(request):
+            return Response(status=403)
+        return Response(prune_positions(), status=200)

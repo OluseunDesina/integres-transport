@@ -1,30 +1,35 @@
 <div class="mx-auto flex max-w-lg flex-col gap-6">
-  <div>
-    <a routerLink="/businesses" class="text-sm text-slate-500 hover:text-slate-900">&larr; Businesses</a>
-    <h1 class="mt-2 text-lg font-semibold text-slate-900">
-      Seat-hold duration
-      @if (business(); as b) {
-        — {{ b.name }}
-      }
-    </h1>
-  </div>
+  <ui-page-header
+    [title]="heading()"
+    description="How long a held seat stays reserved before the expiry sweep releases it back to inventory."
+  >
+    <!-- ui-page-header has had a breadcrumb slot since slice 2 and
+         nothing used it; all three business-scoped screens hand-rolled
+         this link above their own <h1>. -->
+    <a
+      breadcrumb
+      routerLink="/businesses"
+      class="inline-flex min-h-11 items-center text-sm text-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+    >
+      &larr; Businesses
+    </a>
+  </ui-page-header>
 
   @if (notFound()) {
     <ui-alert>Business not found.</ui-alert>
   } @else if (loading()) {
-    <p class="text-sm text-slate-500">Loading…</p>
+    <div role="status" aria-busy="true" aria-label="Loading this business">
+      <ui-skeleton variant="block" height="8rem" />
+    </div>
   } @else {
-    <p class="text-sm text-slate-500">
-      How long a held seat stays reserved before the expiry sweep releases it back to inventory.
-    </p>
     <!-- Said here rather than by disabling the field: the value must
          still be editable, because a Business can switch back to
          reservation mode and should find its setting intact. -->
     @if (inert()) {
       <ui-alert variant="warning">
-        This business uses open seating, where nothing is held — a place is counted when a
-        ticket is issued. This setting is saved but has no effect unless the business switches
-        to reservation mode.
+        This business uses open seating, where nothing is held — a place is counted when a ticket
+        is issued. This setting is saved but has no effect unless the business switches to
+        reservation mode.
       </ui-alert>
     }
     @if (successMessage(); as message) {
@@ -37,9 +42,11 @@
     <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
       <ui-text-field
         label="Minutes"
+        inputMode="numeric"
+        hint="Counted from when the seat is held, not from when the booking started."
         formControlName="seat_hold_minutes"
-        [invalid]="form.controls.seat_hold_minutes.invalid && form.controls.seat_hold_minutes.touched"
-        errorMessage="This field is required."
+        [invalid]="!!fieldError()"
+        [errorMessage]="fieldError()"
       />
       <div>
         <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">Save</ui-button>

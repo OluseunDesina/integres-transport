@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.serializers import BaseSerializer
 from rest_framework.views import APIView
 
-from apps.booking.models import Booking
+from apps.analytics.filters import apply_to_payment_records, resolve_filters
 from apps.businesses.models import Business
 from apps.core.idempotency import IdempotencyKeyConflict
 from apps.core.permissions import HasPermission, IsPlatformStaff
@@ -40,8 +40,8 @@ from .services import (
     PspNotConfigured,
     configure_paystack_account,
     initiate_payment,
+    initiate_payment_with_wallet,
     initiate_wallet_topup,
-    pay_booking_from_wallet,
     process_paystack_webhook,
     trigger_settlement_run,
 )
@@ -56,6 +56,13 @@ _IDEMPOTENCY_KEY_PARAM = OpenApiParameter(
 )
 _BUSINESS_QUERY_PARAM = OpenApiParameter(
     "business", str, OpenApiParameter.QUERY, required=False, description="Filter to one Business."
+)
+_PAYMENT_SEARCH_QUERY_PARAM = OpenApiParameter(
+    "search",
+    str,
+    OpenApiParameter.QUERY,
+    required=False,
+    description="Case-insensitive substring match on the PSP reference.",
 )
 _STATUS_QUERY_PARAM = OpenApiParameter(
     "status", str, OpenApiParameter.QUERY, required=False, description="Filter to one status."
@@ -117,7 +124,13 @@ class PaystackAccountConfigView(generics.GenericAPIView[Business]):
 
 
 @extend_schema_view(
-    get=extend_schema(parameters=[_BUSINESS_QUERY_PARAM, _STATUS_QUERY_PARAM]),
+    get=extend_schema(
+        parameters=[
+            _BUSINESS_QUERY_PARAM,
+            _STATUS_QUERY_PARAM,
+            _PAYMENT_SEARCH_QUERY_PARAM,
+        ]
+    ),
     post=extend_schema(
         request=PaymentInitiateSerializer,
         responses=PaymentInitiateResponseSerializer,
@@ -143,15 +156,37 @@ class PaymentListCreateView(generics.ListCreateAPIView[PaymentIntent]):
         )
 
     def get_queryset(self) -> QuerySet[PaymentIntent]:
+        """Filtered through `apps.analytics.filters`, the same module
+        `GET /analytics/payments/summary/` uses.
+
+        That shared path is the point: the metrics strip above this
+        table and the table itself now cannot describe different rows,
+        because there is only one place the filtering happens
+        (docs/specs/16-operational-analytics.md). A divergence would be
+        one bug to find, not two.
+
+        `search` stays local — it is a free-text convenience for looking
+        up a disputed reference, not a dimension anything aggregates by.
+
+        **`apply_to_payment_records`, not `apply_to_payments`.** The
+        record-grain wrapper skips the rolling default period unless the
+        caller actually named one. Calling the aggregate function here
+        was a real, shipped bug: from slice 2 until slice 4 this list —
+        a support and dispute screen — silently showed only the last 30
+        days, with no chip, no message and no error saying so. The
+        summary strip above it is still bounded, because an aggregate
+        with no period is meaningless; a paginated list is already
+        bounded by its own pagination.
+        """
         queryset = PaymentIntent.objects.select_related("booking", "business", "passenger").all()
-        query = PaymentIntentListQuerySerializer(data=self.request.query_params)
+        queryset = apply_to_payment_records(queryset, resolve_filters(self.request.query_params))
+
+        query = PaymentIntentListQuerySerializer(data=self.request.query_params.dict())
         query.is_valid(raise_exception=True)
-        business = query.validated_data.get("business")
-        status_filter = query.validated_data.get("status")
-        if business is not None:
-            queryset = queryset.filter(business=business)
-        if status_filter is not None:
-            queryset = queryset.filter(status=status_filter)
+        search = query.validated_data.get("search", "").strip()
+        if search:
+            queryset = queryset.filter(psp_reference__icontains=search)
+
         return queryset
 
     def create(self, request: Request, *args: Any, **kwargs: Any) -> Response:
@@ -164,6 +199,7 @@ class PaymentListCreateView(generics.ListCreateAPIView[PaymentIntent]):
         serializer = PaymentInitiateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         booking = serializer.validated_data.get("booking_id")
+        use_wallet_balance = serializer.validated_data.get("use_wallet_balance", False)
         wallet_topup = serializer.validated_data.get("wallet_topup")
         user = request.user
         assert isinstance(user, User)
@@ -174,9 +210,14 @@ class PaymentListCreateView(generics.ListCreateAPIView[PaymentIntent]):
                         {"detail": "You cannot pay for another passenger's booking."},
                         status=status.HTTP_403_FORBIDDEN,
                     )
-                intent = initiate_payment(
-                    booking=booking, passenger=user, idempotency_key=idempotency_key
-                )
+                if use_wallet_balance:
+                    intent = initiate_payment_with_wallet(
+                        booking=booking, passenger=user, idempotency_key=idempotency_key
+                    )
+                else:
+                    intent = initiate_payment(
+                        booking=booking, passenger=user, idempotency_key=idempotency_key
+                    )
             else:
                 intent = initiate_wallet_topup(
                     business=wallet_topup["business_id"],
@@ -187,6 +228,8 @@ class PaymentListCreateView(generics.ListCreateAPIView[PaymentIntent]):
         except PspNotConfigured as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
         except (PaymentAlreadyPending, BookingNotPayable, IdempotencyKeyConflict) as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        except InsufficientWalletBalance as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
         except PaystackAPIError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
@@ -272,34 +315,6 @@ class SettlementRunListCreateView(generics.ListCreateAPIView[SettlementRun]):
         except PaystackAPIError as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(SettlementRunSerializer(run).data, status=status.HTTP_201_CREATED)
-
-
-@extend_schema(request=None, responses=PaymentIntentSerializer)
-class PayBookingFromWalletView(APIView):
-    """POST /bookings/{id}/pay-from-wallet/ — Phase 7. Passenger, own
-    booking only; no request body (the booking id in the path is the
-    whole request). Mirrors `BookingCancelView`'s own
-    404-not-found/403-not-yours split, since both operate on a specific
-    passenger's own booking by id."""
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request: Request, pk: str) -> Response:
-        booking = get_object_or_404(Booking.objects.all(), pk=pk)
-        user = request.user
-        assert isinstance(user, User)
-        if booking.passenger_id != user.id:
-            return Response(
-                {"detail": "You cannot pay for another passenger's booking."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        try:
-            intent = pay_booking_from_wallet(booking=booking, passenger=user)
-        except BookingNotPayable as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-        except InsufficientWalletBalance as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
-        return Response(PaymentIntentSerializer(intent).data, status=status.HTTP_201_CREATED)
 
 
 @extend_schema(exclude=True)

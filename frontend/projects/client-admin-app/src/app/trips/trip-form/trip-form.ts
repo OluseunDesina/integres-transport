@@ -3,33 +3,30 @@ import {
   Component,
   OnInit,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, Select, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  FormSection,
+  PageHeader,
+  Select,
+  TextField,
+} from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
+import { applyServerErrors, clearServerErrors, fieldErrorMessage } from '../../shared/form-errors';
+import { allowedTripClassOptions, type TripClass } from '../../shared/trip-class';
 
 const NONE_OPTION: SelectOption = { value: '', label: '— None —' };
-
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
 
 /**
  * Create-only — manual (one-off) Trip creation. There is no
@@ -42,14 +39,15 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-trip-form',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, RouterLink, Alert, Button, Select, TextField],
+  imports: [ReactiveFormsModule, RouterLink, Alert,
+    FormSection,
+    PageHeader, Button, Select, TextField],
   templateUrl: './trip-form.html',
 })
 export class TripForm implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
 
   protected readonly routeOptionsList = signal<SelectOption[]>([]);
@@ -78,8 +76,10 @@ export class TripForm implements OnInit {
     // Both axes, because a Trip snapshots both and the pair is what
     // actually determines how this departure behaves
     // (docs/specs/10-booking-modes.md).
-    const seating = business.booking_mode_default === 'open_seating' ? 'Open seating' : 'Reservation';
-    const collection = business.fare_collection_mode === 'pay_as_you_go' ? 'pay as you go' : 'prepaid';
+    const seating =
+      business.booking_mode_default === 'open_seating' ? 'Open seating' : 'Reservation';
+    const collection =
+      business.fare_collection_mode === 'pay_as_you_go' ? 'pay as you go' : 'prepaid';
     return `${seating}, ${collection}`;
   });
 
@@ -96,6 +96,37 @@ export class TripForm implements OnInit {
     departure_time: ['', Validators.required],
     vehicle: [''],
     driver: [''],
+    // docs/specs/15-trip-classes.md. Unlike booking_mode above, this is
+    // a real form field: the server takes it from the request rather
+    // than snapshotting it from the Business, because a class is a
+    // per-departure decision, not a Business-wide default.
+    trip_class: ['standard' as TripClass, Validators.required],
+  });
+
+  /** Declared after `form`, and read through `toSignal` — see
+   * ScheduleForm's identical note for both reasons. */
+  private readonly selectedRouteId = toSignal(this.form.controls.route.valueChanges, {
+    initialValue: '',
+  });
+
+  /** Narrowed to the chosen route's own allow-list, from the fetch that
+   * already populates the Route picker. */
+  private readonly classesByRoute = signal<ReadonlyMap<string, string[]>>(new Map());
+  protected readonly tripClassOptions = computed<SelectOption[]>(() =>
+    allowedTripClassOptions(this.classesByRoute().get(this.selectedRouteId()) ?? [])
+  );
+
+  /** Keeps the selected class inside the offered options — see
+   * ScheduleForm's identical effect for what goes wrong without it. */
+  private readonly keepClassWithinAllowed = effect(() => {
+    const allowed = this.tripClassOptions();
+    if (allowed.length === 0) {
+      return;
+    }
+    const current = untracked(() => this.form.controls.trip_class.value);
+    if (!allowed.some((option) => option.value === current)) {
+      this.form.controls.trip_class.setValue(allowed[0].value as TripClass);
+    }
   });
 
   async ngOnInit(): Promise<void> {
@@ -123,29 +154,27 @@ export class TripForm implements OnInit {
       this.driverOptionsList.set([NONE_OPTION]);
       return;
     }
-    const authHeader = {
-      Authorization: `Bearer ${this.authStore.accessToken()}`,
-    };
     const query = { limit: 100, offset: 0, business: businessId };
     const [routes, vehicles, drivers] = await Promise.all([
       this.api.GET('/api/v1/routes/', {
         params: { query },
-        headers: authHeader,
       }),
       this.api.GET('/api/v1/vehicles/', {
         params: { query },
-        headers: authHeader,
       }),
       this.api.GET('/api/v1/drivers/', {
         params: { query },
-        headers: authHeader,
       }),
     ]);
+    const routeRows = routes.data?.results ?? [];
     this.routeOptionsList.set(
-      (routes.data?.results ?? []).map((route) => ({
+      routeRows.map((route) => ({
         value: route.id,
         label: route.name,
-      })),
+      }))
+    );
+    this.classesByRoute.set(
+      new Map(routeRows.map((route) => [route.id, route.available_trip_classes ?? []]))
     );
     this.vehicleOptionsList.set([
       NONE_OPTION,
@@ -171,10 +200,8 @@ export class TripForm implements OnInit {
 
     this.submitting.set(true);
     this.errorMessage.set(null);
+    clearServerErrors(this.form);
     const values = this.form.getRawValue();
-    const authHeader = {
-      Authorization: `Bearer ${this.authStore.accessToken()}`,
-    };
 
     const { data, error } = await this.api.POST('/api/v1/trips/', {
       body: {
@@ -183,18 +210,19 @@ export class TripForm implements OnInit {
         departure_time: values.departure_time,
         vehicle: values.vehicle || null,
         driver: values.driver || null,
+        trip_class: values.trip_class,
       },
-      headers: authHeader,
     });
 
     this.submitting.set(false);
 
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(
+        applyServerErrors(
+          this.form,
           error,
-          'Could not create this trip. Check your details and try again.',
-        ),
+          'Could not create this trip. Check your details and try again.'
+        )
       );
       return;
     }
@@ -202,13 +230,19 @@ export class TripForm implements OnInit {
     await this.router.navigate(['/trips']);
   }
 
+  /** Every field, not just those with a validator: any of them can
+   * come back rejected by the server, and `fieldErrorMessage`
+   * surfaces that the same way it surfaces a client-side failure. */
   protected fieldError(
-    field: 'business' | 'route' | 'service_date' | 'departure_time',
+    field:
+      | 'business'
+      | 'route'
+      | 'service_date'
+      | 'departure_time'
+      | 'vehicle'
+      | 'driver'
+      | 'trip_class'
   ): string | null {
-    const control = this.form.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+    return fieldErrorMessage(this.form.controls[field]);
   }
 }

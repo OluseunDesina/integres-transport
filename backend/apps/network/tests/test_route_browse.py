@@ -106,7 +106,29 @@ def test_browse_excludes_an_inactive_route() -> None:
     client = ClientFactory()
     passenger = PassengerUserFactory(client=client)
     active = _bookable_route(client)
-    _bookable_route(client, is_active=False)
+    _bookable_route(client, status=Route.Status.INACTIVE)
+
+    response = _auth_client(passenger).get(reverse("route-browse"))
+
+    assert [row["id"] for row in response.data["results"]] == [str(active.id)]
+
+
+def test_browse_excludes_a_draft_route() -> None:
+    client = ClientFactory()
+    passenger = PassengerUserFactory(client=client)
+    active = _bookable_route(client)
+    _bookable_route(client, status=Route.Status.DRAFT)
+
+    response = _auth_client(passenger).get(reverse("route-browse"))
+
+    assert [row["id"] for row in response.data["results"]] == [str(active.id)]
+
+
+def test_browse_excludes_an_archived_route() -> None:
+    client = ClientFactory()
+    passenger = PassengerUserFactory(client=client)
+    active = _bookable_route(client)
+    _bookable_route(client, status=Route.Status.ARCHIVED)
 
     response = _auth_client(passenger).get(reverse("route-browse"))
 

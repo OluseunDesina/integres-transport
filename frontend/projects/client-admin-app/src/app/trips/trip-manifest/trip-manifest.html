@@ -1,0 +1,227 @@
+<div class="flex flex-col gap-6">
+  <ui-page-header
+    title="Trip manifest"
+    description="Who is aboard this departure, and whether they have boarded."
+  >
+    <nav breadcrumb aria-label="Breadcrumb">
+      <a
+        routerLink="/trips"
+        class="text-sm font-medium text-primary underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >Trips</a
+      >
+    </nav>
+    <!-- One scope, not two: the file the backend builds is this whole
+         trip's manifest, so "current view" and "all results" would be
+         byte-identical and offering both would imply otherwise. -->
+    <ui-export-button
+      actions
+      [scopes]="['all']"
+      label="Export this manifest as CSV"
+      [pending]="exports.isPending('manifest')"
+      (exportRequested)="download()"
+    />
+  </ui-page-header>
+
+  @if (exports.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  }
+
+  @if (store.notFound()) {
+    <ui-empty-state
+      title="Trip not found"
+      description="It may have been deleted, or it belongs to a different client."
+    />
+  } @else if (store.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (store.loading() && !store.data()) {
+    <div class="flex flex-col gap-4" aria-busy="true">
+      <ui-skeleton [lines]="2" />
+      <ui-skeleton variant="block" height="12rem" />
+    </div>
+  } @else if (trip(); as t) {
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 class="font-semibold text-strong" style="font-size: var(--ui-text-heading)">
+        {{ t.route }}
+      </h2>
+      <ui-status-pill [label]="humanise(t.status)" />
+      <ui-status-pill [label]="tripClassLabel(t.trip_class)" />
+      <!-- Labelled, not just dot-separated. This read
+           "7 Sep 2026, 09:30 · E2E-3456-LA · Not recorded", and there
+           was no way to tell which of the two the missing one was —
+           a registration and a driver's name look nothing alike, but
+           "Not recorded" looks like either. -->
+      <span class="text-sm text-muted">
+        {{ t.scheduled_departure_at | date: 'd MMM y, HH:mm' }}
+        · {{ t.vehicle ? 'Vehicle ' + t.vehicle : 'No vehicle assigned' }}
+        · {{ t.driver ? 'Driver ' + t.driver : 'No driver assigned' }}
+      </span>
+    </div>
+
+    @if (totals(); as counts) {
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <ui-stat label="Passengers">{{ counts.passengers }}</ui-stat>
+        <ui-stat
+          label="Boarded"
+          [hint]="isJourneyKind() ? 'A tap is the boarding on a pay-as-you-go trip.' : null"
+          >{{ counts.boarded }}</ui-stat
+        >
+        <!-- "No vehicle assigned", never 0 — a zero here would say the
+             bus is full when in fact there is no bus. -->
+        <ui-stat label="Capacity">{{ capacityLabel() }}</ui-stat>
+      </div>
+    }
+
+    @if (!isJourneyKind()) {
+      <div class="flex flex-wrap items-center gap-3">
+        <ui-toggle
+          label="Show cancelled bookings"
+          describedBy="manifest-cancelled-hint"
+          [checked]="store.includeCancelled()"
+          (toggled)="onIncludeCancelled($event)"
+        />
+        <!-- Wired through `describedBy`: `ui-toggle` renders no text of
+             its own, so a loose paragraph beside it would reach sighted
+             users only. And the narrowing is stated rather than left
+             implicit — a list quietly showing a subset is
+             indistinguishable from a list with less data. -->
+        <p id="manifest-cancelled-hint" class="text-sm text-muted">
+          {{
+            store.includeCancelled()
+              ? 'Cancelled and expired bookings are shown, marked as such.'
+              : 'Cancelled and expired bookings are hidden. Unpaid holds are always shown.'
+          }}
+        </p>
+      </div>
+    }
+
+    @if (store.isEmpty()) {
+      @if (isJourneyKind()) {
+        <ui-empty-state
+          title="Nobody has tapped on yet"
+          description="This trip collects fares on board, so passengers appear here as they tap in."
+        />
+      } @else {
+        <ui-empty-state
+          title="Nobody is booked on this departure"
+          description="Bookings and their seats appear here as they are made."
+        />
+      }
+    } @else if (isJourneyKind()) {
+      <ui-table label="Trip manifest" [loading]="store.loading()">
+        <thead>
+          <tr class="border-b border-border text-xs uppercase tracking-wide text-muted">
+            <th class="py-2">Passenger</th>
+            <th class="hidden py-2 md:table-cell">Boarded at</th>
+            <th class="hidden py-2 md:table-cell">Alighted at</th>
+            <th class="hidden py-2 md:table-cell">Fare</th>
+            <th class="py-2">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of journeyRows(); track row.journey_id) {
+            <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+              <td class="py-2 font-medium text-strong">
+                {{ row.passenger_name }}
+                <span class="mt-0.5 block text-sm font-normal text-muted md:hidden">
+                  {{ journeySummary(row) }}
+                </span>
+              </td>
+              <td class="hidden py-2 whitespace-nowrap md:table-cell">
+                {{ row.board_stop }} · {{ row.boarded_at | date: 'HH:mm' }}
+              </td>
+              <td class="hidden py-2 whitespace-nowrap md:table-cell">
+                @if (row.alighted_at) {
+                  {{ row.alight_stop }} · {{ row.alighted_at | date: 'HH:mm' }}
+                } @else {
+                  <span class="text-muted">Still aboard</span>
+                }
+              </td>
+              <td class="hidden py-2 whitespace-nowrap md:table-cell">{{ fareLabel(row) }}</td>
+              <td class="py-2">
+                <ui-status-pill
+                  [tone]="journeyStatusTone(row.journey_status)"
+                  [label]="journeyStatusLabel(row.journey_status)"
+                />
+              </td>
+            </tr>
+          }
+        </tbody>
+      </ui-table>
+    } @else {
+      <ui-table label="Trip manifest" [loading]="store.loading()">
+        <thead>
+          <tr class="border-b border-border text-xs uppercase tracking-wide text-muted">
+            <th class="py-2">Passenger</th>
+            <th class="py-2">Seat</th>
+            <th class="hidden py-2 md:table-cell">Reference</th>
+            <!-- The **third** tier, not the second. Measured at 768px:
+                 six columns came to 690px inside a 654px wrapper, so the
+                 Ticket column was clipped and every row needed sideways
+                 scroll to finish reading. Fare is the one an operator at
+                 the door needs least — it is in the md:hidden sub-line
+                 below `md`, and in the CSV export at every width. -->
+            <th class="hidden py-2 lg:table-cell">Fare</th>
+            <th class="hidden py-2 md:table-cell">Booking</th>
+            <th class="py-2">Ticket</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (row of prepaidRows(); track row.ticket_id) {
+            <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+              <td class="py-2 font-medium text-strong">
+                {{ row.passenger_name }}
+                <span class="mt-0.5 block text-sm font-normal text-muted md:hidden">
+                  {{ prepaidSummary(row) }}
+                </span>
+              </td>
+              <!-- Open seating sells places, not seats, so this is null
+                   throughout on such a trip. Named rather than blank.
+
+                   No `whitespace-nowrap` here, unlike the reference and
+                   the dates: a seat number is short enough not to need
+                   it, and "Open seating" held on one line pushed the
+                   table 3px past a 390px viewport — measured by
+                   `responsive-tables.ts`, which the screenshots did not
+                   show. Sideways scroll on every row costs more than a
+                   two-line cell. -->
+              <td class="py-2">
+                {{ row.seat_number || 'Open seating' }}
+              </td>
+              <!-- `whitespace-nowrap`: a reference is one token, and the
+                   browser will otherwise break it after the hyphen. -->
+              <td class="hidden py-2 whitespace-nowrap md:table-cell">
+                {{ row.booking_reference }}
+              </td>
+              <td class="hidden py-2 whitespace-nowrap lg:table-cell">{{ fareLabel(row) }}</td>
+              <td class="hidden py-2 md:table-cell">
+                <ui-status-pill
+                  [tone]="bookingStatusTone(row.booking_status)"
+                  [label]="humanise(row.booking_status)"
+                />
+              </td>
+              <td class="py-2">
+                <!-- `null` when the booking holds a seat but has not
+                     been paid for, so no ticket has been issued yet.
+                     Labelled rather than left blank: an empty cell here
+                     reads as missing data, and this is the row an
+                     operator most needs to notice. -->
+                <ui-status-pill
+                  [tone]="ticketStatusTone(row.ticket_status)"
+                  [label]="ticketStatusLabel(row.ticket_status)"
+                />
+              </td>
+            </tr>
+          }
+        </tbody>
+      </ui-table>
+    }
+
+    @if (!store.isEmpty()) {
+      <ui-paginator
+        [total]="store.total()"
+        [page]="store.page()"
+        (pageChange)="onPageChange($event)"
+      />
+    }
+  }
+</div>

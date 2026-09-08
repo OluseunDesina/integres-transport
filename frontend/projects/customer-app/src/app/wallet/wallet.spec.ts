@@ -107,7 +107,7 @@ describe('WalletScreen', () => {
     await createComponent();
     apiClient.GET.and.resolveTo({ data: makeWallet() });
     await component['onBusinessChange']('biz-1');
-    component['setTopupAmount']('500.00');
+    component['topupForm'].controls.amount.setValue('500.00');
     apiClient.POST.and.resolveTo({
       data: { id: 'intent-1', status: 'pending', authorization_url: 'https://paystack/checkout', reference: 'ref-1' },
     });
@@ -128,7 +128,7 @@ describe('WalletScreen', () => {
     await createComponent();
     apiClient.GET.and.resolveTo({ data: makeWallet() });
     await component['onBusinessChange']('biz-1');
-    component['setTopupAmount']('500.00');
+    component['topupForm'].controls.amount.setValue('500.00');
     apiClient.POST.and.resolveTo({ error: { detail: 'This Business has no active Paystack account configured.' } });
 
     await component['topUp']();
@@ -136,5 +136,112 @@ describe('WalletScreen', () => {
     expect(component['topupError']()).toBe(
       'This Business has no active Paystack account configured.'
     );
+  });
+
+  /**
+   * The amount was a bare string signal gated only on "not empty", so
+   * every one of these reached `POST /payments/` and came back as
+   * whatever DRF said about it.
+   */
+  describe('top-up amount validation', () => {
+    async function withBusiness(amount: string): Promise<void> {
+      await createComponent();
+      apiClient.GET.and.resolveTo({ data: makeWallet() });
+      await component['onBusinessChange']('biz-1');
+      apiClient.POST.calls.reset();
+      component['topupForm'].controls.amount.setValue(amount);
+      await component['topUp']();
+    }
+
+    for (const amount of ['abc', '-5', '0', '12.345', '']) {
+      it(`refuses to send ${JSON.stringify(amount)}`, async () => {
+        await withBusiness(amount);
+
+        expect(apiClient.POST).not.toHaveBeenCalled();
+      });
+    }
+
+    it('accepts a whole number and two decimal places', async () => {
+      await createComponent();
+      apiClient.GET.and.resolveTo({ data: makeWallet() });
+      await component['onBusinessChange']('biz-1');
+      apiClient.POST.calls.reset();
+      // Stubbed, or the success path sets window.location.href and
+      // navigates the Karma page out from under the whole suite.
+      spyOn(component as unknown as WithRedirect, 'redirectToPaystack');
+      apiClient.POST.and.resolveTo({ data: { authorization_url: 'https://paystack/x' } });
+
+      component['topupForm'].controls.amount.setValue('1500.50');
+      await component['topUp']();
+
+      expect(apiClient.POST).toHaveBeenCalled();
+    });
+
+    // Asserting on the rendered message, not just on the absent
+    // request: ui-text-field shows nothing unless the parent binds both
+    // `invalid` and `errorMessage`, and a form binding neither passes a
+    // "did not submit" test while showing the user nothing at all.
+    it('renders why it refused, under the field', async () => {
+      await withBusiness('abc');
+      fixture.detectChanges();
+
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain('Enter an amount like 1500 or 1500.50.');
+    });
+
+    it('names zero as the problem rather than the format', async () => {
+      await withBusiness('0');
+      fixture.detectChanges();
+
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+        'Enter an amount greater than zero.'
+      );
+    });
+
+    it('offers a phone the numeric keypad', async () => {
+      await createComponent();
+      apiClient.GET.and.resolveTo({ data: makeWallet() });
+      await component['onBusinessChange']('biz-1');
+      fixture.detectChanges();
+
+      const input = (fixture.nativeElement as HTMLElement).querySelector(
+        'ui-text-field input'
+      ) as HTMLInputElement;
+      expect(input.getAttribute('inputmode')).toBe('decimal');
+    });
+  });
+
+  // DRF nests the error the way the request nests the field, so
+  // `{wallet_topup: {amount: [...]}}` has to be lifted before it can
+  // match a control named `amount`.
+  it('puts a rejected amount under the field, not in the page alert', async () => {
+    await createComponent();
+    apiClient.GET.and.resolveTo({ data: makeWallet() });
+    await component['onBusinessChange']('biz-1');
+    component['topupForm'].controls.amount.setValue('1.00');
+    apiClient.POST.and.resolveTo({
+      error: { wallet_topup: { amount: ['Minimum top-up is 100.00.'] } },
+    });
+
+    await component['topUp']();
+    fixture.detectChanges();
+
+    expect(component['amountError']()).toBe('Minimum top-up is 100.00.');
+    expect(component['topupError']()).toBeNull();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+      'Minimum top-up is 100.00.'
+    );
+  });
+
+  it('still shows a non-field error on the page', async () => {
+    await createComponent();
+    apiClient.GET.and.resolveTo({ data: makeWallet() });
+    await component['onBusinessChange']('biz-1');
+    component['topupForm'].controls.amount.setValue('500.00');
+    apiClient.POST.and.resolveTo({ error: { detail: 'Wallet top-ups are disabled.' } });
+
+    await component['topUp']();
+
+    expect(component['topupError']()).toBe('Wallet top-ups are disabled.');
   });
 });

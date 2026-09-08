@@ -21,6 +21,14 @@ class Schedule(BaseModel):
     departure_time = models.TimeField()
     effective_from = models.DateField()
     effective_until = models.DateField(null=True, blank=True)
+    # docs/specs/15-trip-classes.md. Snapshotted onto each generated
+    # Trip, so editing it here only affects Trips generated after the
+    # edit — the same semantics days_of_week edits already have.
+    trip_class = models.CharField(
+        max_length=20,
+        choices=Business.TripClass.choices,
+        default=Business.TripClass.STANDARD,
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -46,6 +54,22 @@ class Trip(BaseModel):
     scheduled_departure_at = models.DateTimeField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.SCHEDULED)
     status_changed_at = models.DateTimeField(null=True, blank=True)
+    # docs/specs/16-operational-analytics.md slice 1. Stamped by
+    # apps.scheduling.services.transition_trip_status on the
+    # `-> in_progress` and `-> completed` transitions respectively.
+    #
+    # These exist because `status_changed_at` above cannot answer "when
+    # did this Trip depart": it is a single mutable field that every
+    # transition overwrites, so once a Trip completes, the moment it
+    # actually left is gone. Delay is not derivable without these.
+    #
+    # Nullable forever, and never backfilled: a Trip cancelled before
+    # departure has neither, every Trip predating this spec has
+    # neither, and reinterpreting `status_changed_at` as a departure
+    # time for a past Trip would be a lie. Every metric derived from
+    # them reports "unknown" rather than zero when they are null.
+    actual_departure_at = models.DateTimeField(null=True, blank=True)
+    actual_arrival_at = models.DateTimeField(null=True, blank=True)
     vehicle = models.ForeignKey(
         Vehicle, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
@@ -53,10 +77,47 @@ class Trip(BaseModel):
         Driver, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
     )
     booking_mode = models.CharField(max_length=20, choices=Business.BookingMode.choices)
+    # Snapshotted alongside booking_mode, and for the same reason: a
+    # Business that switches how it collects fares must not silently
+    # change the terms of a departure passengers have already booked.
+    # Where the two disagree, the Trip's snapshot wins everywhere
+    # (docs/specs/10-booking-modes.md).
+    fare_collection_mode = models.CharField(
+        max_length=20,
+        choices=Business.FareCollectionMode.choices,
+        default=Business.FareCollectionMode.PREPAID,
+    )
+    # docs/specs/15-trip-classes.md. Snapshotted from the Schedule at
+    # generation time, alongside booking_mode/fare_collection_mode above
+    # and for the same reason.
+    #
+    # The snapshot direction is the opposite of the naive reading, and
+    # deliberately so: class is NOT derived from `vehicle`. That FK is
+    # nullable, and a Trip is generated — and can be booked — long
+    # before a vehicle is assigned. Deriving class from the vehicle
+    # would mean a departure had no class until the morning it ran. A
+    # passenger buys a class; the operator then has to find a vehicle
+    # that honours it.
+    #
+    # Immutable once anything non-cancelled is sold — enforced by
+    # apps.scheduling.services.set_trip_class, not just the serializer.
+    trip_class = models.CharField(
+        max_length=20,
+        choices=Business.TripClass.choices,
+        default=Business.TripClass.STANDARD,
+    )
     cancellation_reason = models.TextField(blank=True)
 
     class Meta:
         ordering = ["service_date", "scheduled_departure_at"]
+        # docs/specs/16-operational-analytics.md slice 1 — composites
+        # matched to that spec's documented filter set. `business` alone
+        # is not indexed here: Postgres already indexes every FK column,
+        # so only the multi-column shapes are new.
+        indexes = [
+            models.Index(fields=["business", "service_date"], name="trip_business_service_date"),
+            models.Index(fields=["business", "status"], name="trip_business_status"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["schedule", "service_date"],

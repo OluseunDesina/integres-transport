@@ -13,6 +13,7 @@ from apps.core.idempotency import IdempotencyKeyConflict
 from apps.core.permissions import HasPermission
 from apps.identity.models import User
 from apps.scheduling.models import Trip
+from apps.tapngo.services import CredentialInactive, UnknownToken
 
 from . import signing
 from .models import Ticket
@@ -26,11 +27,14 @@ from .serializers import (
 from .services import (
     AlreadyBoarded,
     InvalidSignature,
+    NoTicketForCredential,
     TicketExpired,
     TicketNotYetValid,
     TicketRevoked,
+    TripNotPrepaid,
     UnknownTicket,
     WrongTrip,
+    validate_credential,
     validate_ticket,
 )
 
@@ -60,7 +64,13 @@ class BookingTicketsView(generics.ListAPIView[Ticket]):
         # Ownership and paid-status are already checked in list() below
         # before this is ever reached — this only runs on the success
         # path.
-        return Ticket.objects.filter(booking_id=self.kwargs["booking_id"])
+        #
+        # `select_related` is load-bearing, not an optimisation:
+        # TicketSerializer.trip_class reads through booking -> trip, so
+        # without it every row costs two extra queries.
+        return Ticket.objects.select_related("booking__trip").filter(
+            booking_id=self.kwargs["booking_id"]
+        )
 
     def list(self, request: Request, *args: object, **kwargs: object) -> Response:
         booking = get_object_or_404(Booking.objects.all(), pk=self.kwargs["booking_id"])
@@ -130,8 +140,15 @@ class TicketValidateView(generics.GenericAPIView[Trip]):
     """POST /trips/{trip_id}/tickets/validate/ — the validator action,
     gated on `ticketing.validate`. Mirrors `apps.tapngo.views.TapRecordView`'s
     exact shape: `Idempotency-Key` header required before anything else,
-    each typed exception from `validate_ticket` mapped to its own
-    status."""
+    each typed exception from the service layer mapped to its own
+    status.
+
+    Takes either fare medium: a scanned ticket QR (`payload`) or a tap
+    credential (`token`, docs/specs/10-booking-modes.md's universal
+    tap). One endpoint rather than two, because both board the same
+    `Ticket` and return the same result — a credential presented here
+    is not a `TapEvent` and cannot be one, since `TapEvent.journey` is
+    non-null and a prepaid trip opens no journey."""
 
     permission_classes = [HasPermission("ticketing.validate")]
     serializer_class = TicketValidateSerializer
@@ -151,19 +168,36 @@ class TicketValidateView(generics.GenericAPIView[Trip]):
         serializer.is_valid(raise_exception=True)
         user = request.user
         assert isinstance(user, User)
+        token = serializer.validated_data.get("token")
         try:
-            ticket = validate_ticket(
-                trip=trip,
-                payload=serializer.validated_data["payload"],
-                validated_by=user,
-                idempotency_key=idempotency_key,
-            )
+            if token:
+                ticket = validate_credential(
+                    trip=trip,
+                    token=token,
+                    validated_by=user,
+                    idempotency_key=idempotency_key,
+                )
+            else:
+                ticket = validate_ticket(
+                    trip=trip,
+                    payload=serializer.validated_data["payload"],
+                    validated_by=user,
+                    idempotency_key=idempotency_key,
+                )
         except InvalidSignature as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except TicketNotYetValid as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except WrongTrip as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except TripNotPrepaid as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except UnknownToken as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
+        except CredentialInactive as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except NoTicketForCredential as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
         except UnknownTicket as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
         except TicketExpired as exc:
@@ -177,20 +211,27 @@ class TicketValidateView(generics.GenericAPIView[Trip]):
 
         ticket = Ticket.objects.select_related(
             "booking__passenger",
+            "from_stop",
+            "to_stop",
             "seat_reservation__seat",
-            "seat_reservation__from_stop",
-            "seat_reservation__to_stop",
         ).get(pk=ticket.pk)
         passenger = ticket.booking.passenger
         passenger_name = f"{passenger.first_name} {passenger.last_name}".strip() or passenger.email
+        # Stops come off the Ticket itself now, not through
+        # `seat_reservation` — an open-seating ticket has none. The seat
+        # number is null for those, which is the honest answer: nobody
+        # was assigned a seat, and showing a blank is better than the
+        # validator inventing one (docs/specs/10-booking-modes.md).
+        reservation = ticket.seat_reservation
         result = TicketValidationResultSerializer(
             {
                 "status": ticket.status,
                 "passenger_name": passenger_name,
-                "seat_number": ticket.seat_reservation.seat.seat_number,
-                "from_stop": ticket.seat_reservation.from_stop.name,
-                "to_stop": ticket.seat_reservation.to_stop.name,
+                "seat_number": None if reservation is None else reservation.seat.seat_number,
+                "from_stop": ticket.from_stop.name,
+                "to_stop": ticket.to_stop.name,
                 "trip_departure_at": trip.scheduled_departure_at,
+                "booking_status": ticket.booking.status,
             }
         )
         return Response(result.data)

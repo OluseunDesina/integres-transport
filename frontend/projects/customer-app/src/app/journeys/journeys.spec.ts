@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { expectColumnVisibilityParity } from '@shared-ui';
 import { By } from '@angular/platform-browser';
 
 import { Journeys } from './journeys';
@@ -89,4 +90,13 @@ describe('Journeys', () => {
 
     expect(store.changePage).toHaveBeenCalledWith(25);
   });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makeFareJourney()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'journeys');
+  });
+
 });

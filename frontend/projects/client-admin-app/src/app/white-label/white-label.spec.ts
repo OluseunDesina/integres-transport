@@ -123,6 +123,37 @@ describe('WhiteLabel', () => {
     await fixture.componentInstance['onSubmit']();
     fixture.detectChanges();
 
-    expect(fixture.componentInstance['errorMessage']()).toBe('This domain is already in use.');
+    // Rendered under the Domain field. Seven text fields on this screen
+    // and the old alert named none of them. Note the form renders here
+    // for the first time — the message has to survive the control being
+    // bound, which is why it does not live only in `control.errors`.
+    const error = (fixture.nativeElement as HTMLElement).querySelector(
+      'ui-text-field [role="alert"]',
+    );
+    expect(error?.textContent?.trim()).toBe('This domain is already in use.');
+    expect(fixture.componentInstance['errorMessage']()).toBeNull();
+  });
+
+  it('reports an empty domain as missing rather than as a bad email address', async () => {
+    // The previous `fieldError` returned "Enter a valid email address."
+    // for whichever of its two fields was not `domain`, and "This field
+    // is required." for `domain` — so a malformed sender address read as
+    // missing and a missing domain could read as malformed.
+    ({ fixture, apiClient } = await setup());
+    apiClient.GET.and.resolveTo({ data: makeConfig() });
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const form = fixture.componentInstance['form'];
+    form.controls.domain.setValue('');
+    form.controls.email_sender_address.setValue('not-an-email');
+    form.markAllAsTouched();
+    fixture.detectChanges();
+
+    const errors = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('ui-text-field [role="alert"]'),
+    ).map((el) => el.textContent?.trim());
+    expect(errors).toContain('This field is required.');
+    expect(errors).toContain('Enter a valid email address.');
   });
 });

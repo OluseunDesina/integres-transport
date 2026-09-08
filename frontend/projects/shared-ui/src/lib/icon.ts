@@ -33,7 +33,39 @@ export type IconName =
   | 'credit-card'
   | 'tag'
   | 'bolt'
-  | 'bell';
+  | 'bell'
+  // Added for spec 14 slice 2's primitives. `ellipsis-horizontal` is the
+  // action-menu trigger, `x-mark` closes a drawer and removes a filter
+  // chip, `magnifying-glass` labels the filter bar's search, and
+  // `bars-3`/`bars-4` are the density toggle's two states — four bars in
+  // the same box reads as "tighter rows" without needing a legend.
+  | 'ellipsis-horizontal'
+  | 'x-mark'
+  | 'magnifying-glass'
+  | 'arrow-down-tray'
+  | 'chevron-down'
+  | 'bars-3'
+  | 'bars-4'
+  | 'funnel'
+  // Added for spec 14 slice 4. `route-form` reordered its stops with
+  // bare "↑"/"↓" text glyphs, which a screen reader reads as "up
+  // arrow"/"down arrow" only if it happens to have those characters in
+  // its dictionary, and which no other control in the app resembles.
+  | 'arrow-up'
+  | 'arrow-down'
+  // Added for spec 16 slice 3: the console's landing page is a dashboard
+  // now, and a house glyph on it named the route rather than the screen.
+  | 'chart-bar'
+  // Added for spec 17 slice 2: the incident queue. A warning triangle
+  // rather than a bell — the bell is already the notification centre,
+  // and two different meanings behind one glyph in the same sidebar is
+  // how a nav stops being scannable.
+  | 'exclamation-triangle'
+  // Added for spec 20 slice 3: the live-operations board. Broadcast
+  // rings rather than the existing `map` glyph — `map` already names
+  // the static route network, and this screen is about a live signal
+  // from a vehicle, not the network it runs on.
+  | 'signal';
 
 const PATHS: Record<IconName, string> = {
   home: 'M2.25 12l8.954-8.955a1.5 1.5 0 0 1 2.122 0L22.28 12M4.5 9.75V21a.75.75 0 0 0 .75.75H9.75v-6a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75v6h4.5a.75.75 0 0 0 .75-.75V9.75',
@@ -78,6 +110,24 @@ const PATHS: Record<IconName, string> = {
   tag: 'M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.169.659 1.591l9.581 9.581c.699.7 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3ZM6 6h.008v.008H6V6Z',
   bolt: 'M3.75 13.5 10.5 3v7.5h9L12.75 21v-7.5h-9Z',
   bell: 'M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0',
+  'ellipsis-horizontal':
+    'M6.75 12a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm6 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm6 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z',
+  'x-mark': 'M6 18 18 6M6 6l12 12',
+  'magnifying-glass': 'm21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z',
+  'arrow-down-tray': 'M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3',
+  'chevron-down': 'm19.5 8.25-7.5 7.5-7.5-7.5',
+  'bars-3': 'M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5',
+  'bars-4': 'M3.75 5.25h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5m-16.5 4.5h16.5',
+  funnel:
+    'M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z',
+  'arrow-up': 'M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18',
+  'arrow-down': 'M19.5 13.5 12 21m0 0-7.5-7.5M12 21V3',
+  'chart-bar':
+    'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z',
+  'exclamation-triangle':
+    'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z',
+  signal:
+    'M9.348 14.652a3.75 3.75 0 0 1 0-5.304m5.304 0a3.75 3.75 0 0 1 0 5.304m-7.425 2.121a6.75 6.75 0 0 1 0-9.546m9.546 0a6.75 6.75 0 0 1 0 9.546M5.106 18.894c-3.808-3.808-3.808-9.98 0-13.789m13.788 0c3.808 3.808 3.808 9.981 0 13.79M12 12h.008v.008H12V12Z',
 };
 
 @Component({

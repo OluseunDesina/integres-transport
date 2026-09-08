@@ -1,5 +1,6 @@
 import { Dialog } from '@angular/cdk/dialog';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { expectColumnVisibilityParity } from '@shared-ui';
 import type { ConfirmDialogData } from '@shared-ui';
 import { API_CLIENT } from '@api-client';
 import { Subject } from 'rxjs';
@@ -81,7 +82,9 @@ describe('MyCredentials', () => {
     const cells = Array.from(
       (fixture.nativeElement as HTMLElement).querySelectorAll('tbody tr td')
     ).map((td) => td.textContent?.trim());
-    expect(cells[0]).toBe('QR code');
+    // The type cell also carries the responsive sub-line now, so it is
+    // asserted by its parts rather than by exact equality.
+    expect(cells[0]).toContain('QR code');
     expect(cells[1]).toBe('My phone');
     const pill = (fixture.nativeElement as HTMLElement).querySelector('ui-status-pill');
     expect(pill?.textContent?.trim()).toBe('Active');
@@ -172,4 +175,12 @@ describe('MyCredentials', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(apiClient.GET).toHaveBeenCalled();
   });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', async () => {
+    await createComponent();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'my-credentials');
+  });
+
 });

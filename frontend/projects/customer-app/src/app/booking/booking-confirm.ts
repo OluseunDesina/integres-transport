@@ -2,12 +2,13 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button } from '@shared-ui';
+import { Alert, Button, PageHeader } from '@shared-ui';
 
+import { BookingSteps } from '../shared/booking-steps';
 import type { BookingRequest, SeatPickerRequest } from '../shared/booking-draft';
 import { readBookingRequest } from '../shared/booking-draft';
 import { formatMoney, multiplyDecimal } from '../shared/money';
+import { tripClassLabel } from '../shared/trip-class';
 
 const SEAT_CONFLICT_NOTICE =
   'One of the seats you picked was taken while you were booking. Choose another.';
@@ -48,12 +49,11 @@ function toErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-booking-confirm',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, Alert, Button],
+  imports: [DatePipe, BookingSteps, Alert, Button, PageHeader],
   templateUrl: './booking-confirm.html',
 })
 export class BookingConfirm implements OnInit {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly router = inject(Router);
 
   protected readonly request = signal<BookingRequest | null>(readBookingRequest(this.router));
@@ -98,6 +98,12 @@ export class BookingConfirm implements OnInit {
     return request ? formatMoney(request.farePerSeat, request.currency) : '';
   });
 
+  /** Blank rather than a placeholder when the flow carried no class —
+   * a state object written by an older build (see `booking-draft.ts`).
+   * The row is omitted entirely in that case, the same way `Seats` is
+   * on a service that does not assign them. */
+  protected readonly serviceClass = computed(() => tripClassLabel(this.request()?.tripClass));
+
   async ngOnInit(): Promise<void> {
     if (!this.request()) {
       await this.router.navigate(['/search']);
@@ -115,7 +121,8 @@ export class BookingConfirm implements OnInit {
     const { data, error, response } = await this.api.POST('/api/v1/bookings/', {
       // Idempotency-Key is a declared header *parameter* on this
       // operation, so it travels in params.header — unlike
-      // Authorization, which every call attaches ad hoc.
+      // Authorization, which `@auth`'s middleware attaches centrally
+      // (docs/specs/13-session-resilience.md).
       params: { header: { 'Idempotency-Key': this.idempotencyKey } },
       // Two genuinely different bodies, and the backend refuses the
       // wrong one rather than ignoring the parts that do not apply
@@ -137,7 +144,6 @@ export class BookingConfirm implements OnInit {
               from_stop: request.fromStop.id,
               to_stop: request.toStop.id,
             },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     this.submitting.set(false);
@@ -176,6 +182,10 @@ export class BookingConfirm implements OnInit {
       scheduledDepartureAt: request.scheduledDepartureAt,
       fromStop: request.fromStop,
       toStop: request.toStop,
+      // Rebuilt field by field rather than spread, so a new field on
+      // SeatPickerRequest has to be added here too or it is silently
+      // dropped on the way back.
+      tripClass: request.tripClass,
       notice,
     };
     await this.router.navigate(['/search/seats'], { state });

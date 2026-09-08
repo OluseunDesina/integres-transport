@@ -1,6 +1,9 @@
+import datetime
+
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -63,6 +66,27 @@ def test_queue_query_count_does_not_scale_with_client_count(
     assert len(response.data["results"]) == 5
 
 
+def test_queue_is_ordered_oldest_submission_first() -> None:
+    """FIFO, matching `KybQueueListView`'s own ordering — the two review
+    queues are the same screen for two different models and must not
+    disagree on what comes first. Creation order and submission order are
+    deliberately reversed here so the two can be told apart."""
+    platform_staff = PlatformStaffUserFactory()
+    first_created = _submitted_client_with_document()
+    second_created = _submitted_client_with_document()
+
+    second_created.kyc_submitted_at = timezone.now() - datetime.timedelta(days=3)
+    second_created.save(update_fields=["kyc_submitted_at"])
+    first_created.kyc_submitted_at = timezone.now()
+    first_created.save(update_fields=["kyc_submitted_at"])
+
+    response = _auth_client(platform_staff, platform_staff=True).get(reverse("kyc-queue-list"))
+
+    assert response.status_code == status.HTTP_200_OK
+    ids = [row["id"] for row in response.data["results"]]
+    assert ids == [str(second_created.id), str(first_created.id)]
+
+
 def test_queue_lists_only_submitted_clients_with_their_documents() -> None:
     submitted = _submitted_client_with_document()
     ClientFactory(kyc_status=Client.KycStatus.PENDING)
@@ -108,6 +132,16 @@ def test_decide_approve_sets_status_and_is_audit_logged() -> None:
     entry = AuditLog.objects.get(action="client.kyc_decided")
     assert entry.metadata["decision"] == "approve"
 
+    # The document itself never advanced past `pending` on its own — a
+    # decision on the client is a decision on the bundle that earned it.
+    # RLS resets to anonymous outside a permitted session, same as
+    # `submit_kyc_document`'s own comment below.
+    with tenant_context(str(client.id)):
+        document = KycDocument.all_objects.get(client=client)
+    assert document.status == KycDocument.Status.APPROVED
+    assert document.reviewed_by_id == platform_staff.id
+    assert document.reviewed_at is not None
+
 
 def test_decide_reject_requires_a_reason() -> None:
     client = _submitted_client_with_document()
@@ -133,6 +167,11 @@ def test_decide_reject_with_reason_sets_rejection_reason() -> None:
     client.refresh_from_db()
     assert client.kyc_status == Client.KycStatus.REJECTED
     assert client.kyc_rejection_reason == "Certificate illegible"
+
+    with tenant_context(str(client.id)):
+        document = KycDocument.all_objects.get(client=client)
+    assert document.status == KycDocument.Status.REJECTED
+    assert document.rejection_reason == "Certificate illegible"
 
 
 def test_full_register_reject_resubmit_reapprove_flow() -> None:
@@ -168,3 +207,11 @@ def test_full_register_reject_resubmit_reapprove_flow() -> None:
     client.refresh_from_db()
     assert client.kyc_status == Client.KycStatus.APPROVED
     assert client.kyc_rejection_reason == ""
+
+    # The first document was decided at the rejection — a later approval
+    # must not silently relabel history onto it. Only the document
+    # submitted afterwards belongs to this approval.
+    with tenant_context(str(client.id)):
+        documents = {d.document_type: d for d in KycDocument.all_objects.filter(client=client)}
+    assert documents["certificate_of_incorporation"].status == KycDocument.Status.REJECTED
+    assert documents["tax_certificate"].status == KycDocument.Status.APPROVED

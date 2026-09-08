@@ -12,16 +12,26 @@ from typing import Any
 from django.conf import settings
 
 
-def paystack_payload(*, event: str, reference: str) -> dict[str, Any]:
-    return {
-        "event": event,
-        "data": {
-            "reference": reference,
-            "amount": 0,
-            "currency": "NGN",
-            "customer": {"email": "passenger@example.com"},
-        },
+def paystack_payload(
+    *, event: str, reference: str, channel: str | None = None
+) -> dict[str, Any]:
+    """`channel` is omitted by default rather than defaulted to a value.
+
+    docs/specs/16-operational-analytics.md slice 1 reads `data.channel`,
+    and every caller written before it sends a payload without one — so
+    "the key is absent" is the shape most of this suite exercises, and
+    it must stay the shape it exercises. Pass `channel=` only in the
+    tests that are about the channel.
+    """
+    data: dict[str, Any] = {
+        "reference": reference,
+        "amount": 0,
+        "currency": "NGN",
+        "customer": {"email": "passenger@example.com"},
     }
+    if channel is not None:
+        data["channel"] = channel
+    return {"event": event, "data": data}
 
 
 def signed_body(payload: dict[str, Any]) -> tuple[bytes, str]:

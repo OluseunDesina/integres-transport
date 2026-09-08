@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
 import { ListStore, type Page } from '@shared-data';
 
 export type FareRule = components['schemas']['FareRule'];
@@ -25,7 +24,6 @@ function toErrorMessage(error: unknown): string {
 @Injectable({ providedIn: 'root' })
 export class FareRuleStore extends ListStore<FareRule, FareRuleQuery> {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
 
   constructor() {
     super({}, 25);
@@ -36,8 +34,13 @@ export class FareRuleStore extends ListStore<FareRule, FareRuleQuery> {
     page: Page
   ): Promise<{ items: FareRule[]; total: number }> {
     const { data, error } = await this.api.GET('/api/v1/fare-rules/', {
-      params: { query: { limit: page.limit, offset: page.offset, business: query.business } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+      params: {
+        query: {
+          limit: page.limit,
+          offset: page.offset,
+          business: query.business,
+        },
+      },
     });
     if (!data) {
       throw new Error(toErrorMessage(error));

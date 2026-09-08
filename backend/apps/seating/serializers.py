@@ -112,3 +112,31 @@ class TripAvailabilityQuerySerializer(serializers.Serializer):
 class SeatAvailabilitySerializer(serializers.Serializer):
     seat = SeatSerializer()
     is_available = serializers.BooleanField()
+
+
+class TripBookabilitySerializer(serializers.Serializer):
+    """The `GET /trips/{id}/availability/` envelope —
+    docs/specs/10-booking-modes.md.
+
+    Replaced a bare array of seat rows. The array could not distinguish
+    "no vehicle assigned yet" from "every seat taken" — both were `[]` —
+    so the customer app rendered a departure nobody had assigned a bus
+    to as "sold out". `status` is the field that separates them.
+
+    `seats` is always `[]` for open seating, and `capacity_remaining` is
+    always `null` for reservation mode; each mode fills the half that
+    means something for it rather than the API returning two shapes.
+    """
+
+    booking_mode = serializers.CharField()
+    # docs/specs/15-trip-classes.md. Read straight off the Trip's own
+    # snapshot rather than from `bookability`, which is about what is
+    # left to sell, not about what is being sold.
+    trip_class = serializers.CharField()
+    status = serializers.CharField()
+    seats = SeatAvailabilitySerializer(many=True)
+    capacity_remaining = serializers.IntegerField(allow_null=True)
+    # "May a passenger pick their own seat on this trip" — see
+    # `Bookability`'s docstring for why this is not simply the Business
+    # field of the same name.
+    seat_selection_enabled = serializers.BooleanField()

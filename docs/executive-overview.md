@@ -205,7 +205,7 @@ request.
 Every phase originally scoped — secure multi-tenant infrastructure, a
 working compliance/onboarding process, full admin tooling, the
 complete operational model of routes/fleet/schedules, seat-locking
-booking, tap-and-go fare pricing, real payment collection and operator
+booking, pay-as-you-go fare pricing, real payment collection and operator
 payout through Paystack, and tamper-proof digital ticketing — has been
 built to a written spec, reviewed against a fixed checklist, and
 reported on honestly, including what wasn't perfect and what was

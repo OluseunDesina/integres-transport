@@ -6,32 +6,38 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, Select, TextField } from '@shared-ui';
-import type { SelectOption } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  Checkbox,
+  FormSection,
+  Icon,
+  PageHeader,
+  Select,
+  StatusPill,
+  Tabs,
+  TextField,
+} from '@shared-ui';
+import type { SelectOption, TabItem } from '@shared-ui';
 
 import { RouteStore, type Route } from '../../shared/data/store/route.store';
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
+import { extractFirstErrorMessage } from '../../shared/error-message';
+import { applyServerErrors, clearServerErrors, fieldErrorMessage } from '../../shared/form-errors';
+import { statusLabel, statusTone } from '../../shared/route-labels';
+import { TRIP_CLASS_OPTIONS, type TripClass } from '../../shared/trip-class';
 
 type RouteStopEntry = components['schemas']['RouteStopEntry'];
 
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
+const TABS: TabItem[] = [
+  { id: 'details', label: 'Details' },
+  { id: 'stops', label: 'Stops' },
+];
 
 /**
  * One component for create (`routes/new`) and edit (`routes/:id/edit`) —
@@ -43,7 +49,22 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-route-form',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, FormsModule, RouterLink, Alert, Button, Select, TextField],
+  imports: [
+    NgTemplateOutlet,
+    ReactiveFormsModule,
+    FormsModule,
+    RouterLink,
+    Alert,
+    Button,
+    Checkbox,
+    FormSection,
+    Icon,
+    PageHeader,
+    Select,
+    StatusPill,
+    Tabs,
+    TextField,
+  ],
   templateUrl: './route-form.html',
 })
 export class RouteForm implements OnInit {
@@ -51,7 +72,6 @@ export class RouteForm implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   protected readonly store = inject(RouteStore);
 
@@ -59,6 +79,14 @@ export class RouteForm implements OnInit {
   protected readonly editing = computed(() => this.routeId() !== null);
   protected readonly existingRoute = signal<Route | null>(null);
   protected readonly notFound = signal(false);
+  protected readonly statusLabel = statusLabel;
+  protected readonly statusTone = statusTone;
+  /** docs/specs/19-route-lifecycle.md edge case: "Editing an archived
+   * route: 400; restore first." The form disables itself rather than
+   * letting an operator fill it in only to meet that rejection on
+   * submit — restoring is the Routes list's row menu action, not
+   * anything this screen can do. */
+  protected readonly isArchived = computed(() => this.existingRoute()?.status === 'archived');
 
   protected readonly submitting = signal(false);
   protected readonly errorMessage = signal<string | null>(null);
@@ -68,6 +96,13 @@ export class RouteForm implements OnInit {
   // the stop-order section below stays usable — nothing else in the UI
   // would otherwise signal that a details save actually completed.
   protected readonly detailsSaved = signal(false);
+
+  /** Details and Stops are two unrelated panels of one record, and both
+   * are already loaded by the time either renders — which is the model
+   * `ui-tabs` is built for. Create mode has no stops yet, so the tab
+   * list only appears once editing. */
+  protected readonly tabs = TABS;
+  protected readonly activeTab = signal('details');
 
   protected readonly routeStops = signal<RouteStopEntry[]>([]);
   protected readonly availableStops = signal<{ id: string; name: string }[]>([]);
@@ -87,16 +122,43 @@ export class RouteForm implements OnInit {
   // from whichever Business is active in the header switcher. It stays
   // a form control purely as the value carrier for create.
   //
-  // `is_active` is gone entirely: the Routes table owns it now. Leaving
-  // it here would mean a details-only save silently re-sent whatever
-  // value this form loaded with, clobbering a toggle made elsewhere in
+  // `status` is gone entirely: the Routes list's row menu owns every
+  // transition (docs/specs/19-route-lifecycle.md — the backend rejects
+  // a PATCH naming it, and this form never sends the key). Leaving it
+  // here would mean a details-only save silently re-sent whatever value
+  // this form loaded with, clobbering a status change made elsewhere in
   // the meantime.
   protected readonly form = this.fb.nonNullable.group({
     business: ['', Validators.required],
     name: ['', Validators.required],
     code: [''],
     description: [''],
+    // Both optional and both plain strings, not `type="number"` —
+    // `ui-text-field` doesn't offer that type (spinners, scroll-wheel
+    // capture and locale-dependent parsing), so these use
+    // `inputMode="decimal"`/`"numeric"` instead, same as
+    // `seat-hold.ts`'s `seat_hold_minutes`.
+    distance_km: [''],
+    estimated_duration_minutes: [''],
   });
+
+  /**
+   * `available_trip_classes` — docs/specs/15-trip-classes.md.
+   *
+   * A local signal rather than a form control, mirroring
+   * `ScheduleForm`'s `selectedDays` exactly: a checkbox group over a
+   * fixed list is the same shape, and both are "used once, local".
+   *
+   * **Empty means every class is allowed**, not "none" — that reading
+   * is what keeps every Route created before spec 15 schedulable, and
+   * inverting it here would silently empty the class picker on
+   * `ScheduleForm` and `TripForm` for every existing route. The
+   * template says so rather than leaving it to be inferred from an
+   * all-unchecked group.
+   */
+  protected readonly tripClassOptions = TRIP_CLASS_OPTIONS;
+  protected readonly selectedClasses = signal<TripClass[]>([]);
+  protected readonly allClassesAllowed = computed(() => this.selectedClasses().length === 0);
 
   async ngOnInit(): Promise<void> {
     const id = this.route.snapshot.paramMap.get('id');
@@ -116,10 +178,8 @@ export class RouteForm implements OnInit {
     }
     this.routeId.set(id);
 
-    // Paged full-list lookup, not one bounded page plus `.find()`:
-    // the bounded form reported "not found" for any record outside
-    // the store's current page, which on a refresh or a pasted link
-    // is page 1. See `ListStore.findByIdPaged`.
+    // The real single-record GET added in docs/specs/19-route-lifecycle.md
+    // slice 1 — no bounded-page lookup needed any more.
     const route = await this.store.findById(id);
 
     if (!route) {
@@ -128,37 +188,65 @@ export class RouteForm implements OnInit {
     }
 
     this.setExistingRoute(route);
-    this.form.controls.business.disable();
     await this.loadAvailableStops(route.business);
+  }
+
+  protected isClassSelected(value: string): boolean {
+    return this.selectedClasses().includes(value as TripClass);
+  }
+
+  protected toggleClass(value: string, checked: boolean): void {
+    const entry = value as TripClass;
+    this.selectedClasses.update((classes) =>
+      checked
+        ? [...classes, entry]
+        : classes.filter((existing) => existing !== entry)
+    );
   }
 
   private setExistingRoute(route: Route): void {
     this.existingRoute.set(route);
     this.routeStops.set([...route.stops].sort((a, b) => a.sequence - b.sequence));
+    // `?? []` because the field is optional on write, so the generated
+    // type admits `undefined` even though a read always carries it.
+    // Empty is the right fallback either way: it means "every class".
+    this.selectedClasses.set((route.available_trip_classes ?? []) as TripClass[]);
     this.form.patchValue({
       business: route.business,
       name: route.name,
       code: route.code,
       description: route.description,
+      distance_km: route.distance_km ?? '',
+      estimated_duration_minutes:
+        route.estimated_duration_minutes != null ? String(route.estimated_duration_minutes) : '',
     });
+    if (route.status === 'archived') {
+      this.form.disable();
+    } else {
+      this.form.enable();
+      this.form.controls.business.disable();
+    }
   }
 
   private async loadAvailableStops(businessId: string): Promise<void> {
     const { data } = await this.api.GET('/api/v1/stops/', {
       params: { query: { limit: 100, offset: 0 } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     if (data) {
       this.availableStops.set(
         data.results
           .filter((stop) => stop.business === businessId)
-          .map((stop) => ({ id: stop.id, name: stop.name })),
+          .map((stop) => ({ id: stop.id, name: stop.name }))
       );
     }
   }
 
   protected async onSubmit(): Promise<void> {
-    if (this.form.invalid) {
+    // A disabled FormGroup reports `invalid: false` regardless of its
+    // controls' own state, so `isArchived()` needs its own guard here —
+    // the backend's own 400 for this case names the fix, but there is
+    // no reason to round-trip for it when the screen already knows.
+    if (this.isArchived() || this.form.invalid) {
       this.form.markAllAsTouched();
       return;
     }
@@ -166,10 +254,10 @@ export class RouteForm implements OnInit {
     this.submitting.set(true);
     this.errorMessage.set(null);
     this.detailsSaved.set(false);
+    // Clear last attempt's server errors, or a field the server no
+    // longer objects to keeps showing why it once did.
+    clearServerErrors(this.form);
     const values = this.form.getRawValue();
-    const authHeader = {
-      Authorization: `Bearer ${this.authStore.accessToken()}`,
-    };
     const id = this.routeId();
 
     if (id) {
@@ -179,16 +267,25 @@ export class RouteForm implements OnInit {
           name: values.name,
           code: values.code,
           description: values.description,
+          available_trip_classes: this.selectedClasses(),
+          // Blank means "not set", not "zero" — an empty control sends
+          // `null`, never `0` or an empty string, so a route with no
+          // recorded depth stays that way rather than reporting a
+          // distance/duration of nothing.
+          distance_km: values.distance_km.trim() || null,
+          estimated_duration_minutes: values.estimated_duration_minutes.trim()
+            ? Number(values.estimated_duration_minutes)
+            : null,
         },
-        headers: authHeader,
       });
       this.submitting.set(false);
       if (!data) {
         this.errorMessage.set(
-          extractFirstErrorMessage(
+          applyServerErrors(
+            this.form,
             error,
-            'Could not save this route. Check your details and try again.',
-          ),
+            'Could not save this route. Check your details and try again.'
+          )
         );
         return;
       }
@@ -203,16 +300,17 @@ export class RouteForm implements OnInit {
         name: values.name,
         code: values.code,
         description: values.description,
+        available_trip_classes: this.selectedClasses(),
       },
-      headers: authHeader,
     });
     this.submitting.set(false);
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(
+        applyServerErrors(
+          this.form,
           error,
-          'Could not save this route. Check your details and try again.',
-        ),
+          'Could not save this route. Check your details and try again.'
+        )
       );
       return;
     }
@@ -265,14 +363,13 @@ export class RouteForm implements OnInit {
     const { data, error } = await this.api.PUT('/api/v1/routes/{id}/stops/', {
       params: { path: { id: routeId } },
       body: { stops: this.routeStops().map((s) => s.id) },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
 
     this.savingStops.set(false);
 
     if (!data) {
       this.stopsError.set(
-        extractFirstErrorMessage(error, 'Could not save the stop order. Try again.'),
+        extractFirstErrorMessage(error, 'Could not save the stop order. Try again.')
       );
       return;
     }
@@ -281,11 +378,22 @@ export class RouteForm implements OnInit {
     this.stopsSaved.set(true);
   }
 
-  protected fieldError(field: 'business' | 'name'): string | null {
-    const control = this.form.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+  protected setActiveTab(id: string): void {
+    this.activeTab.set(id);
+  }
+
+  /** Every field, not just the two with validators: any of them can come
+   * back rejected by the server, and `fieldErrorMessage` surfaces that
+   * the same way it surfaces a client-side failure. */
+  protected fieldError(
+    field:
+      | 'business'
+      | 'name'
+      | 'code'
+      | 'description'
+      | 'distance_km'
+      | 'estimated_duration_minutes'
+  ): string | null {
+    return fieldErrorMessage(this.form.controls[field]);
   }
 }

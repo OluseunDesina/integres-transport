@@ -1,42 +1,95 @@
-<div class="mx-auto max-w-lg">
-  <h1 class="mb-6 text-lg font-semibold text-slate-900">White Label</h1>
+<div class="mx-auto max-w-2xl">
+  <ui-page-header
+    class="mb-6"
+    title="White label"
+    description="How this client's own domain, branding and outbound email present the platform to its passengers."
+  />
 
   @if (loadError(); as message) {
     <ui-alert>{{ message }}</ui-alert>
   } @else if (loading()) {
-    <p class="text-sm text-slate-500">Loading…</p>
+    <p class="text-sm text-muted">Loading…</p>
   } @else {
     @if (errorMessage(); as message) {
       <ui-alert class="mb-4">{{ message }}</ui-alert>
     }
 
-    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
-      <ui-text-field
-        label="Domain"
-        formControlName="domain"
-        [invalid]="!!fieldError('domain')"
-        [errorMessage]="fieldError('domain')"
-      />
-      <ui-text-field label="Logo URL" formControlName="logo" />
-      <ui-text-field label="Primary color" formControlName="primary_color" />
-      <ui-text-field label="Secondary color" formControlName="secondary_color" />
-      <ui-text-field label="Email sender name" formControlName="email_sender_name" />
-      <ui-text-field
-        label="Email sender address"
-        type="email"
-        formControlName="email_sender_address"
-        [invalid]="!!fieldError('email_sender_address')"
-        [errorMessage]="fieldError('email_sender_address')"
-      />
-      <ui-text-field label="Terms URL" formControlName="terms_url" />
+    <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-8" novalidate>
+      <ui-form-section
+        title="Custom domain"
+        description="The host passengers reach this client on. It is what resolves their branding at sign-in."
+      >
+        <ui-text-field
+          label="Domain"
+          hint="Without a scheme — book.example.com, not https://book.example.com."
+          formControlName="domain"
+          [invalid]="!!fieldError('domain')"
+          [errorMessage]="fieldError('domain')"
+        />
+      </ui-form-section>
 
-      <div class="mt-2 flex items-center gap-3">
-        <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
-          Save changes
-        </ui-button>
+      <ui-form-section
+        title="Branding"
+        description="Applied across the passenger app at runtime. A colour that fails contrast against white is ignored rather than shipped unreadable."
+      >
+        <ui-text-field
+          label="Logo URL"
+          formControlName="logo"
+          [invalid]="!!fieldError('logo')"
+          [errorMessage]="fieldError('logo')"
+        />
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <ui-text-field
+            label="Primary color"
+            hint="A hex value such as #2549EB."
+            formControlName="primary_color"
+            [invalid]="!!fieldError('primary_color')"
+            [errorMessage]="fieldError('primary_color')"
+          />
+          <ui-text-field
+            label="Secondary color"
+            hint="A hex value such as #1D37D8."
+            formControlName="secondary_color"
+            [invalid]="!!fieldError('secondary_color')"
+            [errorMessage]="fieldError('secondary_color')"
+          />
+        </div>
+      </ui-form-section>
+
+      <ui-form-section
+        title="Email identity"
+        description="Who transactional email appears to come from."
+      >
+        <ui-text-field
+          label="Email sender name"
+          formControlName="email_sender_name"
+          [invalid]="!!fieldError('email_sender_name')"
+          [errorMessage]="fieldError('email_sender_name')"
+        />
+        <ui-text-field
+          label="Email sender address"
+          type="email"
+          formControlName="email_sender_address"
+          [invalid]="!!fieldError('email_sender_address')"
+          [errorMessage]="fieldError('email_sender_address')"
+        />
+        <ui-text-field
+          label="Terms URL"
+          formControlName="terms_url"
+          [invalid]="!!fieldError('terms_url')"
+          [errorMessage]="fieldError('terms_url')"
+        />
+      </ui-form-section>
+
+      <div class="flex flex-col gap-3">
         @if (saved() && !form.dirty) {
-          <span class="text-sm text-emerald-700">Saved.</span>
+          <ui-alert variant="success">White label settings saved.</ui-alert>
         }
+        <div>
+          <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+            Save changes
+          </ui-button>
+        </div>
       </div>
     </form>
   }

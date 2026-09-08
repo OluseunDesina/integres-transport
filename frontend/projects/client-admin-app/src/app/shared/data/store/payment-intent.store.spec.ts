@@ -15,6 +15,9 @@ function makePaymentIntent(overrides: Record<string, unknown> = {}) {
     psp_provider: 'paystack',
     psp_reference: 'ref-1',
     psp_authorization_url: '',
+    // docs/specs/16-operational-analytics.md slice 1 — blank is
+    // what every intent that never succeeded carries.
+    channel: '',
     succeeded_at: '2026-08-10T00:00:00Z',
     failed_at: null,
     requires_manual_refund: false,
@@ -38,14 +41,27 @@ describe('PaymentIntentStore', () => {
   });
 
   it('maps a {count,results} envelope to {items,total}', async () => {
-    apiClient.GET.and.resolveTo({ data: { count: 1, results: [makePaymentIntent()] } });
+    apiClient.GET.and.resolveTo({
+      data: { count: 1, results: [makePaymentIntent()] },
+    });
 
     await store.getAll();
 
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/payments/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, business: undefined, status: undefined } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            business: undefined,
+            status: undefined,
+            search: undefined,
+            date_from: undefined,
+            date_to: undefined,
+            channel: undefined,
+          },
+        },
       })
     );
     expect(store.items().length).toBe(1);
@@ -69,7 +85,18 @@ describe('PaymentIntentStore', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/payments/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, business: 'biz-1', status: 'failed' } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            business: 'biz-1',
+            status: 'failed',
+            search: undefined,
+            date_from: undefined,
+            date_to: undefined,
+            channel: undefined,
+          },
+        },
       })
     );
   });

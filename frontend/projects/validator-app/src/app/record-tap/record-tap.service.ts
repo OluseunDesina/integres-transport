@@ -1,7 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore } from '@auth';
+
+import { OpenTripsService } from '../shared/open-trips.service';
 
 export type Trip = components['schemas']['Trip'];
 export type TapEvent = components['schemas']['TapEvent'];
@@ -39,43 +40,24 @@ function toErrorMessage(error: unknown, fallback: string): string {
 @Injectable({ providedIn: 'root' })
 export class RecordTapService {
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
+  private readonly openTrips = inject(OpenTripsService);
 
-  private authHeader(): { Authorization: string } {
-    return { Authorization: `Bearer ${this.authStore.accessToken()}` };
-  }
 
   /**
    * Every trip open for tapping on `serviceDate`, in **both** fare
-   * collection modes. `TripListQuerySerializer.status` only accepts one
-   * value per request, so `scheduled` and `in_progress` are fetched
-   * separately and merged. A generous `limit` accepts the same
-   * "unpaginated picker" tradeoff CLAUDE.md already documents for other
-   * pickers in this codebase.
+   * collection modes.
    *
-   * **No `fare_collection_mode` filter any more.** A tap credential is
-   * universal fare media as of docs/specs/10-booking-modes.md — on a
-   * pay-as-you-go trip it opens or closes a journey, on a prepaid one it
-   * boards the ticket the passenger already holds. Filtering either mode
-   * out of this picker would make one of those unreachable; the screen
-   * branches on the *selected* trip's mode instead.
+   * Delegates to `OpenTripsService`, which spec 17 slice 3 extracted
+   * once a third screen wanted the same set. No filter is applied on
+   * top: a tap credential is universal fare media as of
+   * docs/specs/10-booking-modes.md — on a pay-as-you-go trip it opens or
+   * closes a journey, on a prepaid one it boards the ticket the
+   * passenger already holds — so narrowing by mode here would make one
+   * of those unreachable. The screen branches on the *selected* trip's
+   * mode instead.
    */
-  async loadTripsForDate(serviceDate: string): Promise<Trip[]> {
-    const headers = this.authHeader();
-    const [scheduled, inProgress] = await Promise.all([
-      this.api.GET('/api/v1/trips/', {
-        params: { query: { service_date: serviceDate, status: 'scheduled', limit: 100 } },
-        headers,
-      }),
-      this.api.GET('/api/v1/trips/', {
-        params: { query: { service_date: serviceDate, status: 'in_progress', limit: 100 } },
-        headers,
-      }),
-    ]);
-    const trips = [...(scheduled.data?.results ?? []), ...(inProgress.data?.results ?? [])];
-    return trips.sort((a, b) =>
-      a.scheduled_departure_at.localeCompare(b.scheduled_departure_at)
-    );
+  loadTripsForDate(serviceDate: string): Promise<Trip[]> {
+    return this.openTrips.loadForDate(serviceDate);
   }
 
   /**
@@ -90,7 +72,6 @@ export class RecordTapService {
   async loadRouteStops(businessId: string, routeId: string): Promise<RouteStopOption[]> {
     const { data } = await this.api.GET('/api/v1/routes/', {
       params: { query: { business: businessId, limit: 100 } },
-      headers: this.authHeader(),
     });
     const route = data?.results.find((candidate) => candidate.id === routeId);
     return (route?.stops ?? []).map((stop) => ({
@@ -116,7 +97,6 @@ export class RecordTapService {
         header: { 'Idempotency-Key': crypto.randomUUID() },
       },
       body: { token: params.token, tap_type: params.tapType, stop_id: params.stopId },
-      headers: this.authHeader(),
     });
     if (data) {
       return { ok: true, data };

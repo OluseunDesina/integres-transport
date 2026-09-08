@@ -135,7 +135,11 @@ test.describe('validator-app validate-ticket', () => {
         },
         { timeout: 15_000 }
       )
-      .toContain(ticket.serviceDate);
+      // The trip detail line renders a *formatted* date now, not the
+      // raw ISO one the picker was filled with (spec 14 slice 6b), so
+      // the poll settles on the route name — which is what actually
+      // proves the newly-loaded list was selected from.
+      .toContain(ROUTE_NAME);
     await page.getByLabel('Ticket QR payload (scan or paste)').fill(ticket.payload);
 
     const [response] = await Promise.all([
@@ -146,8 +150,13 @@ test.describe('validator-app validate-ticket', () => {
     ]);
 
     expect(response.status()).toBe(200);
-    const alert = page.getByRole('alert');
-    await expect(alert).toContainText('boarded');
+    // `status`, not `alert`: a success is announced politely now.
+    // `role="alert"` is assertive and interrupts a screen reader
+    // mid-sentence, which is right for a failure and wrong for a
+    // confirmation (docs/specs/14 slice 4).
+    const alert = page.getByRole('status');
+    // "Boarded", not the raw `boarded` enum (spec 14 slice 6b).
+    await expect(alert).toContainText('Boarded');
     await expect(alert).toContainText('Yaba');
     await expect(alert).toContainText('Lekki');
     // No seat was ever assigned, so the label must be absent rather

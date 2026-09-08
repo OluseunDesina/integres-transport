@@ -33,14 +33,26 @@ async function createVehicleType(page: Page, name: string, capacity: string): Pr
   await expect(page).toHaveURL(/\/vehicle-types$/);
 }
 
+/**
+ * Row actions moved from bare text links plus an in-table switch into
+ * one `ui-action-menu` per row — docs/specs/14 slice 3a. Every action on
+ * this screen now goes through here.
+ */
+async function openRowMenu(page: Page, rowName: string): Promise<void> {
+  await page
+    .getByRole('row', { name: new RegExp(rowName) })
+    .getByRole('button', { name: new RegExp('^Actions for') })
+    .click();
+}
+
 test.describe('client-admin-app vehicle types', () => {
   test('renders an axe-clean vehicle types screen behind the nav shell', async ({ page }) => {
     await signIn(page);
     await selectActiveBusiness(page, NETWORK_BUSINESS);
-    await page.getByRole('link', { name: 'Vehicle Types' }).click();
+    await page.getByRole('link', { name: 'Vehicle types' }).click();
 
     await expect(page).toHaveURL(/\/vehicle-types$/);
-    await expect(page.getByRole('heading', { name: 'Vehicle Types' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Vehicle types' })).toBeVisible();
 
     const results = await new AxeBuilder({ page }).analyze();
     expect(results.violations).toEqual([]);
@@ -80,10 +92,8 @@ test.describe('client-admin-app vehicle types', () => {
     await selectActiveBusiness(page, NETWORK_BUSINESS);
     await createVehicleType(page, originalName, '14');
 
-    await page
-      .getByRole('row', { name: new RegExp(originalName) })
-      .getByRole('link', { name: 'Edit' })
-      .click();
+    await openRowMenu(page, originalName);
+    await page.getByRole('menuitem', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: 'Edit vehicle type' })).toBeVisible();
     await expect(page.getByLabel('Name')).toHaveValue(originalName);
 

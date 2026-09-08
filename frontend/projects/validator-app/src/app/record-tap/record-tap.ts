@@ -1,8 +1,15 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Alert, Button, Select, TextField } from '@shared-ui';
+import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
+import { Alert, Button, PageHeader, RadioGroup, Select, TextField, formatMoney } from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
+
+import {
+  JOURNEY_STATUS_LABEL,
+  TRIP_STATUS_LABEL,
+  formatServiceDate,
+  ticketStatusLabel,
+} from '../shared/labels';
 
 import { ValidateTicketService, type TicketValidationResult } from '../validate-ticket/validate-ticket.service';
 import { RecordTapService, type RouteStopOption, type TapEvent, type TapType, type Trip } from './record-tap.service';
@@ -41,7 +48,7 @@ type TapOutcome =
 @Component({
   selector: 'app-record-tap',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, Select, TextField, Button, Alert],
+  imports: [FormsModule, ReactiveFormsModule, Alert, Button, PageHeader, RadioGroup, Select, TextField],
   templateUrl: './record-tap.html',
 })
 export class RecordTap implements OnInit {
@@ -55,6 +62,11 @@ export class RecordTap implements OnInit {
     token: ['', Validators.required],
     stopId: ['', Validators.required],
   });
+
+  protected readonly tapTypeOptions: SelectOption[] = [
+    { value: 'board', label: 'Board' },
+    { value: 'alight', label: 'Alight' },
+  ];
 
   protected readonly tapType = signal<TapType>('board');
 
@@ -148,8 +160,31 @@ export class RecordTap implements OnInit {
     this.loadingStops.set(false);
   }
 
-  protected setTapType(tapType: TapType): void {
-    this.tapType.set(tapType);
+  protected setTapType(tapType: string): void {
+    this.tapType.set(tapType as TapType);
+  }
+
+  /** The trip line, in words. Rendered `{{ trip.status }}` and a raw ISO
+   * `service_date` until slice 6b. */
+  protected tripLine(trip: Trip): string {
+    return `${trip.route.name} · ${formatServiceDate(trip.service_date)} · ${TRIP_STATUS_LABEL[trip.status]}`;
+  }
+
+  /** `seat_number` is null for an open-seating ticket, which was never
+   * assigned one — a bare "seat " reads as a rendering bug rather than
+   * as the honest blank the API means. */
+  protected ticketOutcomeLabel(data: TicketValidationResult): string {
+    const seat = data.seat_number ? `, seat ${data.seat_number}` : '';
+    return `${ticketStatusLabel(data.status)} — ${data.passenger_name}${seat} (${data.from_stop} → ${data.to_stop})`;
+  }
+
+  /** "Recorded. Journey open" told a conductor nothing actionable, and
+   * the amount rendered as "300.00 NGN" — the reverse of every other
+   * screen in the workspace. */
+  protected journeyOutcomeLabel(data: TapEvent): string {
+    const { journey } = data;
+    const amount = journey.amount ? ` — ${formatMoney(journey.amount, journey.currency)}` : '';
+    return `Recorded. Journey ${JOURNEY_STATUS_LABEL[journey.status]}${amount}`;
   }
 
   protected async onSubmit(): Promise<void> {

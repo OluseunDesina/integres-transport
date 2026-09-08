@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 
 @Component({
   selector: 'ui-alert',
@@ -6,17 +6,18 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
   host: { class: 'block' },
   template: `
     <div
-      role="alert"
-      class="rounded-md border px-3 py-2 text-sm"
-      [class.border-red-200]="variant() === 'error'"
-      [class.bg-red-50]="variant() === 'error'"
-      [class.text-red-700]="variant() === 'error'"
-      [class.border-emerald-200]="variant() === 'success'"
-      [class.bg-emerald-50]="variant() === 'success'"
-      [class.text-emerald-700]="variant() === 'success'"
-      [class.border-amber-200]="variant() === 'warning'"
-      [class.bg-amber-50]="variant() === 'warning'"
-      [class.text-amber-800]="variant() === 'warning'"
+      [attr.role]="role()"
+      style="font-size: var(--ui-text-body)"
+      class="rounded-md border px-3 py-2"
+      [class.border-danger-border]="variant() === 'error'"
+      [class.bg-danger-surface]="variant() === 'error'"
+      [class.text-danger]="variant() === 'error'"
+      [class.border-success-border]="variant() === 'success'"
+      [class.bg-success-surface]="variant() === 'success'"
+      [class.text-success]="variant() === 'success'"
+      [class.border-warning-border]="variant() === 'warning'"
+      [class.bg-warning-surface]="variant() === 'warning'"
+      [class.text-warning]="variant() === 'warning'"
     >
       <ng-content />
     </div>
@@ -30,4 +31,16 @@ export class Alert {
    * wrong yet; colouring it red would train people to ignore red.
    */
   readonly variant = input<'error' | 'success' | 'warning'>('error');
+
+  /**
+   * The role follows the variant rather than being fixed at `alert`.
+   *
+   * `role="alert"` is an *assertive* live region: it interrupts a
+   * screen reader mid-sentence. That is right for a failure the user
+   * must deal with, and wrong for "Saved." — and wrong again for the
+   * static guidance several screens render through this component,
+   * which interrupted on every page load. `status` is the polite
+   * equivalent and is what a confirmation or a heads-up should use.
+   */
+  protected readonly role = computed(() => (this.variant() === 'error' ? 'alert' : 'status'));
 }

@@ -9,26 +9,19 @@ import {
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { AuthStore } from '@auth';
-import { Alert, Button, Select, TextField } from '@shared-ui';
+import {
+  Alert,
+  Button,
+  FormSection,
+  PageHeader,
+  Select,
+  TextField,
+} from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 
 import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 import { VehicleStore } from '../../shared/data/store/vehicle.store';
-
-function extractFirstErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === 'object') {
-    for (const value of Object.values(error as Record<string, unknown>)) {
-      if (Array.isArray(value) && typeof value[0] === 'string') {
-        return value[0];
-      }
-      if (typeof value === 'string') {
-        return value;
-      }
-    }
-  }
-  return fallback;
-}
+import { applyServerErrors, clearServerErrors, fieldErrorMessage } from '../../shared/form-errors';
 
 /**
  * One component for create (`vehicles/new`) and edit
@@ -43,7 +36,18 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-vehicle-form',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [ReactiveFormsModule, RouterLink, Alert, Button, Select, TextField],
+  imports: [
+    ReactiveFormsModule,
+    RouterLink,
+    Alert,
+    FormSection,
+    PageHeader,
+    Button,
+    FormSection,
+    PageHeader,
+    Select,
+    TextField,
+  ],
   templateUrl: './vehicle-form.html',
 })
 export class VehicleForm implements OnInit {
@@ -51,7 +55,6 @@ export class VehicleForm implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly selectedBusinessStore = inject(SelectedBusinessStore);
   protected readonly store = inject(VehicleStore);
 
@@ -134,13 +137,12 @@ export class VehicleForm implements OnInit {
     }
     const { data } = await this.api.GET('/api/v1/vehicle-types/', {
       params: { query: { limit: 100, offset: 0, business: businessId } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.vehicleTypeOptionsList.set(
       (data?.results ?? []).map((vt) => ({
         value: vt.id,
         label: `${vt.name} (${vt.capacity} seats)`,
-      })),
+      }))
     );
   }
 
@@ -152,10 +154,8 @@ export class VehicleForm implements OnInit {
 
     this.submitting.set(true);
     this.errorMessage.set(null);
+    clearServerErrors(this.form);
     const values = this.form.getRawValue();
-    const authHeader = {
-      Authorization: `Bearer ${this.authStore.accessToken()}`,
-    };
     const id = this.vehicleId();
 
     const { data, error } = id
@@ -166,7 +166,6 @@ export class VehicleForm implements OnInit {
             insurance_expires_at: values.insurance_expires_at || null,
             roadworthiness_expires_at: values.roadworthiness_expires_at || null,
           },
-          headers: authHeader,
         })
       : await this.api.POST('/api/v1/vehicles/', {
           body: {
@@ -176,17 +175,17 @@ export class VehicleForm implements OnInit {
             insurance_expires_at: values.insurance_expires_at || null,
             roadworthiness_expires_at: values.roadworthiness_expires_at || null,
           },
-          headers: authHeader,
         });
 
     this.submitting.set(false);
 
     if (!data) {
       this.errorMessage.set(
-        extractFirstErrorMessage(
+        applyServerErrors(
+          this.form,
           error,
-          'Could not save this vehicle. Check your details and try again.',
-        ),
+          'Could not save this vehicle. Check your details and try again.'
+        )
       );
       return;
     }
@@ -194,11 +193,10 @@ export class VehicleForm implements OnInit {
     await this.router.navigate(['/vehicles']);
   }
 
-  protected fieldError(field: 'business' | 'vehicle_type' | 'registration_number'): string | null {
-    const control = this.form.controls[field];
-    if (!control.touched || control.valid) {
-      return null;
-    }
-    return 'This field is required.';
+  /** Every field, not just those with a validator: any of them can
+   * come back rejected by the server, and `fieldErrorMessage`
+   * surfaces that the same way it surfaces a client-side failure. */
+  protected fieldError(field: 'business' | 'vehicle_type' | 'registration_number' | 'insurance_expires_at' | 'roadworthiness_expires_at'): string | null {
+    return fieldErrorMessage(this.form.controls[field]);
   }
 }

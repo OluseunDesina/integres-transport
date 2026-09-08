@@ -1,0 +1,37 @@
+<div class="flex flex-col gap-4">
+  <ui-page-header title="Activity" description="Your recent bookings, fares and wallet activity." />
+
+  @if (store.pollError(); as message) {
+    <ui-alert>{{ message }} Showing what was last loaded.</ui-alert>
+  }
+
+  @if (store.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (store.loading()) {
+    <ui-skeleton [lines]="5" />
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No activity yet"
+      description="Your bookings, fares and wallet top-ups will show up here as they happen."
+    />
+  } @else {
+    <ul class="flex flex-col divide-y divide-border rounded-md border border-border">
+      @for (entry of store.entries(); track $index) {
+        <li class="flex flex-col gap-0.5 px-4 py-3">
+          <div class="flex items-baseline justify-between gap-4">
+            <span class="font-medium text-strong">{{ title(entry) }}</span>
+            @if (amountLabel(entry); as amount) {
+              <span class="shrink-0 text-sm font-medium text-default">{{ amount }}</span>
+            }
+          </div>
+          <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 text-sm text-muted">
+            <span>{{ entry.occurred_at | date: 'medium' }}</span>
+            @if (balanceLabel(entry); as balance) {
+              <span>{{ balance }}</span>
+            }
+          </div>
+        </li>
+      }
+    </ul>
+  }
+</div>

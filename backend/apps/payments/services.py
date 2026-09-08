@@ -41,6 +41,7 @@ from apps.ledger.services import (
     post_journal_entry,
 )
 from apps.seating.services import refresh_seat_holds
+from apps.wallet.services import get_wallet_balance
 
 from .models import PaymentIntent, PaystackAccount, WebhookEvent
 from .psp.paystack import initialize_transaction, initiate_transfer, verify_webhook_signature
@@ -273,7 +274,13 @@ def initiate_wallet_topup(
     return intent
 
 
-def pay_booking_from_wallet(*, booking: Booking, passenger: User) -> PaymentIntent:
+def pay_booking_from_wallet(
+    *,
+    booking: Booking,
+    passenger: User,
+    idempotency_key: str | None = None,
+    request_hash: str | None = None,
+) -> PaymentIntent:
     """Phase 7 — docs/specs/7-passenger-wallet.md. Pays a booking
     entirely from the passenger's existing wallet balance: no Paystack
     round-trip, no webhook, the `PaymentIntent` is created already
@@ -296,7 +303,19 @@ def pay_booking_from_wallet(*, booking: Booking, passenger: User) -> PaymentInte
     continuously from before the wallet-balance check through the
     `mark_booking_paid()` call, that call's own status check can never
     see anything but `PENDING_PAYMENT` here — unlike the webhook path,
-    there is no `requires_manual_refund` branch to handle."""
+    there is no `requires_manual_refund` branch to handle.
+
+    `idempotency_key`/`request_hash` are optional — set only by
+    `initiate_payment_with_wallet()`'s fully-wallet-covered branch, so
+    the unified `/payments/` endpoint's "retry under the same key is
+    safe" contract holds here too. No `IntegrityError` disambiguation
+    is needed the way `initiate_payment()` needs one: two concurrent
+    calls under the same key necessarily target the same booking (the
+    key's own request_hash is keyed on booking+passenger), so they
+    always serialize on the `select_for_update()` below first — the
+    loser sees the booking already `PAID` and raises `BookingNotPayable`
+    before ever reaching the `IdempotencyKey` write, so that write can
+    never race with itself for this booking."""
     if booking.passenger_id != passenger.id:
         raise BookingNotPayable("You cannot pay for another passenger's booking.")
 
@@ -358,6 +377,16 @@ def pay_booking_from_wallet(*, booking: Booking, passenger: User) -> PaymentInte
             succeeded_at=timezone.now(),
             journal_entry=entry,
         )
+        if idempotency_key is not None:
+            assert request_hash is not None
+            IdempotencyKey.objects.create(
+                client_id=str(locked_booking.client_id),
+                endpoint=_IDEMPOTENCY_ENDPOINT,
+                key=idempotency_key,
+                request_hash=request_hash,
+                response_status=201,
+                response_body={"payment_intent_id": str(intent.id)},
+            )
         # did_transition is always True here — this function has held
         # the booking's row lock continuously since before its own
         # PENDING_PAYMENT check above, so nothing else could have
@@ -367,6 +396,122 @@ def pay_booking_from_wallet(*, booking: Booking, passenger: User) -> PaymentInte
 
     record_audit_event(
         actor=passenger, action="payment.wallet_paid", target=intent, amount=str(intent.amount)
+    )
+    return intent
+
+
+def initiate_payment_with_wallet(
+    *, booking: Booking, passenger: User, idempotency_key: str
+) -> PaymentIntent:
+    """Blended wallet + Paystack booking payment — revisits
+    docs/specs/7-passenger-wallet.md's original "a blend needs its own
+    partial-refund/reconciliation design" non-goal. The design that
+    resolves it: Paystack is always charged **first**, for the
+    remainder only; the wallet is debited only inside the same atomic
+    step that confirms the Paystack webhook and marks the booking paid
+    (`_apply_booking_payment`'s `wallet_component_amount` branch) — so
+    there is never a window where the wallet has been debited but
+    nothing was purchased, the exact failure mode the non-goal named.
+
+    Uses a distinct request-hash marker from `initiate_payment()`'s own
+    (mirrors `initiate_wallet_topup()`'s reasoning for including
+    `amount`) — a client reusing the same Idempotency-Key for a plain
+    Paystack attempt and then a wallet-blended one on the same booking
+    must see `IdempotencyKeyConflict`, not a silent replay of the
+    wrong one."""
+    if booking.status != Booking.Status.PENDING_PAYMENT:
+        raise BookingNotPayable("This booking cannot be paid for in its current state.")
+
+    request_hash = hash_request(
+        {"booking_id": str(booking.id), "passenger": str(passenger.id), "use_wallet_balance": True}
+    )
+    client_id = str(booking.client_id)
+
+    existing = IdempotencyKey.objects.filter(
+        client_id=client_id, endpoint=_IDEMPOTENCY_ENDPOINT, key=idempotency_key
+    ).first()
+    if existing is not None:
+        if existing.request_hash != request_hash:
+            raise IdempotencyKeyConflict(
+                "This Idempotency-Key was already used for a different request."
+            )
+        return _payment_intent_from_idempotency_record(existing)
+
+    business = booking.business
+    balance = get_wallet_balance(passenger=passenger, business=business)["balance"]
+    wallet_portion = max(Decimal("0.00"), min(balance, booking.total_amount))
+    paystack_portion = booking.total_amount - wallet_portion
+
+    if paystack_portion == Decimal("0.00"):
+        # Wallet fully covers it — no Paystack round-trip at all,
+        # synchronous, same as a plain pay_booking_from_wallet() call.
+        return pay_booking_from_wallet(
+            booking=booking,
+            passenger=passenger,
+            idempotency_key=idempotency_key,
+            request_hash=request_hash,
+        )
+
+    if not PaystackAccount.objects.filter(business=business, is_active=True).exists():
+        raise PspNotConfigured("This Business has no active Paystack account configured.")
+
+    reference = _generate_psp_reference()
+    try:
+        with transaction.atomic():
+            # Same "call Paystack before writing any row" discipline as
+            # initiate_payment() — a PSP failure here leaves nothing to
+            # roll back. Charging only paystack_portion (not the full
+            # booking total) is what makes the wallet-last ordering
+            # above work.
+            init_data = initialize_transaction(
+                email=passenger.email,
+                amount=paystack_portion,
+                currency=booking.currency,
+                reference=reference,
+                callback_url=f"{settings.CUSTOMER_APP_URL}/my-bookings",
+            )
+            intent = PaymentIntent.objects.create(
+                client=booking.client,
+                booking=booking,
+                business=business,
+                passenger=passenger,
+                amount=paystack_portion,
+                wallet_component_amount=wallet_portion,
+                currency=booking.currency,
+                status=PaymentIntent.Status.PENDING,
+                psp_provider="paystack",
+                psp_reference=reference,
+                psp_authorization_url=init_data.get("authorization_url", ""),
+            )
+            refresh_seat_holds(booking=booking, hold_minutes=business.seat_hold_minutes)
+            IdempotencyKey.objects.create(
+                client_id=client_id,
+                endpoint=_IDEMPOTENCY_ENDPOINT,
+                key=idempotency_key,
+                request_hash=request_hash,
+                response_status=201,
+                response_body={"payment_intent_id": str(intent.id)},
+            )
+    except IntegrityError:
+        # Same disambiguation shape as initiate_payment() — see its own
+        # comment for why two different constraints can land here.
+        record = IdempotencyKey.objects.filter(
+            client_id=client_id, endpoint=_IDEMPOTENCY_ENDPOINT, key=idempotency_key
+        ).first()
+        if record is not None:
+            if record.request_hash != request_hash:
+                raise IdempotencyKeyConflict(
+                    "This Idempotency-Key was already used for a different request."
+                ) from None
+            return _payment_intent_from_idempotency_record(record)
+        raise PaymentAlreadyPending("A payment is already pending for this booking.") from None
+
+    record_audit_event(
+        actor=passenger,
+        action="payment.initiated",
+        target=intent,
+        amount=str(intent.amount),
+        wallet_component_amount=str(intent.wallet_component_amount),
     )
     return intent
 
@@ -539,17 +684,34 @@ def _dispatch_webhook_event(*, event: WebhookEvent, reference: str) -> None:
 
 
 def _apply_booking_payment(intent: PaymentIntent) -> None:
-    """A fresh Paystack card charge for a booking. Debits `psp_suspense`
-    (money the PSP has acknowledged but this platform hasn't yet
-    reconciled/settled — exactly that account type's documented
-    purpose, first written to here), not the passenger's wallet: unlike
-    `pay_booking_from_wallet()`, no real wallet balance is ever spent
-    on this path, so touching that account here would corrupt it into
-    something other than a real spendable balance the moment top-ups
-    exist (Phase 7's own reason for this change — see
-    docs/specs/7-passenger-wallet.md's "Context" section)."""
+    """A fresh Paystack card charge for a booking, possibly blended
+    with a wallet component (`initiate_payment_with_wallet()`). Debits
+    `psp_suspense` (money the PSP has acknowledged but this platform
+    hasn't yet reconciled/settled — exactly that account type's
+    documented purpose, first written to here) for `intent.amount` —
+    the passenger's wallet is left untouched by a pure-Paystack intent,
+    since no real wallet balance is spent on that path (Phase 7's own
+    reason for this split — see docs/specs/7-passenger-wallet.md's
+    "Context" section).
+
+    When `intent.wallet_component_amount > 0`
+    (docs/specs/7-passenger-wallet.md's later Implementation note —
+    the blended-payment revisit), the wallet is debited too, but only
+    here, inside this same atomic step, and only after re-confirming
+    the balance under a fresh row lock — the whole point of charging
+    Paystack first is that a shortfall discovered *here* still leaves
+    nothing to roll back on the wallet side. If the balance has since
+    dropped below what's needed (a concurrent spend between initiation
+    and this webhook landing), no journal entry is posted at all —
+    inventing a partial/unbalanced entry would violate the ledger's own
+    balance invariant — and the intent is flagged
+    `requires_manual_refund` for a human to reconcile against Paystack's
+    own record of the charge, the same escape hatch this function
+    already uses for the pre-existing card/wallet race below, not new
+    machinery."""
     business = intent.business
-    business_share, commission_share = _split_commission(intent.amount)
+    total_amount = intent.amount + intent.wallet_component_amount
+    business_share, commission_share = _split_commission(total_amount)
     psp_suspense_account = get_or_create_psp_suspense_account(
         client=business.client, business=business, provider=intent.psp_provider
     )
@@ -557,20 +719,54 @@ def _apply_booking_payment(intent: PaymentIntent) -> None:
         client=business.client, business=business
     )
     commission_account = get_or_create_commission_account()
+
+    lines = [
+        JournalLineInput(
+            account=psp_suspense_account, amount=-intent.amount, currency=intent.currency
+        ),
+    ]
+
+    if intent.wallet_component_amount > Decimal("0.00"):
+        wallet_account = get_or_create_wallet_account(
+            client=business.client, business=business, passenger=intent.passenger
+        )
+        wallet_account = LedgerAccount.all_objects.select_for_update().get(pk=wallet_account.pk)
+        balance = wallet_account.cached_balance or Decimal("0.00")
+        if balance < intent.wallet_component_amount:
+            intent.status = PaymentIntent.Status.SUCCEEDED
+            intent.succeeded_at = timezone.now()
+            intent.requires_manual_refund = True
+            intent.save(update_fields=["status", "succeeded_at", "requires_manual_refund"])
+            record_audit_event(
+                actor=None,
+                action="payment.blended_wallet_shortfall",
+                target=intent,
+                client_id=str(intent.client_id),
+                wallet_component_amount=str(intent.wallet_component_amount),
+                available_balance=str(balance),
+            )
+            return
+        lines.append(
+            JournalLineInput(
+                account=wallet_account,
+                amount=-intent.wallet_component_amount,
+                currency=intent.currency,
+            )
+        )
+
+    lines.append(
+        JournalLineInput(account=clearing_account, amount=business_share, currency=intent.currency)
+    )
+    lines.append(
+        JournalLineInput(
+            account=commission_account, amount=commission_share, currency=intent.currency
+        )
+    )
+
     entry = post_journal_entry(
         business=business,
         entry_type=JournalEntry.EntryType.PAYMENT,
-        lines=[
-            JournalLineInput(
-                account=psp_suspense_account, amount=-intent.amount, currency=intent.currency
-            ),
-            JournalLineInput(
-                account=clearing_account, amount=business_share, currency=intent.currency
-            ),
-            JournalLineInput(
-                account=commission_account, amount=commission_share, currency=intent.currency
-            ),
-        ],
+        lines=lines,
         external_reference=intent.psp_reference,
         memo=f"Payment for booking {intent.booking_id}",
     )
@@ -628,6 +824,33 @@ def _apply_wallet_topup(intent: PaymentIntent) -> None:
     intent.save(update_fields=["status", "succeeded_at", "journal_entry"])
 
 
+def _channel_from_payload(payload: object) -> str:
+    """The payment method Paystack used, from a `charge.success` body's
+    `data.channel` — docs/specs/16-operational-analytics.md slice 1.
+
+    Defensive about every layer, and returns `""` rather than raising
+    when anything is missing or the wrong shape. `process_paystack_webhook`
+    must never let an exception escape (TenancyMiddleware wraps the
+    request in one transaction, so an uncaught error would roll back the
+    WebhookEvent dedup row and silently defeat replay protection) — and
+    losing a reporting label is not worth risking a payment that is
+    otherwise fine.
+
+    Truncated to the column width for the same reason: this is a value
+    another company controls, and a longer one should cost a label, not
+    the charge.
+    """
+    if not isinstance(payload, dict):
+        return ""
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return ""
+    channel = data.get("channel")
+    if not isinstance(channel, str):
+        return ""
+    return channel.strip()[:32]
+
+
 def _handle_charge_success(*, event: WebhookEvent, reference: str) -> None:
     try:
         intent = PaymentIntent.all_objects.select_related(
@@ -645,12 +868,24 @@ def _handle_charge_success(*, event: WebhookEvent, reference: str) -> None:
         intent = PaymentIntent.all_objects.select_for_update().get(pk=intent.pk)
         if intent.status != PaymentIntent.Status.PENDING:
             # Already succeeded/failed/cancelled — edge case 9, an
-            # idempotent no-op.
+            # idempotent no-op. Note this returns *before* the channel
+            # is written, so a replayed delivery cannot overwrite what
+            # the first one captured.
             WebhookEvent.objects.filter(pk=event.pk).update(
                 processing_status=WebhookEvent.ProcessingStatus.IGNORED,
                 processed_at=timezone.now(),
             )
             return
+
+        # docs/specs/16-operational-analytics.md slice 1. Written here
+        # rather than inside the two _apply_* functions below: those are
+        # the paths that differ, and both already end with their own
+        # narrow `update_fields` list that a third payment shape would
+        # have to extend again. One write in the shared caller instead.
+        channel = _channel_from_payload(event.raw_payload)
+        if channel:
+            intent.channel = channel
+            intent.save(update_fields=["channel"])
 
         if intent.intent_type == PaymentIntent.IntentType.WALLET_TOPUP:
             _apply_wallet_topup(intent)

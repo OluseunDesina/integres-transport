@@ -18,7 +18,13 @@ describe('Login', () => {
       providers: [
         provideRouter([]),
         { provide: AuthApiService, useValue: authApi },
-        { provide: WhiteLabelResolverService, useValue: { clientId: () => null } },
+        {
+          provide: WhiteLabelResolverService,
+          // `branding` too since slice 6b: this screen now renders the
+          // brand mark, the first consumer here of the white-label
+          // response's non-colour half.
+          useValue: { clientId: () => null, branding: () => null },
+        },
       ],
     }).compileComponents();
 

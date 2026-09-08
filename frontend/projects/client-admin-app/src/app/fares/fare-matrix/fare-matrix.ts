@@ -9,15 +9,29 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { AuthStore, PermissionsService } from '@auth';
-import { Alert, Button, CONFIRM_DIALOG_TITLE_ID, ConfirmDialog, EmptyState } from '@shared-ui';
+import { PermissionsService } from '@auth';
+import {
+  Alert,
+  Button,
+  CONFIRM_DIALOG_TITLE_ID,
+  ConfirmDialog,
+  EmptyState,
+  PageHeader,
+  Select,
+} from '@shared-ui';
 import type { ConfirmDialogData, ConfirmDialogResult } from '@shared-ui';
 
 import { RouteStore, type Route } from '../../shared/data/store/route.store';
 import { extractFirstErrorMessage } from '../../shared/error-message';
+import {
+  TRIP_CLASS_OPTIONS_WITH_ANY,
+  tripClassLabel,
+  type FareTripClass,
+} from '../../shared/trip-class';
 
 type FareMatrixPayload = components['schemas']['FareMatrix'];
 type FareMatrixStop = components['schemas']['FareMatrixStop'];
@@ -76,6 +90,19 @@ function isPriceable(raw: string): boolean {
 }
 
 /**
+ * The wildcard grid — the prices that apply to any class with no grid
+ * of its own, and the only grid that existed before spec 15.
+ *
+ * `?trip_class=` is a required parameter, deliberately: a request that
+ * does not say which class it means would otherwise silently edit this
+ * grid, and spec 12's "submit only edited cells" rule exists because a
+ * write into the wrong place here closes rules an operator never
+ * looked at. Widening that blast radius from one cell to one whole
+ * class is not acceptable.
+ */
+const WILDCARD_TRIP_CLASS: FareTripClass = '';
+
+/**
  * The stop-pair fare grid for one Route — docs/specs/12-fare-matrix.md.
  *
  * Per-stop-pair pricing has existed since Phase 4 but was entered one
@@ -95,20 +122,43 @@ function isPriceable(raw: string): boolean {
 @Component({
   selector: 'app-fare-matrix',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, Alert, Button, EmptyState],
+  imports: [FormsModule, RouterLink, Alert, Button, EmptyState, PageHeader, Select],
   templateUrl: './fare-matrix.html',
 })
 export class FareMatrix implements OnInit {
   private readonly activatedRoute = inject(ActivatedRoute);
   private readonly api = inject(API_CLIENT);
-  private readonly authStore = inject(AuthStore);
   private readonly routeStore = inject(RouteStore);
   private readonly permissions = inject(PermissionsService);
   private readonly dialog = inject(Dialog);
 
   @ViewChild('closeBody') private readonly closeBody!: TemplateRef<unknown>;
+  @ViewChild('switchBody') private readonly switchBody!: TemplateRef<unknown>;
 
   private readonly routeId = this.activatedRoute.snapshot.paramMap.get('routeId') ?? '';
+
+  /**
+   * Which class's grid is on screen. Starts on the wildcard, which is
+   * where every price created before spec 15 lives, so the screen opens
+   * showing what it always showed.
+   */
+  protected readonly tripClassOptions = TRIP_CLASS_OPTIONS_WITH_ANY;
+  protected readonly tripClass = signal<FareTripClass>(WILDCARD_TRIP_CLASS);
+  protected readonly tripClassLabel = tripClassLabel;
+  protected readonly isWildcardGrid = computed(() => this.tripClass() === WILDCARD_TRIP_CLASS);
+
+  /**
+   * The wildcard grid's amounts, read alongside a specific class's own.
+   *
+   * `get_fare()` falls back to the wildcard when a class has no rule of
+   * its own, so a blank cell on a Premium grid is not "unpriced" — it
+   * is "priced by the Any-class grid". Rendering it as empty would tell
+   * the operator the opposite of what a passenger will be charged.
+   *
+   * Empty on the wildcard grid itself, which has nothing to inherit
+   * from.
+   */
+  private readonly inheritedAmounts = signal<ReadonlyMap<string, string>>(new Map());
 
   protected readonly route = signal<Route | null>(null);
   protected readonly matrix = signal<FareMatrixPayload | null>(null);
@@ -122,13 +172,15 @@ export class FareMatrix implements OnInit {
   protected readonly draft = signal<ReadonlyMap<string, string>>(new Map());
   private readonly original = signal<ReadonlyMap<string, string | null>>(new Map());
 
+  /** True from a class change until that class's grid has arrived. */
+  protected readonly switching = signal(false);
   protected readonly saving = signal(false);
   protected readonly saveError = signal<string | null>(null);
   protected readonly saveSummary = signal<string | null>(null);
 
   protected readonly currency = computed(() => this.matrix()?.currency ?? '');
   protected readonly isPerSegment = computed(
-    () => this.matrix()?.fare_pricing_mode === 'per_segment',
+    () => this.matrix()?.fare_pricing_mode === 'per_segment'
   );
   protected readonly stops = computed<FareMatrixStop[]>(() => this.matrix()?.stops ?? []);
   /** Columns are alighting stops, so the first stop never heads one —
@@ -209,7 +261,9 @@ export class FareMatrix implements OnInit {
   /** Read-only for a viewer without `fares.manage`, and for a Business
    * pricing flat — where a `PUT` would 409 anyway, so offering editable
    * cells would only invite wasted work. */
-  protected readonly cellsDisabled = computed(() => !this.canManage() || !this.isPerSegment());
+  protected readonly cellsDisabled = computed(
+    () => !this.canManage() || !this.isPerSegment() || this.switching()
+  );
 
   protected readonly canSave = computed(
     () =>
@@ -217,12 +271,68 @@ export class FareMatrix implements OnInit {
       this.isPerSegment() &&
       this.dirtyKeys().size > 0 &&
       this.invalidKeys().size === 0 &&
-      !this.saving(),
+      !this.saving()
   );
 
   protected readonly confirmLabel = computed(() => 'Stop selling these segments');
   protected readonly danger = computed(() => true);
   protected readonly confirmDisabled = computed(() => false);
+
+  /** The class a pending switch is waiting on the operator to confirm. */
+  protected readonly pendingTripClass = signal<FareTripClass>(WILDCARD_TRIP_CLASS);
+  protected readonly switchConfirmLabel = computed(() => 'Discard and switch');
+  protected readonly switchDanger = computed(() => true);
+  protected readonly switchConfirmDisabled = computed(() => false);
+
+  /**
+   * A cell's inherited amount, or null.
+   *
+   * Only ever consulted for a cell this class does not price itself —
+   * see `inheritedAmounts`. An inherited amount is **not** put into
+   * `draft`, so `dirtyKeys` keeps meaning "differs from what the server
+   * said about *this* class"; seeding it would mark every inherited
+   * cell dirty on load, and the first save would copy the whole
+   * wildcard grid into the class.
+   */
+  protected inheritedAmount(key: string): string | null {
+    if (normalizeAmount(this.draft().get(key) ?? '') !== null) {
+      return null;
+    }
+    if (normalizeAmount(this.original().get(key) ?? null) !== null) {
+      return null;
+    }
+    return this.inheritedAmounts().get(key) ?? null;
+  }
+
+  protected hasInheritedCells = computed(() => this.inheritedAmounts().size > 0);
+
+  /**
+   * An inherited amount is shown as the input's **placeholder**, not
+   * its value.
+   *
+   * That is the whole mechanism: the browser renders a placeholder
+   * muted (the "visually distinct" half), typing replaces it, and
+   * leaving it alone keeps the input empty — so the cell is never
+   * dirty and never submitted. A greyed *value* would have needed all
+   * three of those behaviours re-implemented, and got one of them
+   * wrong.
+   */
+  protected cellPlaceholder(key: string): string {
+    return this.inheritedAmount(key) ?? '';
+  }
+
+  /**
+   * The "labelled" half, for anyone who cannot see the placeholder's
+   * contrast. A dimmed number with no spoken explanation would be worse
+   * than no number at all.
+   */
+  protected cellAriaLabel(cell: GridCell): string {
+    const inherited = this.inheritedAmount(cell.key);
+    if (inherited === null) {
+      return cell.label;
+    }
+    return `${cell.label}. No fare set for this class; inherits ${inherited} from the Any class grid.`;
+  }
 
   async ngOnInit(): Promise<void> {
     if (!this.routeId) {
@@ -241,9 +351,9 @@ export class FareMatrix implements OnInit {
 
   private async loadMatrix(): Promise<void> {
     this.loadError.set(null);
+    const chosen = this.tripClass();
     const { data, error, response } = await this.api.GET('/api/v1/routes/{id}/fare-matrix/', {
-      params: { path: { id: this.routeId } },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
+      params: { path: { id: this.routeId }, query: { trip_class: chosen } },
     });
 
     if (!data) {
@@ -257,6 +367,85 @@ export class FareMatrix implements OnInit {
 
     this.matrix.set(data);
     this.seedDraft(data);
+    await this.loadInheritedAmounts(chosen);
+  }
+
+  /**
+   * A second read, of the wildcard grid, only when a specific class is
+   * showing.
+   *
+   * A failure here is deliberately silent: inherited amounts are
+   * context, and losing them must not stop an operator pricing the
+   * class they came to price. The cells simply render as blank, which
+   * is what they did before this existed.
+   */
+  private async loadInheritedAmounts(chosen: FareTripClass): Promise<void> {
+    if (chosen === WILDCARD_TRIP_CLASS) {
+      this.inheritedAmounts.set(new Map());
+      return;
+    }
+    const { data } = await this.api.GET('/api/v1/routes/{id}/fare-matrix/', {
+      params: { path: { id: this.routeId }, query: { trip_class: WILDCARD_TRIP_CLASS } },
+    });
+    const inherited = new Map<string, string>();
+    for (const cell of data?.cells ?? []) {
+      if (cell.amount !== null) {
+        inherited.set(cellKey(cell.from_stop, cell.to_stop), cell.amount);
+      }
+    }
+    this.inheritedAmounts.set(inherited);
+  }
+
+  /**
+   * Switches grids, warning first if that would throw away edits.
+   *
+   * `dirtyKeys()` already computes exactly what would be lost, so the
+   * warning can be specific rather than a generic "unsaved changes"
+   * — and a silent discard is the one outcome this must not have.
+   */
+  protected onTripClassChange(next: string): void {
+    const chosen = next as FareTripClass;
+    if (chosen === this.tripClass()) {
+      return;
+    }
+    if (this.dirtyKeys().size === 0) {
+      this.applyTripClass(chosen);
+      return;
+    }
+    this.pendingTripClass.set(chosen);
+    this.dialog.open<boolean, ConfirmDialogData>(ConfirmDialog, {
+      ariaModal: true,
+      ariaLabelledBy: CONFIRM_DIALOG_TITLE_ID,
+      data: {
+        title: 'Discard these fare edits?',
+        bodyTemplate: this.switchBody,
+        confirmLabel: this.switchConfirmLabel,
+        danger: this.switchDanger,
+        confirmDisabled: this.switchConfirmDisabled,
+        onConfirm: async () => {
+          this.applyTripClass(this.pendingTripClass());
+          return { ok: true } as ConfirmDialogResult;
+        },
+      },
+    });
+  }
+
+  private applyTripClass(chosen: FareTripClass): void {
+    this.tripClass.set(chosen);
+    this.saveError.set(null);
+    this.saveSummary.set(null);
+    // `switching`, not the page-level `loading`: that one gates the
+    // whole block, so using it here would unmount the class selector
+    // mid-interaction and throw focus away.
+    //
+    // It is not cosmetic. Between the selector changing and the new
+    // grid arriving, the table still holds the *previous* class's
+    // amounts while the heading and legend already name the new one —
+    // and every cell is editable. An operator typing into that window
+    // would be editing prices they were never shown. Disabling the
+    // cells until the data matches the label closes it.
+    this.switching.set(true);
+    void this.loadMatrix().finally(() => this.switching.set(false));
   }
 
   private seedDraft(payload: FareMatrixPayload): void {
@@ -376,9 +565,10 @@ export class FareMatrix implements OnInit {
   private async submit(): Promise<ConfirmDialogResult> {
     this.saving.set(true);
     const { data, error } = await this.api.PUT('/api/v1/routes/{id}/fare-matrix/', {
-      params: { path: { id: this.routeId } },
+      // The grid on screen, never a default: a save must land in the
+      // class the operator was looking at.
+      params: { path: { id: this.routeId }, query: { trip_class: this.tripClass() } },
       body: { cells: this.buildPayload() },
-      headers: { Authorization: `Bearer ${this.authStore.accessToken()}` },
     });
     this.saving.set(false);
 
@@ -390,9 +580,7 @@ export class FareMatrix implements OnInit {
     }
 
     const changed = data.created + data.superseded + data.closed;
-    this.saveSummary.set(
-      changed === 1 ? 'Saved 1 fare.' : `Saved ${changed} fares.`,
-    );
+    this.saveSummary.set(changed === 1 ? 'Saved 1 fare.' : `Saved ${changed} fares.`);
     // Reload rather than patching local state: the response reports
     // counts, not rows, and a save creates *new* rule ids the next save
     // needs in order to detect a moved tip.

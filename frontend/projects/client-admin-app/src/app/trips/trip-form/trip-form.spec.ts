@@ -79,6 +79,10 @@ describe('TripForm', () => {
         scheduled_departure_at: '2026-09-01T06:30:00Z',
         status: 'scheduled',
         status_changed_at: null,
+        // docs/specs/16-operational-analytics.md slice 1 — null
+        // on every Trip that has not departed, which is most of them.
+        actual_departure_at: null,
+        actual_arrival_at: null,
         vehicle: null,
         driver: null,
         booking_mode: 'reservation',
@@ -98,6 +102,7 @@ describe('TripForm', () => {
       departure_time: '08:00',
       vehicle: '',
       driver: '',
+      trip_class: 'standard',
     });
 
     await fixture.componentInstance['onSubmit']();
@@ -111,6 +116,7 @@ describe('TripForm', () => {
           departure_time: '08:00',
           vehicle: null,
           driver: null,
+          trip_class: 'standard',
         },
       })
     );
@@ -128,13 +134,19 @@ describe('TripForm', () => {
       departure_time: '08:00',
       vehicle: 'v-2',
       driver: '',
+      trip_class: 'standard',
     });
 
     await fixture.componentInstance['onSubmit']();
     fixture.detectChanges();
 
-    expect(fixture.componentInstance['errorMessage']()).toBe(
-      'This vehicle belongs to a different Business.'
-    );
+    // Rendered under the Vehicle select the server named, rather than in
+    // a page-level alert that leaves the operator hunting for which of
+    // the six fields it meant.
+    const errors = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll('ui-select [role="alert"]')
+    ).map((el) => el.textContent?.trim());
+    expect(errors).toContain('This vehicle belongs to a different Business.');
+    expect(fixture.componentInstance['errorMessage']()).toBeNull();
   });
 });

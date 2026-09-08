@@ -38,7 +38,9 @@ describe('StaffStore', () => {
 
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/staff/',
-      jasmine.objectContaining({ params: { query: { limit: 25, offset: 0 } } })
+      jasmine.objectContaining({
+        params: { query: { limit: 25, offset: 0, search: undefined } },
+      })
     );
     expect(store.items().length).toBe(1);
     expect(store.items()[0].email).toBe('owner@example.com');

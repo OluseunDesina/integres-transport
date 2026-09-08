@@ -1,9 +1,11 @@
+import { expectColumnVisibilityParity } from '@shared-ui';
 import { signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 
 import { FareJourneyList } from './fare-journey-list';
 import { FareJourneyStore, type FareJourney } from '../../shared/data/store/fare-journey.store';
+import { SelectedBusinessStore } from '../../shared/data/store/selected-business.store';
 
 function makeFareJourney(overrides: Partial<FareJourney> = {}): FareJourney {
   return {
@@ -26,6 +28,12 @@ function makeFareJourney(overrides: Partial<FareJourney> = {}): FareJourney {
     created_at: '2026-08-19T07:05:00Z',
     ...overrides,
   };
+}
+
+/** The screen is business-scoped since slice 3b, so it reads the active
+ * Business the same way every other list does. */
+class FakeSelectedBusinessStore {
+  selectedBusinessId = signal<string | null>('biz-1');
 }
 
 class FakeFareJourneyStore {
@@ -53,26 +61,37 @@ describe('FareJourneyList', () => {
 
     await TestBed.configureTestingModule({
       imports: [FareJourneyList],
-      providers: [{ provide: FareJourneyStore, useValue: store }],
+      providers: [
+        { provide: FareJourneyStore, useValue: store },
+        {
+          provide: SelectedBusinessStore,
+          useValue: new FakeSelectedBusinessStore(),
+        },
+      ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(FareJourneyList);
     fixture.detectChanges();
   });
 
-  it('loads journeys on init', () => {
-    expect(store.getAll).toHaveBeenCalled();
+  it('scopes the query to the active Business on init', () => {
+    // The only fetch trigger: an ngOnInit calling getAll() would race
+    // this scoped one and briefly list every Business's journeys.
+    expect(store.updateQuery).toHaveBeenCalledWith({ business: 'biz-1' });
   });
 
   it('shows the empty state when the store has no rows', () => {
     store.isEmpty.set(true);
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.textContent).toContain('No pay-as-you-go journeys found');
+    expect(fixture.nativeElement.textContent).toContain('No pay-as-you-go journeys yet');
   });
 
   it('renders a row per journey with route, stops, and status', () => {
-    store.items.set([makeFareJourney(), makeFareJourney({ id: 'journey-2', status: 'needs_review' })]);
+    store.items.set([
+      makeFareJourney(),
+      makeFareJourney({ id: 'journey-2', status: 'needs_review' }),
+    ]);
     fixture.detectChanges();
 
     const rows = fixture.debugElement.queryAll(By.css('tbody tr'));
@@ -88,6 +107,23 @@ describe('FareJourneyList', () => {
     select.dispatchEvent(new Event('change'));
     fixture.detectChanges();
 
-    expect(store.updateQuery).toHaveBeenCalledWith({ status: 'needs_review' });
+    expect(store.updateQuery).toHaveBeenCalledWith(
+      jasmine.objectContaining({ business: 'biz-1', status: 'needs_review' })
+    );
+  });
+  // --- docs/specs/14, responsive columns ---
+
+  it('keeps every column hidden in the header hidden in its cells', () => {
+    store.items.set([makeFareJourney()]);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'fare-journey-list rows');
+  });
+
+  it('keeps the skeleton row aligned with the header too', () => {
+    store.loading.set(true);
+    fixture.detectChanges();
+
+    expectColumnVisibilityParity(fixture.nativeElement, 'fare-journey-list skeleton');
   });
 });

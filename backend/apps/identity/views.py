@@ -1,5 +1,5 @@
 from django.db.models import QuerySet
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import generics, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
@@ -8,25 +8,32 @@ from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenViewBase
 
-from apps.core.permissions import HasPermission
+from apps.core.audit import record_audit_event
+from apps.core.permissions import HasAnyPermission, HasPermission
 from apps.identity.models import Role, User
 from apps.identity.serializers import (
     ClientAdminTokenObtainSerializer,
     CustomerTokenObtainSerializer,
     MeSerializer,
+    PassengerLookupQuerySerializer,
+    PassengerSerializer,
     RoleSerializer,
     StaffInvitationAcceptSerializer,
     StaffInvitationCreatedResponseSerializer,
     StaffInvitationCreateSerializer,
     StaffInvitationResolveSerializer,
+    StaffListQuerySerializer,
     StaffSerializer,
     StaffUpdateSerializer,
     SuperAdminTokenObtainSerializer,
     TokenObtainResponseSerializer,
 )
 from apps.identity.services import (
+    PassengerNotFound,
     accept_staff_invitation,
     invite_staff,
+    lookup_passenger,
+    mask_email,
     resolve_invitation,
     update_staff_member,
 )
@@ -137,7 +144,16 @@ class StaffInvitationAcceptView(APIView):
         )
 
 
-@extend_schema(responses=StaffSerializer)
+_STAFF_SEARCH_QUERY_PARAM = OpenApiParameter(
+    "search",
+    str,
+    OpenApiParameter.QUERY,
+    required=False,
+    description="Case-insensitive substring match on the staff member's email.",
+)
+
+
+@extend_schema(responses=StaffSerializer, parameters=[_STAFF_SEARCH_QUERY_PARAM])
 class StaffListView(generics.ListAPIView[User]):
     permission_classes = [HasPermission("staff.manage")]
     serializer_class = StaffSerializer
@@ -150,11 +166,21 @@ class StaffListView(generics.ListAPIView[User]):
         # during the Phase 1 self-check's query-count audit.
         request = self.request
         assert isinstance(request.user, User)
-        return (
+        queryset = (
             User.objects.filter(client=request.user.client, is_client_staff=True)
             .select_related("role")
             .prefetch_related("role__permissions")
         )
+
+        query = StaffListQuerySerializer(data=request.query_params.dict())
+        query.is_valid(raise_exception=True)
+        search = query.validated_data.get("search", "").strip()
+        if search:
+            # Narrows an already Client-filtered queryset, so no term a
+            # caller can type reaches another Client's staff.
+            queryset = queryset.filter(email__icontains=search)
+
+        return queryset
 
 
 @extend_schema(request=StaffUpdateSerializer, responses=StaffSerializer)
@@ -176,3 +202,86 @@ class StaffUpdateView(generics.GenericAPIView[User]):
         assert isinstance(actor, User)
         updated = update_staff_member(user=member, updated_by=actor, **serializer.validated_data)
         return Response(StaffSerializer(updated).data)
+
+
+_EMAIL_QUERY_PARAM = OpenApiParameter(
+    "email",
+    str,
+    OpenApiParameter.QUERY,
+    required=True,
+    description="Exact (case-insensitive) email address. Not a search — a "
+    "partial address matches nothing.",
+)
+
+
+@extend_schema(parameters=[_EMAIL_QUERY_PARAM], responses=PassengerSerializer)
+class PassengerLookupView(APIView):
+    """`GET /passengers/lookup/?email=` — resolve one passenger of this
+    Client, so staff can act for them.
+
+    Two capabilities need this, which is why it takes either codename:
+
+    - **`booking.manage`** — the counter-booking flow
+      (docs/specs/18-manifest-and-staff-booking.md slice 2) needs a
+      passenger id before it can book.
+    - **`wallet.view`** — `client-admin-app`'s wallet-lookup screen has
+      shipped since spec 5 with its limitation written into its own
+      docstring: `GET /wallet/?business=&passenger=` takes a UUID and
+      there was no way to obtain one, so the screen only worked if a
+      support ticket happened to quote it. That is the capability this
+      endpoint is; gating it on `booking.manage` alone would have left
+      the screen broken for every Staff user, since Staff hold
+      `wallet.view` and deliberately not `booking.manage`.
+
+    Widening the gate widens who can confirm an address is registered.
+    That is a real cost and it was taken deliberately: the alternative
+    was a second endpoint doing the same lookup under a different name,
+    which is the same disclosure with more code.
+
+    Lives in `apps.identity` rather than `apps.booking` because the data
+    is `identity.User` — the app that owns the data owns the endpoint,
+    and it now has two consumers in different apps, so hanging it off
+    either one would make the other depend on it.
+
+    Throttled: an exact-match endpoint is still an enumeration oracle if
+    you let someone hammer it. A `404` is returned for both "no such
+    passenger" and "a passenger of another Client", with one message —
+    the distinction is exactly what an attacker wants.
+    """
+
+    permission_classes = [HasAnyPermission("booking.manage", "wallet.view")]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "passenger_lookup"
+
+    def get(self, request: Request) -> Response:
+        query = PassengerLookupQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        actor = request.user
+        assert isinstance(actor, User)
+        assert actor.client is not None
+
+        try:
+            passenger = lookup_passenger(email=query.validated_data["email"], client=actor.client)
+        except PassengerNotFound as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
+
+        # Audited on success only. A miss records nothing but the
+        # throttle counter — logging every failed address would build the
+        # very list of tried addresses this endpoint exists to avoid
+        # producing.
+        record_audit_event(
+            actor=actor,
+            action="passenger.looked_up",
+            target=passenger,
+            client_id=str(actor.client_id),
+        )
+        return Response(
+            PassengerSerializer(
+                {
+                    "id": passenger.id,
+                    "first_name": passenger.first_name,
+                    "last_name": passenger.last_name,
+                    "email": mask_email(passenger.email),
+                }
+            ).data
+        )
