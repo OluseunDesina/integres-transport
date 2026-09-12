@@ -19,6 +19,7 @@ import {
   Button,
   CONFIRM_DIALOG_TITLE_ID,
   ConfirmDialog,
+  Countdown,
   EmptyState,
   PageHeader,
   Paginator,
@@ -119,6 +120,7 @@ function extractFirstErrorMessage(error: unknown, fallback: string): string {
     ActionMenu,
     Alert,
     Button,
+    Countdown,
     EmptyState,
     PageHeader,
     Paginator,
@@ -293,6 +295,21 @@ export class MyBookings implements OnInit {
    * cancelled or expired, never had a real departure to track. */
   protected canTrack(booking: Booking): boolean {
     return booking.status === 'paid' || booking.status === 'completed';
+  }
+
+  /** `ui-countdown` reaching zero on a row is not the same fact as that
+   * row's hold actually being gone — the sweep task runs once a
+   * minute. There is no single-booking re-fetch for a passenger
+   * (`docs/specs/21-passenger-experience.md` slice 2, and
+   * `BookingStore`'s own docstring: `/bookings/mine/` is the only
+   * endpoint a passenger can read their own bookings through), so this
+   * reloads the whole current page rather than one row — the same
+   * `getAll()` `onPageChange` already calls, and correct here too: a
+   * hold expiring is exactly the moment this row's own status might
+   * have changed to `expired` server-side.
+   */
+  protected onHoldExpired(): void {
+    void this.store.getAll();
   }
 
   /**

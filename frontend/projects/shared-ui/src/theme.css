@@ -207,3 +207,91 @@
     }
   }
 }
+
+/* --- Senior Mode --------------------------------------------------------
+ * docs/specs/21-passenger-experience.md slice 3. `customer-app` only —
+ * `SeniorModeStore` sets `data-senior="true"` on `<html>`; the three
+ * operator apps never set the attribute, so this block never applies to
+ * them, and nothing here needs to know that — the same reasoning
+ * `[data-surface='consumer']` above already relies on.
+ *
+ * A display mode, not a second layout: every rule below is a token
+ * override or a generic selector, never a component-specific one, per
+ * the spec's own "what it must not do".
+ */
+
+/* The one line that does almost all of the work. Every utility in this
+ * workspace is `rem`-based (Tailwind v4's own type scale included, and
+ * `--ui-control-height`/`--ui-row-height`/`--ui-gutter` above), so
+ * scaling the root font-size scales type, spacing and control/target
+ * sizes together, in the same proportion, from one place — "a custom
+ * property the type ramp already derives from" is `rem` itself. It also
+ * composes with a real OS/browser zoom rather than fighting it: a
+ * percentage on the root multiplies whatever size the platform already
+ * chose, so Senior Mode and a passenger's own accessibility settings add
+ * up instead of one overriding the other.
+ *
+ * 175%: roughly doubles body text (spec's own "double-sized fonts"),
+ * and takes `--ui-control-height`'s 2.75rem (44px) to 77px — comfortably
+ * past the 56px floor — without the more extreme reflow risk a literal
+ * 2x carries at the 768/1200px breakpoints, where a still-`sm:`/`md:`-gated
+ * side-by-side layout does not requery its media query just because
+ * `rem` grew (only real viewport width does that), and so must fit its
+ * now-larger children by wrapping, not by becoming eligible to stack.
+ * Verified without added horizontal scroll at 320–1200px in the visual
+ * pass this slice records in docs/ui-review/21-passenger-experience/.
+ */
+html[data-senior='true'] {
+  font-size: 175%;
+}
+
+[data-senior='true'] {
+  /* --- Contrast: 7:1 (AAA), up from the 4.5:1 (AA) baseline ----------
+   * Measured in color.spec.ts's "Senior Mode contrast tokens clear AAA"
+   * block. `--color-default` (ink-700, 10.35:1) and `--color-strong`
+   * (ink-900, 17.85:1) already clear AAA unmodified and are not
+   * repeated here.
+   */
+  --color-muted: var(--color-ink-600); /* 4.76:1 -> 7.58:1 */
+  --color-danger: var(--color-danger-hover); /* 6.47:1 -> 8.31:1, reuses an existing token */
+  --color-success: #065f46; /* 5.48:1 -> 7.68:1 */
+  --color-warning: #92400e; /* 5.02:1 -> 7.09:1 */
+
+  /* --- QR treatment ----------------------------------------------------
+   * `booking-tickets`/`my-credentials` read this for the rendered
+   * *display* size; the underlying PNG is generated at a fixed larger
+   * resolution in both modes so enlarging it here does not upscale a
+   * blurry image (see each component's own comment).
+   *
+   * A literal `px`, not `rem` — this block already lives under the
+   * selector that scales the root font-size 175%, so a `rem` value
+   * here would compound with that scale instead of landing at the
+   * intended size (21.25rem would resolve to ~595px, not 340px).
+   */
+  --ui-qr-size: 340px;
+}
+
+/* Senior Mode's own unconditional version of the `prefers-reduced-motion`
+ * block above — "all non-essential transitions removed" is a property of
+ * the mode, not contingent on the OS also asking for it. */
+[data-senior='true'] *,
+[data-senior='true'] *::before,
+[data-senior='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Honoured independently of the Senior Mode toggle: a system preference
+ * already expressed should not require finding a setting in this app.
+ * `:not([data-senior='true'])` only avoids setting the same custom
+ * properties twice when both apply; it changes nothing about the result. */
+@media (prefers-contrast: more) {
+  :root:not([data-senior='true']) {
+    --color-muted: var(--color-ink-600);
+    --color-danger: var(--color-danger-hover);
+    --color-success: #065f46;
+    --color-warning: #92400e;
+  }
+}

@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 
@@ -92,13 +92,63 @@ describe('TripSearch', () => {
 
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/routes/browse/',
-      jasmine.objectContaining({ params: { query: { limit: 100, offset: 0 } } })
+      jasmine.objectContaining({
+        params: { query: { limit: 100, offset: 0, search: undefined } },
+      })
     );
     expect(component['routeOptions']().map((o) => o.label)).toEqual([
       'Select a route',
       'Ikeja → CMS',
     ]);
   });
+
+  it('debounces a route search term and forwards it to the browse endpoint', fakeAsync(() => {
+    fixture = TestBed.createComponent(TripSearch);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    tick();
+    fixture.detectChanges();
+    apiClient.GET.calls.reset();
+
+    component['onRouteSearchInput']('yaba');
+    // Not yet — a keystroke should not fire a request before the
+    // debounce window closes, or a search term is one HTTP request per
+    // character against a paginated endpoint.
+    expect(apiClient.GET).not.toHaveBeenCalled();
+
+    tick(300);
+
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/routes/browse/',
+      jasmine.objectContaining({
+        params: { query: { limit: 100, offset: 0, search: 'yaba' } },
+      })
+    );
+  }));
+
+  it('does not fetch again for every keystroke within the debounce window', fakeAsync(() => {
+    fixture = TestBed.createComponent(TripSearch);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    tick();
+    fixture.detectChanges();
+    apiClient.GET.calls.reset();
+
+    component['onRouteSearchInput']('y');
+    tick(100);
+    component['onRouteSearchInput']('ya');
+    tick(100);
+    component['onRouteSearchInput']('yab');
+    tick(300);
+
+    expect(apiClient.GET).toHaveBeenCalledTimes(1);
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/routes/browse/',
+      jasmine.objectContaining({
+        params: { query: { limit: 100, offset: 0, search: 'yab' } },
+      })
+    );
+  }));
 
   it('labels route options with their Business only when a Client runs several', async () => {
     apiClient.GET.and.callFake((path: string) =>

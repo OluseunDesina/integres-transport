@@ -20,6 +20,18 @@ let nextId = 0;
  * The description is associated with the heading via `aria-describedby`,
  * so a screen reader announcing the heading also announces what the
  * screen is for.
+ *
+ * **`min-w-0` on both flex wrappers, not decorative.** `break-words` on
+ * the heading/description alone did nothing — a flex item's default
+ * minimum width is its content's own min-content size, which for
+ * wrappable prose is the width of its single widest *unbreakable* run
+ * (an email address, say). Without `min-w-0` these two columns simply
+ * grew to fit that run instead of ever handing `break-words` a
+ * constrained box to break inside, so a long `title()` overflowed
+ * `customer-app`'s `<main>` instead of wrapping — caught by spec 21
+ * slice 3's Senior Mode, whose larger type made an existing safe fit
+ * (a passenger's own email, `home.ts`'s greeting) exceed 390px for the
+ * first time (docs/ui-review/21-passenger-experience/iteration-1.md).
  */
 @Component({
   selector: 'ui-page-header',
@@ -28,12 +40,12 @@ let nextId = 0;
   template: `
     <header class="flex flex-col gap-2">
       <ng-content select="[breadcrumb]" />
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="flex flex-col gap-1">
+      <div class="flex min-w-0 flex-wrap items-start justify-between gap-3">
+        <div class="flex min-w-0 flex-col gap-1">
           <h1
             [id]="titleId"
             [attr.aria-describedby]="description() ? descriptionId : null"
-            class="font-semibold text-strong"
+            class="break-words font-semibold text-strong"
             style="font-size: var(--ui-text-heading)"
           >
             {{ title() }}
@@ -42,7 +54,7 @@ let nextId = 0;
             <p
               [id]="descriptionId"
               style="font-size: var(--ui-text-body)"
-              class="max-w-2xl text-muted"
+              class="max-w-2xl break-words text-muted"
             >
               {{ text }}
             </p>

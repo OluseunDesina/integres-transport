@@ -31,9 +31,17 @@
                 alt="Scannable ticket QR code"
                 width="220"
                 height="220"
-                class="rounded-md border border-border bg-surface p-2"
+                class="h-[var(--ui-qr-size,220px)] w-[var(--ui-qr-size,220px)] max-w-none rounded-md border border-border bg-surface p-2"
               />
             }
+            <!-- The fallback if a scan fails — the point of showing this
+                 at all — so it must stay readable on its own, not just
+                 present. Senior Mode's own type scale (theme.css) is
+                 what makes it "large" there; no second markup branch. -->
+            <p class="text-center text-sm text-muted">
+              Ticket reference
+              <code class="block break-all font-mono text-default">{{ ticket.id }}</code>
+            </p>
             <ui-status-pill
               [tone]="statusTone[ticket.status]"
               [label]="statusLabel[ticket.status]"

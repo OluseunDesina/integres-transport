@@ -8,7 +8,7 @@ interface AuthSession {
   user: AuthUser;
 }
 
-const STORAGE_KEY = 'integra.auth.session';
+const STORAGE_KEY = 'integra.auth.session'; // nosec B105
 
 /**
  * Session state for the current app. Not a `ListStore` (see

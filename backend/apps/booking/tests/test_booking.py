@@ -1,11 +1,14 @@
+import datetime
 from decimal import Decimal
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.businesses.models import Business
+from apps.businesses.tests.factories import BusinessFactory
 from apps.clients.tests.factories import ClientFactory
 from apps.core.idempotency import IdempotencyKeyConflict
 from apps.core.models import AuditLog
@@ -799,6 +802,211 @@ def test_bookings_mine_query_count_does_not_scale_with_booking_count(
 
     assert response.status_code == status.HTTP_200_OK
     assert len(response.data["results"]) == 5
+
+
+# --- hold_expires_at / hold_expires_in_seconds (spec 21 slice 2) -----------
+
+
+def test_bookings_mine_includes_a_live_hold_countdown() -> None:
+    client = ClientFactory()
+    trip, passenger, booking = _one_booking(client)
+
+    response = _auth_client(passenger).get(reverse("booking-mine"))
+
+    assert response.status_code == status.HTTP_200_OK
+    row = response.data["results"][0]
+    with tenant_context(str(client.id)):
+        reservation = SeatReservation.objects.get(booking=booking)
+        held_minutes = trip.business.seat_hold_minutes
+    assert row["hold_expires_at"] == reservation.held_until
+    # Within a few seconds of the full hold window — real wall-clock time
+    # passes between `create_booking` and this assertion, so an exact
+    # `held_minutes * 60` would be flaky.
+    assert held_minutes * 60 - 5 <= row["hold_expires_in_seconds"] <= held_minutes * 60
+
+
+def test_hold_expires_is_null_for_an_open_seating_booking() -> None:
+    """The one edge case the spec states correctly: open seating holds
+    no `SeatReservation` at all (`create_booking`'s own `open_seating`
+    branch), so there is nothing to count down from."""
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(
+            client=client, booking_mode_default=Business.BookingMode.OPEN_SEATING
+        )
+        route = RouteFactory(client=client, business=business)
+        stop_a = StopFactory(client=client, business=business)
+        stop_b = StopFactory(client=client, business=business)
+        RouteStopFactory(client=client, route=route, stop=stop_a, sequence=1)
+        RouteStopFactory(client=client, route=route, stop=stop_b, sequence=2)
+        vehicle_type = VehicleTypeFactory(client=client, business=business, capacity=10)
+        vehicle = VehicleFactory(client=client, business=business, vehicle_type=vehicle_type)
+        trip = TripFactory(
+            client=client,
+            route=route,
+            business=business,
+            vehicle=vehicle,
+            booking_mode=Business.BookingMode.OPEN_SEATING,
+        )
+        FareRuleFactory(client=client, route=route, business=business, amount="500.00")
+        passenger = PassengerUserFactory(client=client)
+        create_booking(
+            trip=trip,
+            passenger=passenger,
+            passenger_count=2,
+            from_stop=stop_a,
+            to_stop=stop_b,
+            idempotency_key="open-seating-hold-null",
+        )
+
+    response = _auth_client(passenger).get(reverse("booking-mine"))
+
+    assert response.status_code == status.HTTP_200_OK
+    row = response.data["results"][0]
+    assert row["hold_expires_at"] is None
+    assert row["hold_expires_in_seconds"] is None
+
+
+def test_hold_expires_is_a_real_countdown_for_a_quick_book_booking() -> None:
+    """Corrects the spec's own claim that quick-book bookings hold
+    nothing, the same way open-seating ones do — they do not.
+    `apps.booking.tests.test_quick_book`'s own module docstring already
+    states real `SeatReservation` rows are written; this is that fact
+    read through the API surface this slice adds."""
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(
+            client=client,
+            booking_mode_default=Business.BookingMode.RESERVATION,
+            seat_selection_enabled=False,
+        )
+        route = RouteFactory(client=client, business=business)
+        stop_a = StopFactory(client=client, business=business)
+        stop_b = StopFactory(client=client, business=business)
+        RouteStopFactory(client=client, route=route, stop=stop_a, sequence=1)
+        RouteStopFactory(client=client, route=route, stop=stop_b, sequence=2)
+        vehicle_type = VehicleTypeFactory(client=client, business=business, capacity=4)
+        vehicle = VehicleFactory(client=client, business=business, vehicle_type=vehicle_type)
+        for seat_number in ("1A", "1B"):
+            SeatFactory(client=client, vehicle_type=vehicle_type, seat_number=seat_number)
+        trip = TripFactory(client=client, route=route, business=business, vehicle=vehicle)
+        FareRuleFactory(client=client, route=route, business=business, amount="50.00")
+        passenger = PassengerUserFactory(client=client)
+        create_booking(
+            trip=trip,
+            passenger=passenger,
+            passenger_count=2,
+            from_stop=stop_a,
+            to_stop=stop_b,
+            idempotency_key="quick-book-hold-real",
+        )
+
+    response = _auth_client(passenger).get(reverse("booking-mine"))
+
+    assert response.status_code == status.HTTP_200_OK
+    row = response.data["results"][0]
+    assert row["hold_expires_at"] is not None
+    assert row["hold_expires_in_seconds"] > 0
+
+
+def test_hold_expires_is_null_once_the_booking_is_paid() -> None:
+    """Payment moves every reservation from HELD to CONFIRMED
+    (`apps.booking.services.create_booking`'s own line 466) without
+    clearing `held_until` — reading a CONFIRMED row's stale `held_until`
+    would resurrect a countdown on an already-paid booking, which the
+    spec's own edge case forbids."""
+    client = ClientFactory()
+    trip, passenger, booking = _one_booking(client)
+    with tenant_context(str(client.id)):
+        SeatReservation.objects.filter(booking=booking).update(
+            status=SeatReservation.Status.CONFIRMED
+        )
+        booking.status = Booking.Status.PAID
+        booking.save(update_fields=["status"])
+
+    response = _auth_client(passenger).get(reverse("booking-mine"))
+
+    assert response.status_code == status.HTTP_200_OK
+    row = response.data["results"][0]
+    assert row["hold_expires_at"] is None
+    assert row["hold_expires_in_seconds"] is None
+
+
+def test_hold_expires_in_seconds_is_floored_at_zero_for_an_expired_but_unswept_hold() -> None:
+    """The sweep task (`apps.seating.tasks.expire_seat_holds`) runs once
+    a minute, so a HELD reservation can sit past its own `held_until`
+    for up to that long. The countdown must read as "expiring now," not
+    a negative number, until the sweep actually catches up."""
+    client = ClientFactory()
+    trip, passenger, booking = _one_booking(client)
+    with tenant_context(str(client.id)):
+        SeatReservation.objects.filter(booking=booking).update(
+            held_until=timezone.now() - datetime.timedelta(seconds=30)
+        )
+
+    response = _auth_client(passenger).get(reverse("booking-mine"))
+
+    assert response.status_code == status.HTTP_200_OK
+    row = response.data["results"][0]
+    assert row["hold_expires_at"] is not None
+    assert row["hold_expires_in_seconds"] == 0
+
+
+def test_hold_expires_at_is_the_earliest_of_several_seats() -> None:
+    client = ClientFactory()
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client, capacity=2)
+    passenger = PassengerUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
+        seat_a = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number="1A")
+        seat_b = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number="1B")
+        booking = create_booking(
+            trip=trip,
+            passenger=passenger,
+            seats=[
+                {"seat": seat_a, "from_stop": stop_a, "to_stop": stop_b},
+                {"seat": seat_b, "from_stop": stop_a, "to_stop": stop_b},
+            ],
+            idempotency_key="earliest-of-two",
+        )
+        reservations = list(SeatReservation.objects.filter(booking=booking).order_by("seat_id"))
+        earlier = timezone.now() + datetime.timedelta(minutes=1)
+        SeatReservation.objects.filter(pk=reservations[0].pk).update(held_until=earlier)
+
+    response = _auth_client(passenger).get(reverse("booking-mine"))
+
+    assert response.status_code == status.HTTP_200_OK
+    row = response.data["results"][0]
+    assert row["hold_expires_at"] == earlier
+
+
+def test_hold_expires_fields_are_present_on_the_created_booking_response() -> None:
+    """`POST /bookings/` returns a single `BookingSerializer` instance
+    with no `reservations_by_booking` context — the fallback per-object
+    query path in `_reservations`, exercised here rather than only on
+    the list endpoints."""
+    client = ClientFactory()
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client)
+    passenger = PassengerUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
+        seat = SeatFactory(client=client, vehicle_type=vehicle_type)
+
+    response = _auth_client(passenger).post(
+        reverse("booking-list-create"),
+        {
+            "trip": str(trip.id),
+            "seats": [
+                {"seat": str(seat.id), "from_stop": str(stop_a.id), "to_stop": str(stop_b.id)}
+            ],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="post-hold-fields",
+    )
+
+    assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["hold_expires_at"] is not None
+    assert response.data["hold_expires_in_seconds"] > 0
 
 
 # --- ?business= / ?search= on GET /bookings/ ---------------------------

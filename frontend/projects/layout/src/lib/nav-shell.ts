@@ -3,7 +3,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
-  HostListener,
   computed,
   inject,
   input,
@@ -56,6 +55,22 @@ export interface QuickAction {
 const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
 
 /**
+ * Below this width the 64px icon rail itself is too much: self-check
+ * 2026-09-12-specs19-21's F9 measured it at ~12% of a 390px viewport,
+ * and it eats directly into the width budget `ui-table`'s own
+ * three-times-hardened 390px fit depends on. Strictly narrower than
+ * COLLAPSE_BREAKPOINT, so the two never overlap: 640–768px still gets
+ * today's icon rail, and only below 640px does the sidebar go fully
+ * off-canvas instead. 640px matches `customer-app`'s own `AppShell`
+ * mobile breakpoint literal, for the same phones that pattern targets
+ * — though the pattern itself does not transfer (see the class
+ * docstring's own note on why a bottom tab bar doesn't fit this
+ * console's permission-filtered nav, business switcher and profile
+ * menu).
+ */
+const DRAWER_BREAKPOINT = '(max-width: 639px)';
+
+/**
  * First `layout` component with real service dependencies (`AuthStore`,
  * `PermissionsService`, `AuthApiService` from `@auth`) — see
  * docs/specs/2-client-admin-super-admin-ui.md §4. Nav-item visibility
@@ -72,6 +87,21 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
  * repo). No cdkTrapFocus here — this is persistent page chrome, not a
  * modal/overlay, matching AuthLayout's own documented reasoning for why
  * a focus trap doesn't belong on a bare page.
+ *
+ * Below DRAWER_BREAKPOINT the sidebar goes further: fully off-canvas
+ * (not just icon-only), toggled by a hamburger button in a slim top bar
+ * that only exists at that width. This is a drawer, not the same
+ * pattern as `customer-app`'s `AppShell` bottom tab bar — a fixed-count
+ * tab bar has no analogue for a permission-filtered nav list, a
+ * business switcher and a profile menu, all of which this sidebar
+ * carries. `effectiveCollapsed` is what makes the drawer reuse every
+ * existing icon-rail-vs-expanded template branch below rather than
+ * needing a second set of them: opening the drawer is treated as
+ * "temporarily not collapsed" for exactly as long as it stays open. The
+ * closed drawer is `inert`, not just visually off-canvas — otherwise
+ * its nav links, profile button and notification bell would stay in
+ * the keyboard tab order while invisible, the same class of bug fixed
+ * in `ui-map`'s markers during spec 21 slice 1.
  *
  * The bottom profile block is a purpose-built dropdown/menu (not a
  * generic `ui-menu` primitive — one specific-shaped menu, one consumer,
@@ -91,13 +121,37 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
 @Component({
   selector: 'app-nav-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'flex min-h-screen bg-surface-muted' },
+  host: {
+    class: 'flex min-h-screen bg-surface-muted',
+    '(document:click)': 'onDocumentClick($event)',
+    '(document:keydown.escape)': 'onDocumentEscape()',
+  },
   imports: [ActionMenu, RouterLink, RouterLinkActive, RouterOutlet, Icon, NotificationBell],
   template: `
+    @if (isNarrowestViewport() && mobileMenuOpen()) {
+      <!-- A real \`button\`, not a clickable \`div\` — native button
+           semantics satisfy the interactive-element lint rules for free
+           (focusable, keyboard-activatable) without a second Escape/
+           click handler for keyboard users, who already close the
+           drawer via the document-level Escape listener. -->
+      <button
+        type="button"
+        class="fixed inset-0 z-10 cursor-default bg-black/40"
+        aria-label="Close navigation menu"
+        (click)="closeDrawer(false)"
+      ></button>
+    }
+
     <aside
-      class="flex shrink-0 flex-col border-r border-border bg-surface transition-[width] duration-150 motion-reduce:transition-none"
+      class="flex shrink-0 flex-col border-r border-border bg-surface transition-[width,transform] duration-150 motion-reduce:transition-none"
       [class.w-64]="!effectiveCollapsed()"
       [class.w-16]="effectiveCollapsed()"
+      [class.fixed]="isNarrowestViewport()"
+      [class.inset-y-0]="isNarrowestViewport()"
+      [class.left-0]="isNarrowestViewport()"
+      [class.z-20]="isNarrowestViewport()"
+      [class.-translate-x-full]="isNarrowestViewport() && !mobileMenuOpen()"
+      [attr.inert]="isNarrowestViewport() && !mobileMenuOpen() ? '' : null"
     >
       <div class="flex h-14 items-center justify-between gap-2 border-b border-border px-3">
         @if (!effectiveCollapsed()) {
@@ -105,7 +159,9 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
         } @else {
           <span class="sr-only">{{ appName() }}</span>
         }
-        <app-notification-bell align="left" [resolveRoute]="resolveNotificationRoute()" />
+        @if (!isNarrowestViewport()) {
+          <app-notification-bell align="left" [resolveRoute]="resolveNotificationRoute()" />
+        }
       </div>
 
       <nav
@@ -121,6 +177,7 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
             [attr.aria-current]="rla.isActive ? 'page' : null"
             [attr.aria-label]="effectiveCollapsed() ? item.label : null"
             [title]="effectiveCollapsed() ? item.label : null"
+            (click)="closeDrawer(false)"
             class="inline-flex min-h-11 min-w-11 items-center gap-3 rounded-md px-3 text-sm text-default hover:bg-surface-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             <ui-icon [name]="item.icon" />
@@ -230,11 +287,43 @@ const COLLAPSE_BREAKPOINT = '(max-width: 768px)';
     </aside>
 
     <main class="flex min-w-0 flex-1 flex-col overflow-y-auto">
+      @if (isNarrowestViewport()) {
+        <!-- Lives in \`main\`'s own flex-column, not as a sibling of
+             \`aside\`/\`main\` at the host's flex-row level — a sibling
+             there would sit *beside* them, not stacked above. -->
+        <header
+          class="sticky top-0 z-10 flex h-14 w-full shrink-0 items-center gap-2 border-b border-border bg-surface px-3"
+        >
+          <button
+            type="button"
+            #drawerTrigger
+            (click)="openDrawer()"
+            aria-haspopup="true"
+            [attr.aria-expanded]="mobileMenuOpen()"
+            aria-label="Open navigation menu"
+            class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted hover:bg-surface-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          >
+            <ui-icon name="bars-3" />
+          </button>
+          <span class="truncate text-sm font-semibold text-strong">{{ appName() }}</span>
+          <app-notification-bell
+            align="left"
+            [resolveRoute]="resolveNotificationRoute()"
+            class="ml-auto"
+          />
+        </header>
+      }
       @if (visibleQuickActions().length > 0) {
         <!-- Rendered only when the app supplies actions, so an app
-             without them keeps exactly its previous layout. -->
+             without them keeps exactly its previous layout. \`top-14\`
+             instead of \`top-0\` when the mobile header above is also
+             present — both are \`sticky\`, and without the offset this
+             bar would paint over the header at the same scroll-pinned
+             position rather than stacking beneath it. -->
         <div
-          class="sticky top-0 z-10 flex justify-end border-b border-border bg-surface px-6 py-2"
+          class="sticky z-10 flex justify-end border-b border-border bg-surface px-6 py-2"
+          [class.top-0]="!isNarrowestViewport()"
+          [class.top-14]="isNarrowestViewport()"
         >
           <ui-action-menu
             label="Create a new record"
@@ -279,15 +368,28 @@ export class NavShell {
   private readonly permissionsService = inject(PermissionsService);
   private readonly router = inject(Router);
 
+  private readonly breakpointObserver = inject(BreakpointObserver);
+
   private readonly isNarrowViewport = toSignal(
-    inject(BreakpointObserver)
-      .observe(COLLAPSE_BREAKPOINT)
-      .pipe(map((result) => result.matches)),
+    this.breakpointObserver.observe(COLLAPSE_BREAKPOINT).pipe(map((result) => result.matches)),
     { initialValue: false }
   );
 
+  protected readonly isNarrowestViewport = toSignal(
+    this.breakpointObserver.observe(DRAWER_BREAKPOINT).pipe(map((result) => result.matches)),
+    { initialValue: false }
+  );
+
+  protected readonly mobileMenuOpen = signal(false);
+
+  // Opening the drawer is "temporarily not collapsed" — every existing
+  // icon-rail-vs-expanded branch below (nav labels, the profile block,
+  // the width itself) already keys off this one signal, so the drawer
+  // needs no second set of them.
   protected readonly effectiveCollapsed = computed(
-    () => this.isNarrowViewport() || this.collapseStore.collapsed()
+    () =>
+      (this.isNarrowViewport() || this.collapseStore.collapsed()) &&
+      !(this.isNarrowestViewport() && this.mobileMenuOpen())
   );
 
   protected readonly visibleNavItems = computed(() =>
@@ -318,6 +420,10 @@ export class NavShell {
   protected readonly menuOpen = signal(false);
   private readonly profileRoot = viewChild.required<ElementRef<HTMLElement>>('profileRoot');
   private readonly profileTrigger = viewChild.required<ElementRef<HTMLButtonElement>>('profileTrigger');
+  // `.required` doesn't fit here — the trigger only exists in the DOM
+  // at all when `isNarrowestViewport()` is true, unlike `profileTrigger`
+  // above, which is unconditionally rendered.
+  private readonly drawerTrigger = viewChild<ElementRef<HTMLButtonElement>>('drawerTrigger');
 
   protected readonly initial = computed(() => (this.authStore.user()?.email ?? '?').charAt(0).toUpperCase());
   protected readonly roleAndClientLabel = computed(() => {
@@ -347,7 +453,17 @@ export class NavShell {
     }
   }
 
-  @HostListener('document:click', ['$event'])
+  protected openDrawer(): void {
+    this.mobileMenuOpen.set(true);
+  }
+
+  protected closeDrawer(restoreFocus: boolean): void {
+    this.mobileMenuOpen.set(false);
+    if (restoreFocus) {
+      this.drawerTrigger()?.nativeElement.focus();
+    }
+  }
+
   protected onDocumentClick(event: MouseEvent): void {
     if (!this.menuOpen()) {
       return;
@@ -364,10 +480,12 @@ export class NavShell {
   // never reach it. A document-level listener, matching the
   // click-outside pattern above, is what actually catches it regardless
   // of which element inside (or outside) the menu currently has focus.
-  @HostListener('document:keydown.escape')
   protected onDocumentEscape(): void {
     if (this.menuOpen()) {
       this.closeMenu(true);
+    }
+    if (this.mobileMenuOpen()) {
+      this.closeDrawer(true);
     }
   }
 

@@ -15,6 +15,26 @@
 
   <section class="rounded-xl border border-border bg-surface p-5 shadow-sm">
     <div class="grid gap-4 sm:grid-cols-2">
+      <!-- A Client can run more routes than the picker below ever
+           fetches at once (MAX_OPTIONS) — searching narrows what that
+           fetch asks for, rather than filtering an already-truncated
+           list client-side, so a route past the cap is still reachable.
+
+           Label deliberately does not contain the word "route": every
+           e2e spec's `getByLabel('Route')` is a substring match, and a
+           label like "Search routes" would resolve two elements (this
+           field and the Route select below) — found by actually running
+           the suite, not by inspection. -->
+      <ui-text-field
+        label="Search"
+        type="text"
+        class="sm:col-span-2"
+        placeholder="Search routes by name…"
+        hint="Narrows the list below to routes matching what you type."
+        [ngModel]="routeSearchTerm()"
+        [ngModelOptions]="{ standalone: true }"
+        (ngModelChange)="onRouteSearchInput($event)"
+      />
       <ui-select
         label="Route"
         class="sm:col-span-2"

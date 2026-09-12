@@ -111,7 +111,13 @@ export class BookingTickets implements OnInit {
   // Isolated for testability, same convention as my-credentials.ts's
   // generateQrDataUrl — specs spy on this instead of exercising the
   // real encoder.
+  //
+  // 340, not 220: Senior Mode (spec 21 slice 3) renders this image at
+  // `--ui-qr-size` (340px there, 220px otherwise) via CSS, not a second
+  // TypeScript branch — generating the PNG at the larger fixed
+  // resolution up front means the default 220px display downscales a
+  // sharp source instead of the 220px mode ever upscaling a blurry one.
   protected async generateQrDataUrl(payload: string): Promise<string> {
-    return toDataURL(payload, { width: 220, margin: 1 });
+    return toDataURL(payload, { width: 340, margin: 1 });
   }
 }

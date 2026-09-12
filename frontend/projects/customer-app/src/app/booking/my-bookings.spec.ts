@@ -32,6 +32,11 @@ function makeBooking(overrides: Record<string, unknown> = {}) {
       { id: 'res-1', seat: '1A', from_stop: 'Ikeja', to_stop: 'CMS', status: 'held', held_until: '' },
       { id: 'res-2', seat: '1B', from_stop: 'Ikeja', to_stop: 'CMS', status: 'held', held_until: '' },
     ],
+    // A real hold by default, matching the seated status above —
+    // docs/specs/21-passenger-experience.md slice 2. Tests for the
+    // no-hold case (paid, open seating) override both to null.
+    hold_expires_at: '2026-08-10T00:15:00Z',
+    hold_expires_in_seconds: 900,
     created_at: '2026-08-10T00:00:00Z',
     ...overrides,
   };
@@ -523,6 +528,41 @@ describe('MyBookings', () => {
     await createComponent();
 
     expectColumnVisibilityParity(fixture.nativeElement, 'my-bookings');
+  });
+
+  // --- hold countdown (docs/specs/21-passenger-experience.md slice 2) ----
+
+  describe('hold countdown', () => {
+    it('renders a countdown on a pending_payment row with a live hold', async () => {
+      await createComponent();
+
+      const countdown = (fixture.nativeElement as HTMLElement).querySelector('ui-countdown');
+      expect(countdown?.textContent).toContain('Held for');
+    });
+
+    it('renders no countdown once the hold is null (already paid, or open seating)', async () => {
+      apiClient.GET.and.resolveTo({
+        data: {
+          count: 1,
+          results: [makeBooking({ hold_expires_at: null, hold_expires_in_seconds: null })],
+        },
+      });
+
+      await createComponent();
+
+      const countdown = (fixture.nativeElement as HTMLElement).querySelector('ui-countdown');
+      expect(countdown?.textContent?.trim()).toBe('');
+    });
+
+    it('reloads the list rather than asserting expiry once a row reaches zero', async () => {
+      await createComponent();
+      apiClient.GET.calls.reset();
+
+      component['onHoldExpired']();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(apiClient.GET).toHaveBeenCalledWith('/api/v1/bookings/mine/', jasmine.anything());
+    });
   });
 
   /**

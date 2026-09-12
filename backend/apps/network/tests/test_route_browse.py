@@ -169,6 +169,21 @@ def test_browse_narrows_to_one_business_when_filtered() -> None:
     assert [row["id"] for row in response.data["results"]] == [str(wanted_route.id)]
 
 
+def test_browse_search_narrows_by_route_name() -> None:
+    """Self-check 2026-09-12-specs19-21's trip-search finding: this
+    endpoint's `limit=100` cap on the passenger app's route picker had
+    no `?search=` to reach past it on a Client running more routes than
+    that."""
+    client = ClientFactory()
+    passenger = PassengerUserFactory(client=client)
+    wanted = _bookable_route(client, name="Yaba Express")
+    _bookable_route(client, name="Ikeja Direct")
+
+    response = _auth_client(passenger).get(reverse("route-browse"), {"search": "yaba"})
+
+    assert [row["id"] for row in response.data["results"]] == [str(wanted.id)]
+
+
 def test_browse_400s_on_an_unknown_business_filter() -> None:
     client = ClientFactory()
     passenger = PassengerUserFactory(client=client)

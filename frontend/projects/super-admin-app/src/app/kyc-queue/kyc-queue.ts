@@ -138,16 +138,26 @@ export class KycQueue implements OnInit {
       },
     });
 
-    // Refetch either way — a cancelled review leaves the row unchanged,
-    // a confirmed one leaves it decided; both cases are naturally
-    // reflected by the same unconditional reload. Deferred one tick:
-    // `getAll()` flips `ui-table`'s `loading` state, which tears down and
-    // recreates the whole table (including the Review button CDK is
-    // restoring focus to) — refetching in the same synchronous tick as
-    // the dialog's own close/focus-restoration sequence raced it and
-    // silently dropped focus onto nothing.
-    ref.closed.subscribe(() => {
-      setTimeout(() => void this.store.getAll());
+    // Only refetch on an actual decision (`ref.close(true)`), not on
+    // cancel/Escape (`false`/`undefined`) — a cancelled review leaves
+    // the row genuinely unchanged, so there is nothing to reload. This
+    // was previously unconditional ("both cases are naturally reflected
+    // by the same unconditional reload"), which was itself the bug: a
+    // refetch flips `ui-table`'s `loading` state, tearing down and
+    // recreating the whole table — including the Review button CDK's
+    // Dialog had *just* synchronously restored focus to — and the
+    // freshly-created button is a different DOM node that focus()
+    // was never called on. The `setTimeout` deferral only avoided
+    // racing that initial synchronous restoration; it did nothing to
+    // stop this second, later loss once the deferred refetch itself
+    // fired and rebuilt the row a moment later. Confirmed dialogs
+    // still need the reload (the row is genuinely stale there); Escape
+    // and Cancel now correctly leave both the data and the focused
+    // element alone.
+    ref.closed.subscribe((result) => {
+      if (result) {
+        void this.store.getAll();
+      }
     });
   }
 

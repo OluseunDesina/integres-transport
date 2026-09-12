@@ -20,9 +20,22 @@ function todayISO(): string {
 /** By value on a label *prefix*, for the reason `booking.spec.ts`'s own
  * helper documents: `trip-search.ts` appends the operator name to every
  * option once the browse endpoint spans more than one Business, which
- * these fixtures guarantee. */
+ * these fixtures guarantee.
+ *
+ * Searches by name first (self-check 2026-09-12-specs19-21): this dev
+ * database accumulates stray e2e-created routes faster than
+ * `prune_e2e_test_data` can clear all of them (some are `Schedule`/
+ * `Trip`/`FareRule`-protected, which that command deliberately never
+ * force-cascades), and the browse endpoint's own picker is capped at
+ * 100 results in its default, unfiltered order — enough stray routes
+ * pushes this fixture's route past that cap. Typing its name narrows
+ * the same request server-side instead, which is the actual fix; the
+ * old unfiltered `<select>` was never going to be reliable once this
+ * dev database's fixture data crossed the cap, no matter how much
+ * pruning ran first. */
 async function selectFixtureRoute(page: Page): Promise<void> {
-  const select = page.getByLabel('Route');
+  await page.getByLabel('Search').fill(ROUTE_NAME);
+  const select = page.getByLabel('Route', { exact: true });
   const option = select.locator('option').filter({ hasText: ROUTE_NAME }).first();
   await expect(option).toBeAttached();
   await select.selectOption((await option.getAttribute('value')) ?? '');
@@ -77,6 +90,13 @@ test.describe('customer-app open seating', () => {
     await expect(page.getByText('Seats', { exact: true })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Reserve places' }).click();
+
+    // Open seating holds nothing (spec 21 slice 2's own corrected
+    // reading of the model) — the held/confirmed panel shows no
+    // countdown, unlike a seated reservation's.
+    await expect(page.getByText('confirmed once you pay')).toBeVisible();
+    await expect(page.locator('ui-countdown')).toBeEmpty();
+    await page.getByRole('button', { name: 'Continue to My Bookings' }).click();
 
     await expect(page).toHaveURL(/\/my-bookings$/);
     const row = page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first();

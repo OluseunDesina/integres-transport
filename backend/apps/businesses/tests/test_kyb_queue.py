@@ -175,6 +175,33 @@ def test_queue_lists_only_submitted_businesses_with_client_context_and_documents
     assert len(row["documents"]) == 1
 
 
+def test_queue_search_narrows_by_business_name() -> None:
+    """Self-check 2026-09-12-specs19-21's F7: the queue had no way to
+    find one submission among many except paging through FIFO order."""
+    client = ClientFactory()
+    staff = ClientStaffUserFactory(client=client)
+    upload = SimpleUploadedFile("cert.pdf", b"%PDF-1.4 fake", content_type="application/pdf")
+    with tenant_context(str(client.id)):
+        wanted = BusinessFactory(client=client, name="Lagos Shuttle Co")
+        other = BusinessFactory(client=client, name="Abuja Transit Ltd")
+        for business in (wanted, other):
+            submit_kyb_document(
+                business=business,
+                document_type="certificate_of_incorporation",
+                file=upload,
+                uploaded_by=staff,
+            )
+    platform_staff = PlatformStaffUserFactory()
+
+    response = _auth_client(platform_staff, platform_staff=True).get(
+        reverse("kyb-queue-list"), {"search": "lagos"}
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    ids = [row["id"] for row in response.data["results"]]
+    assert ids == [str(wanted.id)]
+
+
 def test_queue_requires_platform_staff() -> None:
     submitted = _submitted_business_with_document()
     staff = ClientStaffUserFactory(client=submitted.client)

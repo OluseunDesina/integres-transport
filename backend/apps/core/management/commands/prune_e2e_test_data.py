@@ -18,7 +18,22 @@ whole tool is scoped to — never parametrized to prune another Client.
 
 Best-effort: a row with a protected dependent (a Vehicle/Trip/Booking/
 etc. some other spec created against it) is skipped and counted rather
-than force-cascaded.
+than force-cascaded. **The one deliberate exception** is a stray
+Business's own `KybDocument`/`Director` rows (self-check
+2026-09-12-specs19-21's F8): any e2e run that went through the KYB
+submission flow leaves its throwaway Business with a `KybDocument`
+attached, and that FK is `on_delete=PROTECT` — meaning almost every
+stray Business this command finds was permanently unpruneable, and the
+super-admin KYB queue could only ever grow. A dev/CI-only fixture
+document carries no real audit or compliance value, unlike the same
+model in production, so this command explicitly deletes a stray
+Business's own documents (and any Director those documents alone
+reference) before deleting the Business itself. `Route`'s own
+`ProtectedError`s are deliberately NOT given the same treatment — those
+come from real `Schedule`/`Trip`/`FareRule`/`Incident` rows, which are
+usage data even in a test fixture, and force-cascading through them
+risks leaving booking/ledger-adjacent rows in a broken state other
+specs depend on.
 """
 
 from typing import Any
@@ -26,7 +41,7 @@ from typing import Any
 from django.core.management.base import BaseCommand
 from django.db.models import ProtectedError
 
-from apps.businesses.models import Business
+from apps.businesses.models import Business, Director, KybDocument
 from apps.clients.models import Client
 from apps.core.management.commands.seed_e2e_users import (
     BOOKABLE_ROUTE_NAME,
@@ -80,9 +95,21 @@ class Command(BaseCommand):
             )
             for business in stray_businesses:
                 if dry_run:
-                    self.stdout.write(f"[dry-run] would delete Business: {business.name}")
+                    doc_count = KybDocument.all_objects.filter(business=business).count()
+                    suffix = (
+                        f" ({doc_count} KybDocument row(s) would go with it)" if doc_count else ""
+                    )
+                    self.stdout.write(f"[dry-run] would delete Business: {business.name}{suffix}")
                     continue
                 try:
+                    # Documents first, then any Director those documents
+                    # alone protect, then the Business — the exact order
+                    # `on_delete=PROTECT` requires. Nothing else in this
+                    # codebase references a `KybDocument`, so deleting it
+                    # is always safe; a `Director` is only unsafe to
+                    # delete while a `KybDocument` still names it.
+                    KybDocument.all_objects.filter(business=business).delete()
+                    Director.all_objects.filter(business=business).delete()
                     business.delete()
                     businesses_deleted += 1
                 except ProtectedError:

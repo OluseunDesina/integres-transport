@@ -2,7 +2,6 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
-  HostListener,
   OnInit,
   inject,
   input,
@@ -58,7 +57,11 @@ function noRoute(): null {
 @Component({
   selector: 'app-notification-bell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'contents' },
+  host: {
+    class: 'contents',
+    '(document:click)': 'onDocumentClick($event)',
+    '(document:keydown.escape)': 'onDocumentEscape()',
+  },
   imports: [Icon],
   template: `
     <div class="relative" #bellRoot>
@@ -186,7 +189,6 @@ export class NotificationBell implements OnInit {
     }
   }
 
-  @HostListener('document:click', ['$event'])
   protected onDocumentClick(event: MouseEvent): void {
     if (!this.menuOpen()) {
       return;
@@ -199,7 +201,6 @@ export class NotificationBell implements OnInit {
   // Same reasoning as NavShell's identical listener: opening the panel
   // never moves focus off the trigger, so a template-level
   // keydown.escape binding on the panel itself would never fire.
-  @HostListener('document:keydown.escape')
   protected onDocumentEscape(): void {
     if (this.menuOpen()) {
       this.closeMenu(true);

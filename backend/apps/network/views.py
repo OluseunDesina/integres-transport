@@ -191,7 +191,10 @@ class RouteListCreateView(generics.ListCreateAPIView[Route]):
         return Response(RouteSerializer(route).data, status=201)
 
 
-@extend_schema(parameters=[_BUSINESS_QUERY_PARAM], responses=RouteBrowseSerializer(many=True))
+@extend_schema(
+    parameters=[_BUSINESS_QUERY_PARAM, _SEARCH_QUERY_PARAM],
+    responses=RouteBrowseSerializer(many=True),
+)
 class RouteBrowseView(generics.ListAPIView[Route]):
     """GET /routes/browse/ — the passenger-facing Route list, see
     docs/specs/4-fares-seating-booking-frontend.md §3.2.
@@ -232,16 +235,16 @@ class RouteBrowseView(generics.ListAPIView[Route]):
         queryset = Route.objects.select_related("business").filter(
             status=Route.Status.ACTIVE, id__in=bookable
         )
-        # `_as_plain_dict` even though this view reads only `business` —
-        # the QueryDict/BooleanField trap documented in
-        # `_apply_list_query` is latent the moment anyone reads another
-        # field here.
-        query = NetworkListQuerySerializer(data=_as_plain_dict(self.request.query_params))
-        query.is_valid(raise_exception=True)
-        business = query.validated_data.get("business")
-        if business is not None:
-            queryset = queryset.filter(business=business)
-        return queryset
+        # `?business=&search=`, the same two params and the same
+        # name/code search fields the staff Route list already applies
+        # (`_apply_route_list_query`) — self-check 2026-09-12-specs19-21's
+        # trip-search finding: this endpoint took `?business=` but had no
+        # way to reach a route past its own `limit=100` cap on a Client
+        # running more than that many. `_apply_list_query` already keeps
+        # every clause narrowing, so this cannot reach another Client's
+        # rows any more than the bare `business` filter above already
+        # could not.
+        return _apply_list_query(queryset, self.request.query_params, ["name", "code"])
 
 
 @extend_schema_view(

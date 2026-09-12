@@ -47,3 +47,6 @@ export * from './lib/chart';
 export * from './lib/map';
 export * from './lib/theme/color';
 export * from './lib/theme/brand-theme.service';
+/* Spec 21 slice 2 — the seat-hold countdown, `booking-confirm` and
+ * `my-bookings`. */
+export * from './lib/countdown';

@@ -511,6 +511,101 @@ def test_manifest_query_count_does_not_scale_with_the_number_aboard() -> None:
     assert len(eight_rows.captured_queries) == len(one_row.captured_queries)
 
 
+def test_manifest_query_count_does_not_scale_with_unticketed_held_bookings() -> None:
+    """The counter-booking path (docs/specs/18-manifest-and-staff-booking.md
+    slice 2): a held-but-unpaid booking has no `Ticket` row at all, so it
+    is read through a different queryset (`unticketed_booking_queryset`)
+    than the one the test above already covers. Same property, same
+    reasoning: one row must cost the same as eight.
+    """
+    client = ClientFactory()
+    roles = create_default_roles(client)
+    staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
+    trip, stop_a, stop_b, vehicle_type = _reservation_trip(client, capacity=8)
+
+    def _hold_one_seat(index: int) -> None:
+        with tenant_context(str(client.id)):
+            seat = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number=f"{index}A")
+            passenger = PassengerUserFactory(client=client)
+            create_booking(
+                trip=trip,
+                passenger=passenger,
+                seats=[{"seat": seat, "from_stop": stop_a, "to_stop": stop_b}],
+                idempotency_key=f"m-unticketed-n1-{index}",
+            )
+
+    _hold_one_seat(0)
+
+    with CaptureQueriesContext(connection) as one_row:
+        assert len(_manifest(staff, str(trip.id)).data["results"]) == 1
+
+    for index in range(1, 8):
+        _hold_one_seat(index)
+
+    with CaptureQueriesContext(connection) as eight_rows:
+        assert len(_manifest(staff, str(trip.id)).data["results"]) == 8
+
+    assert len(eight_rows.captured_queries) == len(one_row.captured_queries)
+
+
+def test_manifest_query_count_does_not_scale_with_the_number_of_taps() -> None:
+    """The pay-as-you-go path is read through a third queryset
+    (`journey_queryset`), untested by the two counts above. Same
+    property again: the manifest must not fan out per `FareJourney` the
+    way it doesn't fan out per `Ticket` or per unticketed `Booking`.
+    """
+    client = ClientFactory()
+    roles = create_default_roles(client)
+    staff = ClientStaffUserFactory(client=client, role=roles["Owner"])
+    with tenant_context(str(client.id)):
+        route = RouteFactory(client=client)
+        stop_a = StopFactory(client=client, business=route.business)
+        stop_b = StopFactory(client=client, business=route.business)
+        RouteStopFactory(client=client, route=route, stop=stop_a, sequence=1)
+        RouteStopFactory(client=client, route=route, stop=stop_b, sequence=2)
+        departure = timezone.now() + timedelta(hours=2)
+        trip = TripFactory(
+            client=client,
+            route=route,
+            business=route.business,
+            service_date=departure.date(),
+            scheduled_departure_at=departure,
+            fare_collection_mode=Business.FareCollectionMode.PAY_AS_YOU_GO,
+        )
+
+    def _tap_one_passenger(index: int) -> None:
+        with tenant_context(str(client.id)):
+            passenger = PassengerUserFactory(client=client)
+            credential = TapCredentialFactory(client=client, passenger=passenger)
+            FareJourney.objects.create(
+                client=client,
+                business=route.business,
+                trip=trip,
+                passenger=passenger,
+                credential=credential,
+                board_stop=stop_a,
+                alight_stop=stop_b,
+                status=FareJourney.Status.CLOSED,
+                amount="300.00",
+                currency=route.business.currency,
+                boarded_at=timezone.now() - timedelta(minutes=20),
+                alighted_at=timezone.now(),
+            )
+
+    _tap_one_passenger(0)
+
+    with CaptureQueriesContext(connection) as one_row:
+        assert len(_manifest(staff, str(trip.id)).data["results"]) == 1
+
+    for index in range(1, 8):
+        _tap_one_passenger(index)
+
+    with CaptureQueriesContext(connection) as eight_rows:
+        assert len(_manifest(staff, str(trip.id)).data["results"]) == 8
+
+    assert len(eight_rows.captured_queries) == len(one_row.captured_queries)
+
+
 # --- access ----------------------------------------------------------------
 
 

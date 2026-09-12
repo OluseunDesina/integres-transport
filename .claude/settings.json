@@ -235,7 +235,10 @@
       "Bash(E2E_SKIP_SEED=1 npx playwright test --project=client-admin-app counter-booking.spec.ts --reporter=line)",
       "Bash(UI_REVIEW_SPEC=18-staff-booking UI_REVIEW_DIR=iteration-2 E2E_SKIP_SEED=1 npx playwright test --project=client-admin-app --grep @ui-review --reporter=line)",
       "Bash(awk -F': ' '{s+=$2} END {print \"frontend unit total:\", s}')",
-      "Bash(awk 'NR>=908 && NR<=955' docs/status.md)"
+      "Bash(awk 'NR>=908 && NR<=955' docs/status.md)",
+      "Bash(UI_REVIEW_DIR=item2-verify UI_REVIEW_SPEC=fix-batch UI_REVIEW_SENIOR=1 npx playwright test --project=customer-app -g \"@ui-review capture\")",
+      "Bash(UI_REVIEW_DIR=item3-verify UI_REVIEW_SPEC=fix-batch npx playwright test --project=client-admin-app -g \"@ui-review capture\")",
+      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; head -30 \"{}\"')"
     ]
   }
 }

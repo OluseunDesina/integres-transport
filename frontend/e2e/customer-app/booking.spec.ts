@@ -51,9 +51,21 @@ function farFutureISO(): string {
  * guarantees that, so the bare-label form here had been failing since
  * that fixture landed — unnoticed, because this project's e2e suite
  * had not been run since.
+ *
+ * Searches by name first (self-check 2026-09-12-specs19-21): the
+ * browse endpoint's picker is capped at 100 results in its default,
+ * unfiltered order, and this dev database accumulates stray e2e-
+ * created routes faster than `prune_e2e_test_data` can clear all of
+ * them (some are `Schedule`/`Trip`/`FareRule`-protected, which that
+ * command deliberately never force-cascades) — `open-seating.spec.ts`
+ * hit exactly this once its own fixture route crossed the cap. This
+ * spec's route hadn't yet, but the fetch was equally bounded; searching
+ * narrows the same request server-side instead of relying on
+ * unfiltered order staying lucky.
  */
 async function selectFixtureRoute(page: Page): Promise<void> {
-  const select = page.getByLabel('Route');
+  await page.getByLabel('Search').fill(ROUTE_NAME);
+  const select = page.getByLabel('Route', { exact: true });
   const option = select.locator('option').filter({ hasText: ROUTE_NAME }).first();
   await expect(option).toBeAttached();
   await select.selectOption((await option.getAttribute('value')) ?? '');
@@ -163,6 +175,16 @@ test.describe('customer-app booking flow', () => {
 
     await page.getByRole('button', { name: 'Reserve seats' }).click();
 
+    // Submitting no longer navigates away — spec 21 slice 2's held/
+    // confirmed panel, with its own countdown, shows on this same
+    // screen first.
+    await expect(page.getByText('Your seats are held')).toBeVisible();
+    await expect(page.locator('ui-countdown')).toContainText('Held for');
+    results = await new AxeBuilder({ page }).analyze();
+    expect(results.violations).toEqual([]);
+
+    await page.getByRole('button', { name: 'Continue to My Bookings' }).click();
+
     await expect(page).toHaveURL(/\/my-bookings$/);
     const row = page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first();
     await expect(row).toBeVisible();
@@ -257,6 +279,10 @@ test.describe('customer-app booking flow', () => {
     await page.getByRole('button', { name: 'Reserve seats' }).focus();
     await page.keyboard.press('Enter');
 
+    await expect(page.getByText('Your seats are held')).toBeVisible();
+    await page.getByRole('button', { name: 'Continue to My Bookings' }).focus();
+    await page.keyboard.press('Enter');
+
     await expect(page).toHaveURL(/\/my-bookings$/);
 
     // Clean up via the confirm dialog so this reusable fixture seat isn't
@@ -274,6 +300,7 @@ test.describe('customer-app booking flow', () => {
     await pickFirstAvailableSeat(page);
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByRole('button', { name: 'Reserve seats' }).click();
+    await page.getByRole('button', { name: 'Continue to My Bookings' }).click();
 
     await expect(page).toHaveURL(/\/my-bookings$/);
     const row = page.getByRole('row', { name: new RegExp(ROUTE_NAME) }).first();
@@ -382,22 +409,25 @@ test.describe('customer-app booking flow', () => {
     await pageA.getByRole('button', { name: 'Continue' }).click();
     await pageB.getByRole('button', { name: 'Continue' }).click();
 
+    // A winning submit no longer navigates away (spec 21 slice 2 — it
+    // stays on /book showing the held/confirmed panel), so the outcome
+    // is read off which marker appears, not off the URL.
+    async function submitAndClassify(page: import('@playwright/test').Page): Promise<'won' | 'lost'> {
+      await page.getByRole('button', { name: 'Reserve seats' }).click();
+      const won = page.getByText('Continue to My Bookings');
+      const lost = page.getByText('One of the seats you picked was taken while you were booking.');
+      await expect(won.or(lost)).toBeVisible();
+      return (await won.isVisible()) ? 'won' : 'lost';
+    }
+
     const [resultA, resultB] = await Promise.allSettled([
-      (async () => {
-        await pageA.getByRole('button', { name: 'Reserve seats' }).click();
-        await pageA.waitForURL(/\/my-bookings$|\/search\/seats$/);
-        return pageA.url();
-      })(),
-      (async () => {
-        await pageB.getByRole('button', { name: 'Reserve seats' }).click();
-        await pageB.waitForURL(/\/my-bookings$|\/search\/seats$/);
-        return pageB.url();
-      })(),
+      submitAndClassify(pageA),
+      submitAndClassify(pageB),
     ]);
 
-    const urls = [resultA, resultB].map((r) => (r.status === 'fulfilled' ? r.value : ''));
-    const succeeded = urls.filter((u) => u.includes('/my-bookings'));
-    const conflicted = urls.filter((u) => u.includes('/search/seats'));
+    const outcomes = [resultA, resultB].map((r) => (r.status === 'fulfilled' ? r.value : 'lost'));
+    const succeeded = outcomes.filter((o) => o === 'won');
+    const conflicted = outcomes.filter((o) => o === 'lost');
 
     // Exactly one context wins the seat; the other is bounced back to the
     // seat picker with the conflict notice — never two bookings for one
@@ -405,7 +435,7 @@ test.describe('customer-app booking flow', () => {
     expect(succeeded.length).toBe(1);
     expect(conflicted.length).toBe(1);
 
-    const loserPage = urls[0].includes('/search/seats') ? pageA : pageB;
+    const loserPage = outcomes[0] === 'lost' ? pageA : pageB;
     await expect(
       loserPage.getByText('One of the seats you picked was taken while you were booking.')
     ).toBeVisible();

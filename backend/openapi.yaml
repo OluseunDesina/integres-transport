@@ -2646,6 +2646,12 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match. Routes match on name or code;
+          stops on name or address.
       tags:
       - routes
       security:
@@ -3336,6 +3342,11 @@ paths:
         description: The initial index from which to return the results.
         schema:
           type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: Case-insensitive substring match on the business name.
       tags:
       - super-admin
       security:
@@ -4766,6 +4777,15 @@ components:
           items:
             $ref: '#/components/schemas/BookingSeatReservation'
           readOnly: true
+        hold_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          readOnly: true
+        hold_expires_in_seconds:
+          type: integer
+          nullable: true
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -4775,6 +4795,8 @@ components:
       - cancellation_reason
       - created_at
       - currency
+      - hold_expires_at
+      - hold_expires_in_seconds
       - id
       - passenger
       - reference

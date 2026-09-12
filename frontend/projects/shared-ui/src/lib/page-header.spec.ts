@@ -69,4 +69,25 @@ describe('PageHeader', () => {
     const secondHeading = second.debugElement.query(By.css('h1')).nativeElement as HTMLElement;
     expect(secondHeading.id).not.toBe(heading().id);
   });
+
+  // Spec 21 slice 3's own finding (docs/ui-review/21-passenger-experience/
+  // iteration-1.md): `title` is arbitrary text — a passenger's own email
+  // in `home.ts`'s greeting, a tenant's business name elsewhere — and an
+  // unbroken run of it (no spaces) rendered fine at this app's normal
+  // type scale but overflowed once Senior Mode's larger root font-size
+  // grew the same string past its container's width, silently clipped
+  // rather than visibly overflowing once app-shell's `<main>` gained its
+  // own `overflow-x-hidden` backstop. `break-words` is the fix per the
+  // spec's own edge case: "wrap, never truncate — a truncated
+  // destination is unreadable."
+  it('wraps a long, unbroken title and description instead of overflowing', () => {
+    host.title = 'e2e-passenger@a-very-long-example-domain-name-that-will-not-fit.example.com';
+    host.description =
+      'ThisIsOneSingleUnbrokenWordWithNoSpacesThatWouldOtherwiseOverflowItsContainer';
+    fixture.detectChanges();
+
+    expect(heading().className).toContain('break-words');
+    const description = fixture.debugElement.query(By.css('p')).nativeElement as HTMLElement;
+    expect(description.className).toContain('break-words');
+  });
 });

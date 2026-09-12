@@ -74,6 +74,8 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
 
 export const AA_BODY = 4.5;
 export const AA_LARGE = 3;
+/** WCAG 2.1 AAA body text, the floor Senior Mode's token set is measured against. */
+export const AAA_BODY = 7;
 
 const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 

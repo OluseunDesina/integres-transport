@@ -206,8 +206,13 @@ export class MyCredentials implements OnInit {
   // Isolated for testability — spied on in specs so unit tests don't
   // exercise the real QR-encoding library, same isolation-for-testing
   // convention my-bookings.ts used for redirectToPaystack().
+  //
+  // 340, not 220 — see booking-tickets.ts's identical comment: Senior
+  // Mode (spec 21 slice 3) displays this at a larger CSS size via
+  // `--ui-qr-size`, and generating the source at that resolution up
+  // front avoids upscaling a blurry 220px PNG.
   protected async generateQrDataUrl(token: string): Promise<string> {
-    return toDataURL(token, { width: 220, margin: 1 });
+    return toDataURL(token, { width: 340, margin: 1 });
   }
 
   private async submitRevoke(id: string): Promise<ConfirmDialogResult> {

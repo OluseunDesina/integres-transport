@@ -79,16 +79,15 @@ test.describe('super-admin-app KYC queue', () => {
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
     await expect(row).toBeVisible();
-    // CDK's Dialog service restores focus to the trigger element by
-    // default (restoreFocus: true, unset here) — manually verified this
-    // holds (reviewButton regains focus) and confirmed reliable in an
-    // isolated single-file run. Not asserted here: reproducibly flaky
-    // specifically when this file runs in the same `playwright test`
-    // invocation as kyb-queue.spec.ts (each is 100% reliable alone, even
-    // with a 15s timeout on the assertion, which rules out a simple
-    // timing/resource-contention explanation) — a parallel-execution
-    // artifact this session couldn't further isolate, not a demonstrated
-    // product defect.
+    // CDK's Dialog service restores focus to the trigger element
+    // synchronously on close (restoreFocus: true, the default). The
+    // real, previously-undiagnosed bug this masked: the component's own
+    // deferred post-close refetch (kyc-queue.ts) used to run
+    // unconditionally, including on cancel/Escape — recreating the
+    // whole table a moment after focus had just been correctly
+    // restored to this exact button, landing focus back on nothing.
+    // Fixed by only refetching on an actual decision.
+    await expect(reviewButton).toBeFocused();
   });
 
   test('the decide dialog is fully operable by keyboard alone', async ({ page }) => {

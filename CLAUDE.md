@@ -29,16 +29,29 @@ metro). One Django/DRF backend; four white-labeled Angular 20 frontends
 one Angular CLI workspace. `validator-app` is an installable PWA
 standing in for the still-out-of-scope Flutter validator app.
 
-**Status: phases 0–12 and specs 13–20 are complete.** 1171/1171 backend
-tests, 1596 frontend unit tests, four Playwright projects
-(121 / 23 / 19 / 12 — not re-run since spec 19; see specs 19/20's own
-Implementation notes for what was verified instead). See
-`docs/status.md` and the roadmap.
+**Status: phases 0–12 and specs 13–21 are all complete — the Transit OS
+adoption roadmap is done.** 1185/1185 backend tests, 1645 frontend unit
+tests, four Playwright projects. See `docs/status.md` and the roadmap.
 
-**Next: spec 21 slice 1 — responsive navigation**
-([`docs/specs/21-passenger-experience.md`](docs/specs/21-passenger-experience.md)):
-the bottom tab bar, page padding, and the multi-width overflow tests —
-closes the standing recorded nav-overflow defect on its own.
+**Next: nothing scheduled.** The roadmap
+([`docs/specs/README-transit-os-adoption.md`](docs/specs/README-transit-os-adoption.md))
+has no further spec. The self-check catch-up for specs 19–21
+(`docs/self-check-2026-09-12-specs19-21.md`) and the fix batch it led
+to are both done — every gap that report and `docs/traps.md` named
+(`ui-map` contrast, `ui-table` Senior Mode density, `trip-search`'s
+Route picker, `NavShell`'s icon rail, the KYB queue search, the
+`prune_e2e_test_data` KYB-document cascade, and the real bug behind the
+one Playwright interference case) is fixed — see `docs/traps.md`'s own
+entries for each, dated 2026-09-12. What's actually owed now: three
+**new**, unrelated defects this fix batch's own full-suite verification
+surfaced (a `client-admin-app` route row's action menu that reports
+`aria-expanded` but never renders its items; a pre-existing
+`aria-allowed-role` axe violation in `live-operations`'s trip-picker
+list; and data drift on this dev database's shared "Yaba → Lekki" trip
+fixture — duplicate rows, one incorrectly `in_progress`) — all named in
+`docs/traps.md`'s "Known gaps" section, none fixed. Don't start any of
+this without being
+asked.
 
 ## How we work
 

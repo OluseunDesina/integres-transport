@@ -4,12 +4,24 @@
     description="Businesses that have submitted verification documents and are waiting on a decision."
   />
 
+  <ui-filter-bar
+    [searchValue]="store.query().search ?? ''"
+    (searchChange)="onSearchChange($event)"
+    searchLabel="Search"
+    placeholder="Search by business name…"
+    ariaLabel="Filter the KYB queue"
+  />
+
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
   } @else if (store.isEmpty()) {
     <ui-empty-state
-      title="No submissions to review"
-      description="New KYB submissions will appear here."
+      [title]="store.query().search ? 'No matching submissions' : 'No submissions to review'"
+      [description]="
+        store.query().search
+          ? 'No business name matches ' + store.query().search + '.'
+          : 'New KYB submissions will appear here.'
+      "
     />
   } @else {
     <ui-table label="KYB review queue" [loading]="store.loading()">

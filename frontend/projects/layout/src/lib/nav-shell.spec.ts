@@ -353,6 +353,91 @@ describe('NavShell', () => {
     });
   });
 
+  describe('mobile drawer (narrow viewport)', () => {
+    function drawerTrigger(fixture: ComponentFixture<HostComponent>) {
+      return fixture.debugElement.query(By.css('[aria-label="Open navigation menu"]'));
+    }
+
+    function backdrop(fixture: ComponentFixture<HostComponent>) {
+      return fixture.debugElement.query(By.css('[aria-label="Close navigation menu"]'));
+    }
+
+    function aside(fixture: ComponentFixture<HostComponent>) {
+      return fixture.debugElement.query(By.css('aside'));
+    }
+
+    function openDrawer(fixture: ComponentFixture<HostComponent>): void {
+      drawerTrigger(fixture).nativeElement.click();
+      fixture.detectChanges();
+    }
+
+    beforeEach(async () => {
+      localStorage.clear();
+      ({ fixture } = await setup(true));
+      authStore = TestBed.inject(AuthStore);
+      authStore.setSession('a', 'r', makeUser({ permissions: ['client-admin:access'] }));
+      fixture.detectChanges();
+    });
+
+    it('renders a hamburger trigger only at this breakpoint', () => {
+      expect(drawerTrigger(fixture)).toBeTruthy();
+    });
+
+    it('starts closed: the sidebar is inert and no backdrop is rendered', () => {
+      expect(aside(fixture).nativeElement.hasAttribute('inert')).toBeTrue();
+      expect(backdrop(fixture)).toBeNull();
+    });
+
+    it('opens on trigger click: sidebar loses inert, backdrop appears, aria-expanded flips', () => {
+      openDrawer(fixture);
+
+      expect(aside(fixture).nativeElement.hasAttribute('inert')).toBeFalse();
+      expect(backdrop(fixture)).toBeTruthy();
+      expect(drawerTrigger(fixture).nativeElement.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('shows nav-item labels while open, unlike the plain icon rail', () => {
+      openDrawer(fixture);
+
+      const homeLink = fixture.debugElement
+        .queryAll(By.css('nav a'))
+        .find((el) => (el.nativeElement.textContent as string).includes('Home'));
+      expect(homeLink?.nativeElement.querySelector('span')).toBeTruthy();
+    });
+
+    it('closes on backdrop click', () => {
+      openDrawer(fixture);
+
+      backdrop(fixture).nativeElement.click();
+      fixture.detectChanges();
+
+      expect(aside(fixture).nativeElement.hasAttribute('inert')).toBeTrue();
+      expect(backdrop(fixture)).toBeNull();
+    });
+
+    it('closes on Escape and restores focus to the hamburger trigger', () => {
+      openDrawer(fixture);
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      fixture.detectChanges();
+
+      expect(aside(fixture).nativeElement.hasAttribute('inert')).toBeTrue();
+      expect(document.activeElement).toBe(drawerTrigger(fixture).nativeElement);
+    });
+
+    it('closes when a nav link is clicked', () => {
+      openDrawer(fixture);
+
+      const homeLink = fixture.debugElement
+        .queryAll(By.css('nav a'))
+        .find((el) => (el.nativeElement.textContent as string).includes('Home'));
+      homeLink?.nativeElement.click();
+      fixture.detectChanges();
+
+      expect(aside(fixture).nativeElement.hasAttribute('inert')).toBeTrue();
+    });
+  });
+
   // --- Quick-create top bar (docs/specs/14 slice 3a) ---
 
   describe('quick actions', () => {

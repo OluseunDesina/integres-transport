@@ -211,7 +211,14 @@ export class UiMap implements OnDestroy {
     if (this.destroyed) {
       return;
     }
-    const map = L.map(container, { attributionControl: true }).setView(
+    // `keyboard: false`: the container itself carries `aria-hidden`
+    // (see the template) — everything the map shows has a non-map
+    // equivalent in the accessible table below it, so nothing inside
+    // this subtree should be reachable by keyboard either. Without
+    // this, Leaflet gives the container its own `tabindex="0"` for
+    // arrow-key panning, which axe correctly flags as a focusable
+    // descendant of an aria-hidden element.
+    const map = L.map(container, { attributionControl: true, keyboard: false }).setView(
       DEFAULT_CENTER,
       DEFAULT_ZOOM
     );
@@ -222,6 +229,17 @@ export class UiMap implements OnDestroy {
     this.leafletMap = map;
     this.layerGroup = L.layerGroup().addTo(map);
     this.syncMarkers(this.markers());
+    // The zoom control's two buttons and the attribution link are
+    // real `<a>` elements Leaflet builds itself — there is no
+    // per-control "keyboard" option for either, unlike the map and its
+    // markers. Stripped of tab focus here rather than removed: a mouse
+    // or touch user still has full zoom control and can still follow
+    // the attribution link, only keyboard tab order skips them, which
+    // is what an aria-hidden ancestor already implies for anything
+    // genuinely reachable inside it.
+    for (const el of container.querySelectorAll<HTMLElement>('a, button, [tabindex]')) {
+      el.setAttribute('tabindex', '-1');
+    }
   }
 
   private syncMarkers(markers: MapMarker[]): void {
@@ -262,9 +280,15 @@ export class UiMap implements OnDestroy {
         iconSize: [18, 18],
         iconAnchor: [9, 9],
       });
-      const leafletMarker = L.marker(position, { icon, title: marker.label }).bindPopup(
-        this.popupHtml(marker)
-      );
+      // `keyboard: false` — same reason the map itself disables it:
+      // without it Leaflet gives every marker `tabindex="0"` and
+      // `role="button"`, another focusable descendant of the
+      // `aria-hidden` container.
+      const leafletMarker = L.marker(position, {
+        icon,
+        title: marker.label,
+        keyboard: false,
+      }).bindPopup(this.popupHtml(marker));
       leafletMarker.on('click', () => this.markerSelected.emit(marker.id));
       leafletMarker.addTo(group);
       this.markersById.set(marker.id, leafletMarker);
@@ -296,7 +320,16 @@ export class UiMap implements OnDestroy {
       `Updated: ${escapeHtml(marker.stalenessLabel ?? UNKNOWN)}`,
     ];
     if (marker.simulated) {
-      parts.push('<em>Simulated data</em>');
+      // Explicit colors, not Leaflet's popup defaults: measured live at
+      // 2.71:1 (fails WCAG AA's 4.5:1) with whatever the browser's
+      // default `<em>`/popup styling actually resolves to here — the
+      // static markup itself carried no color at all. This pairing
+      // (--color-warning on --color-warning-surface) is the same one
+      // `ui-alert`'s own `warning` variant uses, measured at 5.02:1 in
+      // color.spec.ts.
+      parts.push(
+        '<em style="color:var(--color-warning);background:var(--color-warning-surface);padding:0 4px;border-radius:2px;">Simulated data</em>'
+      );
     }
     return parts.join('<br>');
   }

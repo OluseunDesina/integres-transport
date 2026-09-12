@@ -21,3 +21,17 @@
    tokens, so Leaflet's default marker image assets are never
    referenced. */
 @import 'leaflet/dist/leaflet.css';
+
+/* Leaflet's own attribution link ("OpenStreetMap contributors",
+   required by their tile usage policy) ships with 2.55:1 contrast
+   against its control's background and no non-colour styling — axe's
+   `link-in-text-block` rule (a real, previously unrun finding from
+   spec 21 slice 1, caught on customer-app's own tracking screen and
+   applied here too since both apps render the same control). Same fix
+   as customer-app/src/styles.css: underline it, since the rule only
+   requires the link be distinguishable from surrounding text by
+   *some* means, not colour specifically — Leaflet/OSM's own text and
+   colour stay untouched. */
+.leaflet-control-attribution a {
+  text-decoration: underline;
+}

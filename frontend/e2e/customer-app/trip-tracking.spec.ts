@@ -51,15 +51,11 @@ async function ensureTripInProgress(): Promise<string> {
         })
       ).json()
     ).access as string;
-    const passengerToken = (
-      await (
-        await api.post(`${BACKEND_URL}/api/v1/auth/customer/token/`, {
-          data: { email: PASSENGER_EMAIL, password: PASSWORD },
-        })
-      ).json()
-    ).access as string;
-
-    const trip = await findTripCarryingPassengers(api, passengerToken, ROUTE_NAME);
+    // `findTripCarryingPassengers` reads GET /bookings/, the staff-gated
+    // list (`booking.view`) — a passenger token 403s there regardless of
+    // fixture state, so this must be the staff token even though the
+    // trip it locates is the *passenger's* own.
+    const trip = await findTripCarryingPassengers(api, staffToken, ROUTE_NAME);
     await api.post(`${BACKEND_URL}/api/v1/trips/${trip.id}/status/`, {
       headers: { Authorization: `Bearer ${staffToken}` },
       data: { status: 'in_progress', reason: 'e2e passenger tracking fixture' },

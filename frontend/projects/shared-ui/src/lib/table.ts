@@ -71,10 +71,19 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 @Component({
   selector: 'ui-table',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'block' },
+  // `min-w-0`: this component owns its own horizontal scroll (the
+  // `overflow-x-auto` wrapper below), but a flex item's automatic
+  // minimum size defaults to its content's min-content width — so
+  // inside any `flex`/`flex-col` ancestor (every consumer here uses one:
+  // `<div class="flex flex-col gap-6">`), the table's own un-shrinkable
+  // content silently forced the *ancestor* wider instead of ever
+  // reaching this wrapper's scroll behaviour. Invisible until spec 21
+  // slice 3's Senior Mode grew a row's content past 390px for the first
+  // time and turned it into real page-level horizontal overflow.
+  host: { class: 'block min-w-0' },
   template: `
     <div
-      class="overflow-x-auto rounded-md border border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+      class="relative overflow-x-auto rounded-md border border-border focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
       tabindex="0"
       [attr.role]="label() ? 'region' : null"
       [attr.aria-label]="label()"
@@ -177,6 +186,33 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
         :host ::ng-deep table td {
           padding-inline: 1rem;
         }
+      }
+
+      /*
+       * Senior Mode (docs/specs/21-passenger-experience.md slice 3) only
+       * ever sets \`data-senior\` on \`customer-app\`'s \`<html>\` — this
+       * rule is therefore inert on every \`client-admin-app\`/
+       * \`super-admin-app\` table, which keeps the console density
+       * decision above (\`text-sm\`, never \`--ui-text-body\`) completely
+       * untouched.
+       *
+       * \`overflow-wrap: anywhere\` above exists so one unbroken token
+       * (a reference, an email) doesn't force a column wider than the
+       * viewport — but it applies indiscriminately, and Senior Mode's
+       * 175% root scale is what first made that cost visible: a genuinely
+       * short, space-separated primary value ("QR code") fragmented
+       * mid-word ("QR" / "cod" / "e") because \`anywhere\` breaks
+       * wherever the box runs out of room, not at the word boundary that
+       * was available. \`normal\` still wraps at the space — it only
+       * stops manufacturing a break where none is needed — so this is a
+       * strict improvement for exactly the tokens \`anywhere\` was never
+       * needed for. A genuinely long unbroken token in a primary cell
+       * (rare — most of those live in secondary/hidden columns) falls
+       * back to the wrapper's own horizontal scroll, the same fallback
+       * every table already relies on.
+       */
+      :host-context([data-senior='true']) ::ng-deep table td:not(:has(button, a)) {
+        overflow-wrap: normal;
       }
     `,
   ],

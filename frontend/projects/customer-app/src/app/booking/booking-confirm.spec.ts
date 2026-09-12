@@ -34,7 +34,9 @@ const PLACES_REQUEST: BookingRequest = {
   passengerCount: 2,
 };
 
-function makeBooking() {
+function makeBooking(
+  overrides: { hold_expires_at?: string | null; hold_expires_in_seconds?: number | null } = {}
+) {
   return {
     id: 'booking-1',
     business: 'biz-1',
@@ -50,12 +52,18 @@ function makeBooking() {
     currency: 'NGN',
     cancellation_reason: '',
     seats: [],
+    // Reservation-mode default — a real hold, the ordinary case for
+    // REQUEST (kind: 'seats'). Tests for the places/open-seating case
+    // override both to null explicitly.
+    hold_expires_at: '2026-08-10T00:15:00Z',
+    hold_expires_in_seconds: 900,
     created_at: '2026-08-10T00:00:00Z',
+    ...overrides,
   };
 }
 
 describe('BookingConfirm', () => {
-  let apiClient: { POST: jasmine.Spy };
+  let apiClient: { POST: jasmine.Spy; GET: jasmine.Spy };
   let fixture: ComponentFixture<BookingConfirm>;
   let component: BookingConfirm;
   let navigateSpy: jasmine.Spy;
@@ -75,7 +83,13 @@ describe('BookingConfirm', () => {
   }
 
   beforeEach(() => {
-    apiClient = { POST: jasmine.createSpy('POST') };
+    apiClient = {
+      POST: jasmine.createSpy('POST'),
+      // BookingStore.findById (injected for the post-expiry re-fetch)
+      // pages through GET /bookings/mine/ — unused by most tests here,
+      // but must exist so injecting BookingConfirm doesn't throw.
+      GET: jasmine.createSpy('GET').and.resolveTo({ data: { results: [], count: 0 } }),
+    };
     apiClient.POST.and.resolveTo({ data: makeBooking(), response: { status: 201 } });
 
     TestBed.configureTestingModule({
@@ -172,12 +186,72 @@ describe('BookingConfirm', () => {
     expect(keys[0]).toBe(keys[1]);
   });
 
-  it('sends the passenger to my-bookings on success', async () => {
+  it('shows a held/confirmed panel on success instead of navigating away', async () => {
     await createComponent();
 
     await component['submit']();
+    fixture.detectChanges();
+
+    expect(navigateSpy).not.toHaveBeenCalledWith(['/my-bookings']);
+    expect(component['createdBooking']()?.id).toBe('booking-1');
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Your seats are held');
+    expect(text).toContain('Continue to My Bookings');
+  });
+
+  it('navigates to my-bookings only once the passenger presses Continue', async () => {
+    await createComponent();
+    await component['submit']();
+
+    await component['continueToMyBookings']();
 
     expect(navigateSpy).toHaveBeenCalledWith(['/my-bookings']);
+  });
+
+  it('renders a live countdown from the created booking, with no second request', async () => {
+    await createComponent();
+
+    await component['submit']();
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).querySelector('ui-countdown')).not.toBeNull();
+    expect(apiClient.GET).not.toHaveBeenCalled();
+  });
+
+  it('re-fetches the booking rather than asserting expiry once the countdown reaches zero', async () => {
+    await createComponent();
+    await component['submit']();
+    fixture.detectChanges();
+
+    apiClient.GET.and.resolveTo({
+      data: {
+        results: [makeBooking({ hold_expires_at: null, hold_expires_in_seconds: null })],
+        count: 1,
+      },
+    });
+
+    await component['onHoldExpired']();
+
+    expect(apiClient.GET).toHaveBeenCalled();
+    expect(component['createdBooking']()?.hold_expires_in_seconds).toBeNull();
+  });
+
+  describe('when the created booking holds nothing (open seating)', () => {
+    it('renders no countdown and says the booking is confirmed once paid', async () => {
+      apiClient.POST.and.resolveTo({
+        data: makeBooking({ hold_expires_at: null, hold_expires_in_seconds: null }),
+        response: { status: 201 },
+      });
+      await createComponent(PLACES_REQUEST);
+
+      await component['submit']();
+      fixture.detectChanges();
+
+      const host = fixture.nativeElement as HTMLElement;
+      expect(host.querySelector('ui-countdown')?.textContent?.trim()).toBe('');
+      expect(host.textContent).toContain('confirmed once you pay');
+      expect(host.textContent).not.toContain('held');
+    });
   });
 
   it('never offers a payment affordance — Phase 5 owns that', async () => {

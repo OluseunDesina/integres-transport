@@ -1,8 +1,11 @@
 """Serializers for apps.booking — see
 docs/specs/4-fares-seating-booking.md §3."""
 
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
+from django.utils import timezone
 from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema_field
 from rest_framework import serializers
 
@@ -316,6 +319,8 @@ class BookingTripSerializer(serializers.Serializer):
 class BookingSerializer(serializers.ModelSerializer[Booking]):
     trip = serializers.SerializerMethodField()
     seats = serializers.SerializerMethodField()
+    hold_expires_at = serializers.SerializerMethodField()
+    hold_expires_in_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
@@ -336,6 +341,11 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
             "currency",
             "cancellation_reason",
             "seats",
+            # docs/specs/21-passenger-experience.md slice 2. Both derived
+            # from the same live `SeatReservation` rows `seats` already
+            # reads — see `_reservations`/`_earliest_held_until` below.
+            "hold_expires_at",
+            "hold_expires_in_seconds",
             "created_at",
         ]
         read_only_fields = fields
@@ -354,8 +364,7 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
             "trip_class": obj.trip.trip_class,
         }
 
-    @extend_schema_field(BookingSeatReservationSerializer(many=True))
-    def get_seats(self, obj: Booking) -> Any:
+    def _reservations(self, obj: Booking) -> Sequence[SeatReservation]:
         # `reservations_by_booking` (context): the list view batch-fetches
         # every row's SeatReservations in one query and passes the
         # grouping in via context — see apps.booking.views's own
@@ -363,18 +372,77 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
         # own precedent already warns about, here on a relation with no
         # reverse accessor to Prefetch()). Falls back to a live per-object
         # query for the single-object responses (create/cancel), where
-        # one extra query is not an N+1.
+        # one extra query is not an N+1. Shared by `seats` and both hold
+        # fields below — all three read the same rows.
         prefetched: dict[Any, list[SeatReservation]] | None = self.context.get(
             "reservations_by_booking"
         )
-        reservations = (
-            prefetched.get(obj.id, [])
-            if prefetched is not None
-            else SeatReservation.objects.filter(booking=obj).select_related(
+        if prefetched is not None:
+            return prefetched.get(obj.id, [])
+        return list(
+            SeatReservation.objects.filter(booking=obj).select_related(
                 "seat", "from_stop", "to_stop"
             )
         )
-        return BookingSeatReservationSerializer(reservations, many=True).data
+
+    @extend_schema_field(BookingSeatReservationSerializer(many=True))
+    def get_seats(self, obj: Booking) -> Any:
+        return BookingSeatReservationSerializer(self._reservations(obj), many=True).data
+
+    def _earliest_held_until(self, obj: Booking) -> datetime | None:
+        """The earliest `held_until` among this booking's currently-`HELD`
+        `SeatReservation` rows, or `None` if none are held.
+
+        Deliberately **not** "any non-released row" — a `CONFIRMED`
+        reservation's `held_until` is a stale value from before payment
+        (`apps.booking.services.create_booking` never clears it, only the
+        status), and reading it would resurrect a countdown on an already-
+        paid booking. Filtering on `HELD` specifically means "booking
+        already paid → no countdown" (the spec's own edge case) falls out
+        of this for free: payment moves every reservation to `CONFIRMED`,
+        so none is `HELD` any more.
+
+        An open-seating booking has no `SeatReservation` rows at all
+        (`create_booking`'s `open_seating` branch never calls
+        `create_reservation`), so this is `None` for those too — matching
+        the spec.
+
+        `ASSUMPTION`, corrected against the model rather than the spec's
+        own wording: the spec also names "quick-book" bookings as holding
+        nothing, alongside open seating. That is not what the code does —
+        `apps/booking/tests/test_quick_book.py`'s own module docstring
+        states it plainly: quick book is "not open seating: real
+        `SeatReservation` rows are written against real `Seat`s". A
+        quick-book booking holds a real seat with a real `held_until`,
+        the same as one where the passenger picked their own seat, so it
+        gets a real countdown here — the spec's claim was an
+        overgeneralisation from open seating, not a data-model fact.
+        """
+        held_until_values = [
+            reservation.held_until
+            for reservation in self._reservations(obj)
+            if reservation.status == SeatReservation.Status.HELD
+            and reservation.held_until is not None
+        ]
+        return min(held_until_values) if held_until_values else None
+
+    @extend_schema_field(serializers.DateTimeField(allow_null=True))
+    def get_hold_expires_at(self, obj: Booking) -> datetime | None:
+        return self._earliest_held_until(obj)
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_hold_expires_in_seconds(self, obj: Booking) -> int | None:
+        # Floored at zero, never negative: the sweep task
+        # (apps.seating.tasks.expire_seat_holds) runs once a minute, so a
+        # hold can be past its `held_until` for up to that long before it
+        # is actually marked `expired`. The *duration*, not the timestamp,
+        # is what the client counts down from — a device with a wrong
+        # clock still gets a correct countdown this way (see the spec's
+        # own reasoning for returning both fields).
+        held_until = self._earliest_held_until(obj)
+        if held_until is None:
+            return None
+        return max(0, int((held_until - timezone.now()).total_seconds()))
 
 
 class BookingCancelSerializer(serializers.Serializer):

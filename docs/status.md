@@ -891,14 +891,13 @@ than calling `set_rls_session_vars` directly.
     phase's visual pass.
   - **The passenger nav collapses at 390px**, the authoritative
     customer-app viewport: links wrap and overlap and the header forces
-    horizontal overflow. Pre-existing, recorded in
-    `docs/ui-review/10-booking-modes/iteration-1.md`, **not fixed** —
-    it needs a responsive nav, and it will keep appearing in every
-    customer-app screenshot until someone owns it. Spec 17 slice 3
-    measured it rather than restating it: seven labels come to 554px in
-    a 459px nav at 768px, so it wraps there too. That slice kept its own
-    addition inside 1200px by shortening labels, and left the rest to
-    spec 21, which owns replacing this bar with a bottom tab bar.
+    horizontal overflow. Recorded in
+    `docs/ui-review/10-booking-modes/iteration-1.md`; Spec 17 slice 3
+    measured it rather than fixing it (seven labels come to 554px in a
+    459px nav at 768px, so it wraps there too) and left the rest to
+    spec 21. **Fixed in spec 21 slice 1**: below `sm` (640px) the nav
+    moves to a fixed bottom tab bar instead of growing the top row
+    further; see that spec's own entry below.
 - **Spec 18 (manifest and staff booking) slice 1 — the trip manifest —
   is built** (`docs/specs/18-manifest-and-staff-booking.md`, its
   Implementation note). `GET /trips/{id}/manifest/`, a `manifest` CSV
@@ -1586,6 +1585,220 @@ than calling `set_rls_session_vars` directly.
     ordered.
   - 1596 frontend unit tests (up from 1571), 1171/1171 backend tests
     (up from 1161).
+- **Spec 21, slice 1 — responsive navigation — is complete.**
+  (`docs/specs/21-passenger-experience.md`, its Implementation note.)
+  `customer-app`'s `AppShell` moves its nav to a fixed bottom tab bar
+  below Tailwind's own `sm` breakpoint (640px) and keeps the original
+  top-bar row at `sm` and above — one `BreakpointObserver` signal
+  gating a single `@if`, so exactly one `nav[aria-label="Primary"]` is
+  ever in the DOM. Closes the 390px nav-overflow defect recorded since
+  spec 10's own visual pass (`docs/ui-review/10-booking-modes/iteration-1.md`)
+  and left open through spec 17 slice 3's own measurement of it.
+  - **A real 320px finding from the new `e2e/responsive-nav.ts`
+    harness**, not guessed: a flex item's default `min-width: auto`
+    held one two-word tab label ("Tap & Go") to 28px wide — under the
+    44px touch-target minimum — while its one-word neighbours
+    ("Payments", "Journeys") kept their full intrinsic width, since
+    they have no space to wrap on. Fixed with `min-w-0` (let every tab
+    take its equal flex share) plus `break-words` (let an
+    over-long word wrap mid-word inside that share rather than
+    overflow it).
+  - **Running the rest of `customer-app`'s own Playwright suite**
+    (not only the new spec — `AppShell` is chrome every screen mounts)
+    **surfaced two further pre-existing bugs, apparently never actually
+    run to green before**: `trip-tracking.spec.ts`'s fixture helper
+    called a staff-gated endpoint (`GET /bookings/`, `booking.view`)
+    with a passenger token, which always 403s there regardless of
+    fixture state — fixed by passing the staff token instead, since
+    the lookup itself is a staff-only read even though the trip it
+    locates is the passenger's own; and `ui-map`'s zoom control,
+    attribution link and markers stayed keyboard-focusable inside the
+    map's own `aria-hidden` container, which axe correctly flags and
+    named the fix for directly — `keyboard: false` on the Leaflet map
+    and its markers, `tabindex="-1"` swept onto the zoom/attribution
+    anchors (which have no such option) right after the map is
+    created. Confirming that fix didn't regress `ui-map`'s other
+    consumer meant re-running `client-admin-app`'s own unit suite and
+    its `live-operations` e2e spec too, which surfaced a **third**,
+    separate contrast bug — the marker popup's "Simulated data" text
+    at 2.71:1 — left open, orthogonal to responsive navigation, for
+    this spec's own slice 3 (the WCAG sweep) or spec 20's follow-up.
+  - Verified against the same real running stack as spec 20: a
+    rebuilt backend image (the docker image had drifted behind
+    `pyproject.toml`), freshly seeded, with the deliberately-withheld
+    `network.0009_drop_route_is_active` migration confirmed still the
+    only one unapplied.
+  - No backend change. 257 customer-app unit tests changed, 728
+    client-admin-app unit tests re-confirmed unaffected.
+- **Spec 21, slice 2 — hold countdown — is complete.**
+  (`docs/specs/21-passenger-experience.md`, its Implementation note.)
+  `hold_expires_at`/`hold_expires_in_seconds` added to
+  `BookingSerializer`; a new `CountdownClock` (`@shared-data`) and
+  `ui-countdown` (`@shared-ui`); both consumers the spec named,
+  `booking-confirm` and `my-bookings`.
+  - **Computed from the earliest `HELD` reservation only**, not "any
+    non-released row" — a `CONFIRMED` reservation's `held_until` is a
+    stale pre-payment value the code never clears, so reading it would
+    resurrect a countdown on an already-paid booking. Filtering on
+    `HELD` makes "booking already paid → no countdown" fall out for
+    free, with no separate check. Both fields read the exact same
+    per-booking `SeatReservation` rows `seats` already batches
+    (`reservations_by_booking`), so this cost no additional query.
+  - **A second spec claim corrected against the model** (the first was
+    slice 1's `validator-app` scope note): quick-book bookings hold a
+    real seat — `create_reservation` runs for them exactly as for a
+    manually-picked one (`apps/booking/tests/test_quick_book.py`'s own
+    module docstring already states this) — and get a real countdown,
+    contrary to the spec's edge case grouping them with open seating,
+    which holds nothing at all.
+  - **`CountdownClock` is a distinct primitive from `Poller`, not a
+    reuse of it.** `Poller` is one screen's own polling need (a fresh
+    instance per consumer); a countdown needs one shared tick source
+    several unrelated component instances observe together (`my-
+    bookings`' several held rows), which is what a `providedIn: 'root'`
+    singleton is for. `ui-countdown` counts down from seconds alone,
+    never compares against `Date.now()` — a wrong device clock still
+    produces a correct countdown — and emits `expired` without
+    asserting the hold is gone; both consumers re-fetch and render
+    whatever the server actually says.
+  - **`booking-confirm` no longer auto-navigates to `/my-bookings` on a
+    successful submit.** The spec's own stated reason for returning
+    both hold fields on the create response — "so the confirm screen
+    can start counting down without a second request" — cannot be true
+    of a screen that redirects away in the same tick it receives them.
+    It now shows a held/confirmed panel with the countdown first;
+    "Continue to My Bookings" is the passenger's own action. This also
+    lets the post-submit copy tell an open-seating booking from a
+    quick-book one for real (via `hold_expires_in_seconds`), which the
+    pre-submit review form's own existing comment already recorded it
+    could not do.
+  - Running the full `customer-app` Playwright suite after this change
+    surfaced four e2e assertions (`booking.spec.ts` ×3,
+    `open-seating.spec.ts` ×1) that expected the old immediate
+    redirect; all four updated, and the concurrent-booking race test's
+    winner/loser detection rewritten from a URL pattern (the winner no
+    longer navigates) to reading which of two visible-text markers
+    appears.
+  - Verified against the same real running stack: a real seated
+    booking driven through search → seat-picker → confirm, screenshot-
+    confirming "Your seats are held — pay before the timer runs out"
+    with a live "Held for 14:59," then landing on `my-bookings` where
+    the new row counts down, older accumulated rows past their window
+    correctly show "Hold expiring" (floored at zero, not negative), and
+    every cancelled/paid row shows no countdown.
+  - 7 new backend tests, 1178/1178 total (up from 1171). 1617 frontend
+    unit tests (up from 1598: +7 customer-app, +8 shared-ui, +4
+    shared-data).
+
+- **Spec 21, slice 3 — Senior Mode — is complete. This closes spec 21
+  and the whole Transit OS adoption roadmap.**
+  (`docs/specs/21-passenger-experience.md`, its Implementation note.)
+  `SeniorModeStore` (`customer-app`-local, persisted, sets
+  `data-senior="true"` on `<html>`) plus a `theme.css` token block keyed
+  off that attribute; a header `ui-toggle` reachable at every viewport;
+  a larger QR treatment on both existing QR screens. No backend change.
+  - **The type/control/spacing scale is one rule —
+    `html[data-senior='true'] { font-size: 175% }` — not a bespoke
+    token.** Every size in this workspace is `rem`-based, Tailwind v4's
+    own type scale and the `--ui-control-height`/`--ui-row-height`/
+    `--ui-gutter` tokens included, so scaling the root font-size scales
+    all of them together from one place, and composes with a real OS/
+    browser zoom instead of fighting it. Took `--ui-control-height`'s
+    44px to 77px for free, well past the spec's 56px floor, without
+    touching Button/TextField/Select/Checkbox/RadioGroup.
+  - **Contrast raised to a measured 7:1 (AAA)**, not judged: a new
+    `color.spec.ts` block mirrors the existing AA one. `--color-default`
+    (10.35:1) and `--color-strong` (17.85:1) already cleared it
+    unmodified; `--color-muted` and the three status tones did not and
+    were overridden (danger reuses the existing `--color-danger-hover`
+    token rather than a new hex). `prefers-contrast: more` applies the
+    same tokens independently of the toggle, matching this file's
+    existing `prefers-reduced-motion` handling.
+  - **Two real, pre-existing bugs found by the visual pass and fixed —
+    neither one Senior-Mode-specific, both only first exposed by its
+    larger type:**
+    - `ui-page-header`'s title/description overflowed and was silently
+      clipped instead of wrapping (a passenger's own email, on `home`).
+      `break-words` alone did nothing — its flex wrappers lacked
+      `min-w-0`, so each grew to fit the email's own unbreakable width
+      instead of ever handing `break-words` a constrained box to break
+      inside. Fixed in `page-header.ts`, with a regression test.
+    - An `sr-only` `ui-countdown` announcement inside `ui-table`'s
+      `md:table-cell` column escaped the table's own `overflow-x-auto`
+      containment entirely and inflated `document.documentElement
+      .scrollWidth`, because the wrapper was not `position: relative`
+      and so was not its containing block. Fixed with `position:
+      relative` plus `min-w-0` (the latter an independently real
+      automatic-minimum-size flex bug: without it the wrapper does not
+      shrink to its available width inside any consumer's `flex
+      flex-col` layout in the first place). `app-shell.ts`'s `<main>`
+      also gained `overflow-x-hidden` as a backstop, and its header row
+      gained `flex-wrap` in two places for the same 320px reason.
+  - **One capture-tool artifact, not a defect**: `fullPage` Playwright
+    screenshots of a Senior Mode page misplace the fixed bottom tab bar
+    mid-image; a direct viewport screenshot confirms the live app
+    renders it correctly. No code change, recorded so it is not
+    re-discovered as a phantom bug.
+  - **One gap accepted, not fixed**: `ui-table`'s columns stay at a
+    deliberately frozen "console density" — `table.ts`'s own docstring
+    already documents a three-times-hardened decision to hold a 390px
+    fit, never reading `--ui-text-body` — and a root-level `rem` scale
+    cannot selectively respect that opt-out, so a narrow column can
+    wrap mid-word under Senior Mode. Real, but
+    `docs/specs/14-design-system-and-ui-rebuild.md` territory (a
+    narrow-viewport redesign of the component), not a token override;
+    every other Senior Mode requirement holds on every table screen,
+    and no primary action is ever unreachable, only reached by
+    scrolling sideways to it.
+  - Full dual-mode visual pass at 390/768/1200px
+    (`docs/ui-review/21-passenger-experience/iteration-1.md`):
+    `ui-review-capture.ts` gained a `UI_REVIEW_SENIOR` env var so the
+    existing capture list needed no duplication.
+  - `e2e/senior-mode.ts` (new): no horizontal page overflow at
+    320/390/768/1200px with the mode on; axe zero violations at
+    390/1200px in **both** modes; the toggle keyboard-reachable on
+    first load; every rendered `.min-h-11` control at least 56px tall.
+    All 10 pass. Rest of `customer-app`'s Playwright suite re-run too:
+    40 passed, 1 pre-existing skip, 1 pre-existing failure
+    (`open-seating.spec.ts`, traced to this dev database's accumulated
+    e2e-cruft routes exceeding the search dropdown's page size —
+    `prune_e2e_test_data` reduced but did not clear it; unrelated to
+    this slice).
+  - 1633 frontend unit tests total (up from 1617).
+  - **The self-check catch-up for specs 19–21 is done**:
+    `docs/self-check-2026-09-12-specs19-21.md`. Backend (1178/1178,
+    ruff/mypy clean, no OpenAPI drift) and frontend (1633/1633, lint
+    clean on all 9 projects) both verified fresh; migration sweep found
+    only the already-known, deliberately-unapplied
+    `network.0009_drop_route_is_active`. One real regression found and
+    fixed: `@HostListener` had crept back into `NavShell` and
+    `NotificationBell` sometime in this range, the exact convention
+    `standalone: true` was fixed for in the 09-07 pass — converted to
+    `host` object bindings. One tracking gap found and closed: F9 (the
+    `NavShell` 390px icon rail) had silently dropped out of
+    `docs/traps.md`'s "Known gaps" list on the mistaken assumption that
+    spec 21 would fix it — it never touched `NavShell` — and is
+    restored there, now unowned since the roadmap has no further spec.
+  - **The fix batch this self-check led to is done (2026-09-12)**: every
+    gap it and `docs/traps.md` named — `ui-map` marker-popup contrast,
+    `ui-table`'s Senior Mode density, `trip-search`'s bounded Route
+    picker, `NavShell`'s icon rail, the KYB queue's missing search, and
+    `prune_e2e_test_data`'s inability to clear KYB-documented rows —
+    is fixed. Full account, including two corrections made along the
+    way (F1's N+1 gap was narrower than recorded; F6c's real cause was
+    a premature post-close refetch stealing CDK's own focus
+    restoration, not Playwright worker concurrency — `workers: 1` was
+    tried and confirmed **not** to fix it before the real cause was
+    found) lives in `docs/traps.md`'s own entries, each dated. 1185/1185
+    backend tests (up from 1178), 1645 frontend unit tests (up from
+    1633). Verifying the batch with a full four-project Playwright run
+    surfaced three further, unrelated, **not fixed** defects — a
+    `client-admin-app` route row's action menu that never renders its
+    items despite reporting itself open, a pre-existing axe violation
+    in `live-operations`'s trip-picker list, and data drift on the
+    shared "Yaba → Lekki" e2e fixture trip (duplicate rows, one
+    incorrectly `in_progress`) — all recorded in `docs/traps.md`'s
+    "Known gaps" section rather than chased in the same pass.
 
 ---
 

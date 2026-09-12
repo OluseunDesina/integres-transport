@@ -2378,6 +2378,9 @@ export interface components {
             readonly cancellation_reason: string;
             readonly seats: components["schemas"]["BookingSeatReservation"][];
             /** Format: date-time */
+            readonly hold_expires_at: string | null;
+            readonly hold_expires_in_seconds: number | null;
+            /** Format: date-time */
             readonly created_at: string;
         };
         /**
@@ -7366,6 +7369,8 @@ export interface operations {
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match. Routes match on name or code; stops on name or address. */
+                search?: string;
             };
             header?: never;
             path?: never;
@@ -7902,6 +7907,8 @@ export interface operations {
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
+                /** @description Case-insensitive substring match on the business name. */
+                search?: string;
             };
             header?: never;
             path?: never;

@@ -62,6 +62,10 @@
                   [tone]="statusTone[booking.status]"
                   [label]="statusLabel[booking.status]"
                 />
+                <ui-countdown
+                  [secondsRemaining]="booking.hold_expires_in_seconds"
+                  (expired)="onHoldExpired()"
+                />
                 <span class="text-sm text-muted">{{ summaryFor(booking) }}</span>
               </span>
             </td>
@@ -71,10 +75,16 @@
             <td class="hidden py-2 md:table-cell">{{ seatNumbers(booking) }}</td>
             <td class="hidden py-2 md:table-cell">{{ totalLabel(booking) }}</td>
             <td class="hidden py-2 md:table-cell">
-              <ui-status-pill
-                [tone]="statusTone[booking.status]"
-                [label]="statusLabel[booking.status]"
-              />
+              <div class="flex flex-wrap items-center gap-2">
+                <ui-status-pill
+                  [tone]="statusTone[booking.status]"
+                  [label]="statusLabel[booking.status]"
+                />
+                <ui-countdown
+                  [secondsRemaining]="booking.hold_expires_in_seconds"
+                  (expired)="onHoldExpired()"
+                />
+              </div>
             </td>
             <td class="py-2">
               <!-- One primary action and a menu, not up to three buttons

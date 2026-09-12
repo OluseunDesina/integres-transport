@@ -38,11 +38,26 @@ describe('KybQueueStore', () => {
 
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/super-admin/kyb-queue/',
-      jasmine.objectContaining({ params: { query: { limit: 25, offset: 0 } } })
+      jasmine.objectContaining({
+        params: { query: { limit: 25, offset: 0, search: undefined } },
+      })
     );
     expect(store.items().length).toBe(1);
     expect(store.items()[0].client_name).toBe('Acme Shuttle Co');
     expect(store.total()).toBe(1);
+  });
+
+  it('forwards a search term to the query params', async () => {
+    apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
+
+    await store.updateQuery({ search: 'lagos' });
+
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/super-admin/kyb-queue/',
+      jasmine.objectContaining({
+        params: { query: { limit: 25, offset: 0, search: 'lagos' } },
+      })
+    );
   });
 
   it('surfaces the server error message on failure', async () => {

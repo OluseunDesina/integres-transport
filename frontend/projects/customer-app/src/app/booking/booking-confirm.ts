@@ -2,11 +2,12 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { Alert, Button, PageHeader } from '@shared-ui';
+import { Alert, Button, Countdown, PageHeader } from '@shared-ui';
 
 import { BookingSteps } from '../shared/booking-steps';
 import type { BookingRequest, SeatPickerRequest } from '../shared/booking-draft';
 import { readBookingRequest } from '../shared/booking-draft';
+import { BookingStore, type Booking } from '../shared/data/store/booking.store';
 import { formatMoney, multiplyDecimal } from '../shared/money';
 import { tripClassLabel } from '../shared/trip-class';
 
@@ -36,7 +37,9 @@ function toErrorMessage(error: unknown, fallback: string): string {
  * docs/specs/4-fares-seating-booking-frontend.md §4.3. Creates the
  * Booking and stops: a Booking reaches `pending_payment` and no
  * further, since Phase 5 owns payment. There is deliberately no "pay
- * now" affordance anywhere on this screen (§1).
+ * now" affordance anywhere on this screen (§1) — that stays on
+ * `my-bookings`, which is also where this screen sends the passenger
+ * on to.
  *
  * The `Idempotency-Key` is generated once per visit rather than per
  * click, which is what makes the submit button safe to press again
@@ -45,16 +48,34 @@ function toErrorMessage(error: unknown, fallback: string): string {
  * (§6). A genuine seat conflict is the opposite case and must not be
  * retried blindly — it sends the passenger back to the seat map, since
  * a stale selection needs a fresh availability check, not a resubmit.
+ *
+ * **docs/specs/21-passenger-experience.md slice 2.** Submitting no
+ * longer navigates away immediately — `createdBooking` holds the
+ * response and the template swaps the submit form for a held/confirmed
+ * panel with a `ui-countdown`, fed from the same response's
+ * `hold_expires_in_seconds` with no second request (the spec's own
+ * stated reason for returning both hold fields on the create response).
+ * "Continue to My Bookings" is now the passenger's own action rather
+ * than an automatic redirect, so they see what they just bought before
+ * leaving. This also resolves a limitation the pre-submit copy below
+ * already names: this screen cannot tell an open-seating "places"
+ * booking from a quick-book one before submitting (both arrive
+ * identically, as a passenger count with no seat choice) — the created
+ * `Booking`'s `hold_expires_in_seconds` can, because only one of the
+ * two actually holds a seat (`docs/specs/10-booking-modes.md`), and the
+ * post-submit copy uses that real fact instead of a form that is true
+ * of both.
  */
 @Component({
   selector: 'app-booking-confirm',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, BookingSteps, Alert, Button, PageHeader],
+  imports: [DatePipe, BookingSteps, Alert, Button, Countdown, PageHeader],
   templateUrl: './booking-confirm.html',
 })
 export class BookingConfirm implements OnInit {
   private readonly api = inject(API_CLIENT);
   private readonly router = inject(Router);
+  private readonly bookingStore = inject(BookingStore);
 
   protected readonly request = signal<BookingRequest | null>(readBookingRequest(this.router));
 
@@ -62,6 +83,10 @@ export class BookingConfirm implements OnInit {
 
   protected readonly submitting = signal(false);
   protected readonly submitError = signal<string | null>(null);
+
+  /** Set on a successful submit; from then on the template shows the
+   * held/confirmed panel instead of the review form. */
+  protected readonly createdBooking = signal<Booking | null>(null);
 
   /** Null when the passenger bought places rather than seats — the
    * screen shows a passenger count instead. Not an empty string: a
@@ -149,10 +174,7 @@ export class BookingConfirm implements OnInit {
     this.submitting.set(false);
 
     if (data) {
-      // The new Booking is the first row of my-bookings, so there is no
-      // separate success screen to build — the passenger lands where
-      // they can see, and cancel, what they just reserved.
-      await this.router.navigate(['/my-bookings']);
+      this.createdBooking.set(data);
       return;
     }
 
@@ -168,6 +190,27 @@ export class BookingConfirm implements OnInit {
     const request = this.request();
     if (request) {
       await this.returnToSeatPicker(request);
+    }
+  }
+
+  protected async continueToMyBookings(): Promise<void> {
+    await this.router.navigate(['/my-bookings']);
+  }
+
+  /** `ui-countdown` reaching zero is not the same fact as the hold
+   * actually being gone — the sweep task runs once a minute, so this
+   * re-fetches through `BookingStore.findById` (the same "handed an id,
+   * need the real thing" lookup `report-issue` already uses) and shows
+   * whatever the server now says, rather than declaring the seats lost
+   * on a local timer alone. */
+  protected async onHoldExpired(): Promise<void> {
+    const booking = this.createdBooking();
+    if (!booking) {
+      return;
+    }
+    const fresh = await this.bookingStore.findById(booking.id);
+    if (fresh) {
+      this.createdBooking.set(fresh);
     }
   }
 

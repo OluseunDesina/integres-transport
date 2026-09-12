@@ -10,13 +10,16 @@ from apps.identity.models import User
 
 pytestmark = pytest.mark.django_db
 
+_TEST_EMAIL = "owner@acme.example.com"
+_TEST_PASSWORD = "a-strong-unguessable-passphrase-42"  # noqa: S105  # nosec B105
+
 
 def _register(**overrides: str) -> object:
     payload = {
         "name": "Acme Shuttle Co",
-        "email": "owner@acme.example.com",
+        "email": _TEST_EMAIL,
         "phone": "+2348012345678",
-        "password": "a-strong-unguessable-passphrase-42",
+        "password": _TEST_PASSWORD,
         **overrides,
     }
     return APIClient().post(reverse("client-register"), payload)
@@ -26,9 +29,9 @@ def test_registration_creates_client_and_owner_and_returns_tokens() -> None:
     response = _register()
     assert response.status_code == status.HTTP_201_CREATED
 
-    client = Client.objects.get(email="owner@acme.example.com")
+    client = Client.objects.get(email=_TEST_EMAIL)
     assert client.kyc_status == Client.KycStatus.PENDING
-    owner = User.objects.get(email="owner@acme.example.com")
+    owner = User.objects.get(email=_TEST_EMAIL)
     assert owner.client_id == client.id
     assert owner.is_client_staff is True
 
@@ -39,7 +42,7 @@ def test_registration_creates_client_and_owner_and_returns_tokens() -> None:
 
 def test_registration_writes_an_audit_log_entry() -> None:
     _register()
-    client = Client.objects.get(email="owner@acme.example.com")
+    client = Client.objects.get(email=_TEST_EMAIL)
     entry = AuditLog.objects.get(action="client.registered")
     assert entry.client_id == client.id
     assert entry.target_type == "Client"
@@ -64,7 +67,7 @@ def test_registered_owner_can_immediately_sign_in() -> None:
     _register()
     login = APIClient().post(
         reverse("client-admin-token-obtain"),
-        {"email": "owner@acme.example.com", "password": "a-strong-unguessable-passphrase-42"},
+        {"email": _TEST_EMAIL, "password": _TEST_PASSWORD},  # noqa: S106  # nosec B106
     )
     assert login.status_code == status.HTTP_200_OK
 

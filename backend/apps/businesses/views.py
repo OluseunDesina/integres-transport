@@ -274,26 +274,42 @@ class BusinessSuperAdminListView(generics.ListAPIView[Business]):
 
 
 @extend_schema(responses=BusinessKybQueueSerializer)
+@extend_schema_view(get=extend_schema(parameters=[_OWN_BUSINESS_SEARCH_QUERY_PARAM]))
 class KybQueueListView(generics.ListAPIView[Business]):
     permission_classes = [IsPlatformStaff]
     serializer_class = BusinessKybQueueSerializer
-    # select_related("client"): BusinessKybQueueSerializer.client_name
-    # reads obj.client.name per row — without this, that's a second N+1
-    # alongside the one fixed in get_documents (found in the same
-    # Phase 1 self-check query-count audit).
-    # `order_by("kyb_submitted_at")` — oldest submission first, i.e. FIFO,
-    # the business that has been waiting longest gets reviewed first.
-    # Without it this inherits `Business.Meta.ordering = ["-created_at"]`,
-    # which ranks a review queue by when each business was *created*: one
-    # registered months ago but submitted for KYB this morning sank below
-    # everything created after it, no matter how long it had been waiting.
-    # Creation time and submission time are different facts, and only the
-    # second one is what a queue is about.
-    queryset = (
-        Business.all_objects.filter(kyb_status=Business.KybStatus.SUBMITTED)
-        .select_related("client")
-        .order_by("kyb_submitted_at")
-    )
+
+    def get_queryset(self) -> QuerySet[Business]:
+        # select_related("client"): BusinessKybQueueSerializer.client_name
+        # reads obj.client.name per row — without this, that's a second
+        # N+1 alongside the one fixed in get_documents (found in the same
+        # Phase 1 self-check query-count audit).
+        # `order_by("kyb_submitted_at")` — oldest submission first, i.e.
+        # FIFO, the business that has been waiting longest gets reviewed
+        # first. Without it this inherits `Business.Meta.ordering =
+        # ["-created_at"]`, which ranks a review queue by when each
+        # business was *created*: one registered months ago but submitted
+        # for KYB this morning sank below everything created after it, no
+        # matter how long it had been waiting. Creation time and
+        # submission time are different facts, and only the second one is
+        # what a queue is about.
+        queryset = (
+            Business.all_objects.filter(kyb_status=Business.KybStatus.SUBMITTED)
+            .select_related("client")
+            .order_by("kyb_submitted_at")
+        )
+
+        query = BusinessListQuerySerializer(data=self.request.query_params.dict())
+        query.is_valid(raise_exception=True)
+        search = query.validated_data.get("search", "").strip()
+        if search:
+            # No queue has grown large enough (self-check
+            # 2026-09-12-specs19-21's F7) that a reviewer could actually
+            # find a specific submission by paging through FIFO order —
+            # name is the one thing every row's own heading already shows.
+            queryset = queryset.filter(name__icontains=search)
+
+        return queryset
 
 
 @extend_schema(request=KybDecisionSerializer, responses=BusinessKybQueueSerializer)

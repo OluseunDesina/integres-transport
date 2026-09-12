@@ -1,4 +1,5 @@
 import {
+  AAA_BODY,
   AA_BODY,
   AA_LARGE,
   contrastRatio,
@@ -203,5 +204,45 @@ describe('theme.css declared pairings meet WCAG AA', () => {
     const old = contrastRatio(parseHex('#cbd5e1')!, WHITE);
     expect(old).toBeLessThan(AA_LARGE);
     expect(contrastRatio(parseHex('#64748b')!, WHITE)).toBeGreaterThanOrEqual(AA_LARGE);
+  });
+});
+
+/**
+ * Senior Mode's `[data-senior='true']` overrides in `theme.css`
+ * (docs/specs/21-passenger-experience.md slice 3) — measured against
+ * AAA's 7:1, one step above the AA floor the rest of this file checks.
+ *
+ * `--color-default`/`--color-strong` are not repeated here: they are
+ * `ink-700` and `ink-900`, already 10.35:1 and 17.85:1 against white
+ * respectively (see the pairings above), so Senior Mode leaves them
+ * untouched. `--color-muted` (`ink-500`, 4.76:1 — AA only) and the three
+ * status tones (5.0–6.5:1 as their default hue) are the ones that
+ * actually fail AAA and are overridden below.
+ */
+describe('Senior Mode contrast tokens clear AAA (7:1)', () => {
+  const SENIOR_PAIRINGS: [string, string, string][] = [
+    // ink-600 replaces ink-500 as --color-muted.
+    ['muted (ink-600) on surface', '#475569', '#ffffff'],
+    ['muted (ink-600) on surface-muted', '#475569', '#f8fafc'],
+    // Reuses the existing danger-hover token rather than a new hex.
+    ['danger (danger-hover) on surface', '#991b1b', '#ffffff'],
+    ['success (darker) on surface', '#065f46', '#ffffff'],
+    ['warning (darker) on surface', '#92400e', '#ffffff'],
+  ];
+
+  for (const [name, fg, bg] of SENIOR_PAIRINGS) {
+    it(`${name} clears ${AAA_BODY}:1`, () => {
+      const ratio = contrastRatio(parseHex(fg)!, parseHex(bg)!);
+      expect(ratio)
+        .withContext(`${fg} on ${bg} = ${ratio.toFixed(2)}:1`)
+        .toBeGreaterThanOrEqual(AAA_BODY);
+    });
+  }
+
+  it('confirms the tokens they replace actually fail AAA — otherwise this override is pointless', () => {
+    expect(contrastRatio(parseHex('#64748b')!, WHITE)).toBeLessThan(AAA_BODY); // old --color-muted
+    expect(contrastRatio(parseHex('#b91c1c')!, WHITE)).toBeLessThan(AAA_BODY); // default danger
+    expect(contrastRatio(parseHex('#047857')!, WHITE)).toBeLessThan(AAA_BODY); // default success
+    expect(contrastRatio(parseHex('#b45309')!, WHITE)).toBeLessThan(AAA_BODY); // default warning
   });
 });

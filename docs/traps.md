@@ -226,6 +226,36 @@ one-liner here and the full reasoning in `docs/status.md`, same split
   a bare `jasmine.clock()` produced "called 0 times" on assertions
   immediately following a `start()` that, in the real browser, had
   already run synchronously.
+- **A backtick inside an HTML comment inside a component's template
+  literal ends the literal early.** `app-shell.ts`'s template is
+  itself a JS template string; a docstring-style comment quoting
+  `` `pb-[env(...)]` `` and `` `main` `` the way this file's own prose
+  does closed the string at the first backtick and produced cascading
+  `TS1005`/`TS1109` syntax errors several lines later, at the point the
+  now-unterminated string finally found a real backtick to pair with —
+  nowhere near the actual mistake. Quote class names and identifiers in
+  template comments with plain quotes instead.
+- **`break-words` on a heading does nothing if its flex-item ancestor
+  has no `min-w-0`.** A flex item's default minimum width is its
+  content's own min-content size — for wrapping prose, the width of its
+  single widest *unbreakable* run — so without `min-w-0` the ancestor
+  just grows to fit that run instead of ever handing `break-words` a
+  constrained box to break inside. `ui-page-header`'s `<h1>`/`<p>`
+  overflowed a passenger's own email this way (spec 21 slice 3); fixed
+  with `min-w-0` on both of its flex wrappers, not by touching the text
+  utility that was already correct.
+- **A scroll container (`overflow-x-auto`) needs `position: relative`
+  to actually contain an absolutely-positioned descendant.** `overflow`
+  clips normal-flow content fine on its own, but an `absolute` child's
+  *position* is computed against its nearest **positioned** ancestor —
+  with none, that's the document root, regardless of any `overflow`
+  in between. `ui-table`'s wrapper correctly clipped its own too-wide
+  `<table>` but let an `sr-only` `ui-countdown` span (`position:
+  absolute` via Tailwind's utility) escape to the page's own coordinate
+  space and inflate `document.documentElement.scrollWidth` — invisible
+  until spec 21 slice 3's Senior Mode grew a row wide enough to trigger
+  it for the first time. Fixed with `position: relative` on the
+  wrapper.
 
 ## Testing traps
 
@@ -295,19 +325,56 @@ one-liner here and the full reasoning in `docs/status.md`, same split
   database that isn't re-seeded in between: POST the target status
   unconditionally rather than GETting the current one first (there is
   no single-trip GET endpoint to do that with anyway — only the list).
+- **`await fixture.whenStable()` can hang indefinitely once a real,
+  recurring `setInterval` is running** — `CountdownClock`
+  (`@shared-data`, spec 21 slice 2) starts one the instant a mounted
+  `ui-countdown` has a non-null `secondsRemaining`, and Zone.js's
+  stability tracking does not resolve while a periodic macrotask stays
+  scheduled. A `my-bookings` test that reset a spy, called a method
+  triggering an async refetch, then `await`ed `fixture.whenStable()`
+  timed out at 5000ms even though the refetch itself completed in a
+  microtask — every *other* test in the same file used the same
+  pattern successfully, only because none of them awaited it a second
+  time after the component had already settled once. Fixed the same
+  way `cancel`'s own refetch test already had it right:
+  `await new Promise((resolve) => setTimeout(resolve, 0))`, never
+  `whenStable()`, for any assertion made after a component with a live
+  timer (`ui-countdown`, `Poller`) is mounted.
+- **A Playwright `fullPage` screenshot of a tall page misplaces a
+  `position: fixed` element mid-image instead of at its true (bottom)
+  position.** Seen on nearly every `*-390-senior.png` capture in spec 21
+  slice 3's visual pass — Senior Mode's ~1.75x type scale is what makes
+  an ordinary screen tall enough to cross whatever height triggers
+  Chromium's multi-segment stitching. A direct, non-`fullPage` viewport
+  screenshot of the identical state confirms the live app renders it
+  correctly, pinned to the bottom, exactly as `e2e/responsive-nav.ts`
+  already asserts in a real (unstitched) viewport. Capture-tool
+  limitation, not a product defect — don't chase it as one.
 
 ## Known gaps, deliberate and open
 
-- **Both consumer navs are one link from wrapping** — measure before
+- **`validator-app`'s nav is one link from wrapping** — measure before
   adding one, and note `w-full` resolves against the nearest flex
-  parent, not the header (validator-app's nav was 193px, not 358, for
-  two slices). Spec 21 owns replacing the passenger bar with a bottom
-  tab bar; keep labels short rather than pre-empting that.
+  parent, not the header (it measured 193px, not 358, for two slices).
+  `customer-app`'s equivalent header row is **fixed** as of spec 21
+  slice 1: below 640px the nav moved to a fixed bottom tab bar instead
+  of growing the top row further. `validator-app` is explicitly out of
+  scope for that spec (desktop-first, no Senior Mode) and still carries
+  the older top-row pattern — keep its labels short rather than
+  pre-empting a fix nobody has scoped yet.
 - **A picker that fetches one bounded page cannot reach every row.**
   `booking-list`'s trip dropdown was the recorded case and is **gone**
   (spec 14 slice 3b replaced it with server-side search, and its e2e
   test is green); `SelectedBusinessStore` pages in a loop. Still
-  one-shot at `limit=100`: `BusinessOptionsService`.
+  one-shot at `limit=100`: `BusinessOptionsService`. **`trip-search`'s
+  own Route picker is fixed too** (fix batch, 2026-09-12):
+  `RouteBrowseView` gained the same `?search=` `_apply_list_query`
+  already used by the staff Route list, and `trip-search.ts` gained a
+  debounced search box above the `<select>` — narrowing the request
+  server-side reaches a route regardless of total count, rather than
+  hoping default order keeps it inside the first 100. `booking.spec.ts`
+  and `open-seating.spec.ts`'s fixture-route helpers both use it now.
+  `BusinessOptionsService` remains the one open instance of this class.
 - **Django admin cannot read RLS-protected models** — an admin request
   authenticates by cookie, resolves as anonymous, and sees zero rows.
 - **Production reverse-proxy topology for white-labeled custom domains**
@@ -316,16 +383,129 @@ one-liner here and the full reasoning in `docs/status.md`, same split
 - **Botswana has no PSP** — Paystack does not operate there (ADR-0007).
 - **Naming, settled and not to be "fixed":** the *credential* is Tap &
   Go; the *fare model* is Pay as you go; the `/tap-go` route path stays.
-- **The KYB queue has no search** (self-check 2026-08-26's F7,
-  reconfirmed 2026-09-07) — 25 near-identical rows per page, no filter.
-  New functionality, not a bug; nobody has asked for it yet.
-- **`prune_e2e_test_data` cannot clear the KYB/KYC review queues**
-  (F8) — `KybDocument`/`KycDocument`'s FK is `on_delete=PROTECT`, and a
-  queue row has a document by definition, so it can never be pruned.
-  Structural; the queues grow monotonically with every e2e run.
-- **The four Playwright projects interfere when run without
-  `--project=`** (F6c) — `super-admin`'s `kyc-queue` spec and
-  `client-admin`'s `kyc-status` spec share one KYC fixture; the booking
-  specs contend for the same fixture seats. Green individually, not
-  together. Not fixed — needs per-project fixtures or a global serial
-  ordering.
+- **`prune_e2e_test_data` couldn't clear the KYB review queue — narrowed,
+  not eliminated** (F8, fixed 2026-09-12). Root cause: any stray
+  Business that went through the KYB submission flow carried a
+  `KybDocument` (`on_delete=PROTECT`), so the command's own
+  `business.delete()` raised `ProtectedError` and silently skipped
+  nearly every one it found (123 of 128 on this dev database). Fixed by
+  deleting a stray Business's own `KybDocument`/`Director` rows first —
+  a dev/CI-only fixture document carries no audit value, unlike the
+  same model in production. One real run: 121 of 128 Businesses cleared
+  (up from effectively none). **Route pruning is deliberately left
+  alone**: a Route's own `ProtectedError`s come from real
+  `Schedule`/`Trip`/`FareRule`/`Incident` rows, which are usage data
+  even in a test fixture, and force-cascading through them risks
+  breaking other specs' assumptions about ledger/booking state. So
+  Route-side cruft (839 protected rows on this database) still
+  accumulates unboundedly — this is why `trip-search`'s own picker
+  needed the `?search=` fix above rather than relying on pruning to
+  keep it inside `limit=100` forever.
+- **`ui-map`'s marker popup ("Simulated data") fails colour contrast —
+  fixed 2026-09-12.** Measured 2.71:1 against the 4.5:1 floor; the
+  markup itself carried no explicit colour (Leaflet's own popup default
+  measures ~12.6:1, so the exact source of 2.71:1 in a live browser was
+  never pinned down precisely). Fixed by not relying on inherited
+  styling at all: the "Simulated data" text is now explicitly styled
+  with `--color-warning` on `--color-warning-surface` (5.02:1, the same
+  pairing `ui-alert`'s `warning` variant uses), which is correct
+  regardless of whatever the untouched markup was actually resolving
+  to.
+- **`ui-table` didn't adapt to Senior Mode's larger type — fixed
+  2026-09-12, scoped to `customer-app`.** A narrow primary column could
+  wrap mid-word (`credentials`' "Type": "QR code" → "QR"/"cod"/"e" at
+  390px), because the base `overflow-wrap: anywhere` rule (needed to
+  stop one unbroken token forcing a column wider than the viewport)
+  applied indiscriminately. Fixed with a `[data-senior='true']`-scoped
+  override to `overflow-wrap: normal` on non-action cells — still wraps
+  at a space, just stops manufacturing a break where a word boundary
+  was already available. Inert everywhere `data-senior` isn't set, so
+  the three operator apps' three-times-hardened console density is
+  untouched. The table's own `overflow-x-auto` scroll remains the
+  fallback for a genuinely wide row (`my-bookings`' Pay button) —
+  unchanged, and never claimed to need more than that.
+- **A staff-gated endpoint 403s a passenger token regardless of
+  fixture state, and the error looks like "no matching row" if nothing
+  checks the response status first.** `findTripCarryingPassengers`
+  reads `GET /bookings/` (`booking.view`, staff-only per its own
+  `get_permissions`) — `trip-tracking.spec.ts` called it with the
+  *passenger's* token, which always 403s there, and the fixture-lookup
+  helper only reads `page.results` with no status check, so the
+  failure surfaced three calls away as `Cannot read properties of
+  undefined (reading 'find')`, not as an auth error. Found running the
+  actual Playwright suite (apparently for the first time — this file
+  was written and, per spec 20 slice 4's own note, only manually
+  verified in a browser, never executed) while confirming spec 21
+  slice 1's `AppShell` rewrite didn't regress `trip-tracking`. Fixed by
+  passing the staff token instead — the trip located is the
+  passenger's own, but the *lookup* is a staff-only read.
+- **`NavShell` kept an icon rail at 390px — fixed 2026-09-12** (self-
+  check 2026-08-26's F9). Below a new `DRAWER_BREAKPOINT` (639px,
+  strictly narrower than the existing 768px icon-rail breakpoint so the
+  two never overlap), the sidebar now goes fully off-canvas instead of
+  shrinking to a 64px rail, toggled by a hamburger button in a slim top
+  bar that only exists at that width. `effectiveCollapsed` treats an
+  open drawer as "temporarily not collapsed," so every existing
+  icon-rail-vs-expanded template branch (labels, width, ARIA) does the
+  right thing without a second set of them. The closed drawer is
+  `[inert]`, not just visually off-canvas, so its nav links/profile
+  button/notification bell can't sit in the keyboard tab order while
+  invisible — the same class of bug fixed in `ui-map`'s markers during
+  spec 21 slice 1. Reclaiming the rail's width measurably helped
+  `ui-table`'s own 390px fit on console screens (confirmed live: a row
+  action button that needed horizontal scroll behind the rail no longer
+  does).
+- **The KYB queue had no search — fixed 2026-09-12** (self-check
+  2026-08-26's F7). `KybQueueListView` now takes the same `?search=`
+  pattern `BusinessListCreateView` already established (name,
+  case-insensitive substring), with a `ui-filter-bar` wired to it.
+- **The four Playwright projects' one documented interference —
+  resolved 2026-09-12, but not the way F6c assumed.** `kyc-queue.spec.ts`
+  and `kyb-queue.spec.ts` (both `super-admin-app`) share no fixture row
+  and never did; the "reproducibly flaky... a parallel-execution
+  artifact this session couldn't further isolate" comment on their
+  Escape-focus-restoration assertion was checking the wrong cause. The
+  real bug, found by actually testing the assertion in isolation until
+  it failed there too: both queue screens' post-close refetch ran
+  unconditionally, including on cancel/Escape, tearing down and
+  rebuilding the whole table (and the button CDK's Dialog had *just*
+  synchronously restored focus to) a moment after a cancelled review —
+  which changed nothing and never needed a refetch at all. Fixed by
+  only refetching on an actual decision. No `playwright.config.ts`
+  change was needed or made; `workers: 1` was tried and confirmed **not**
+  to fix the original assertion (it still failed in isolation), which is
+  what led to finding the real cause instead.
+- **Three new, unrelated defects surfaced running the full suite while
+  verifying the fix batch above (2026-09-12) — none fixed, none caused
+  by that batch** (confirmed: none of the files involved appear in its
+  diff):
+  - `client-admin-app/routes.spec.ts`'s "deactivates a route"/"leaves
+    the route untouched when cancelled" tests fail deterministically,
+    isolated, every run: the row's "Actions for …" button correctly
+    reports `aria-expanded="true"` after being clicked, but no
+    `menuitem`s ever appear in the accessibility tree — the dropdown
+    menu itself never renders. Not a fixture/data issue (the route is
+    freshly created with a unique name and confirmed "Active" first).
+    `route-list.ts`/`action-menu.ts` are untouched by any spec in this
+    arc's recent sessions; this looks like a real, previously
+    undiscovered `ActionMenu` (or its overlay) defect, not something
+    tied to a specific row's data.
+  - `client-admin-app/live-operations.spec.ts`'s own axe check fails on
+    `aria-allowed-role`: a `<button role="listitem">` in what is
+    presumably the trip-picker sidebar list. Unrelated to `ui-map` (the
+    flagged node has no map markup at all) and to anything touched in
+    the specs 19–21 arc.
+  - `open-seating.spec.ts`/`validate-ticket.spec.ts`'s shared "Yaba →
+    Lekki" fixture trip: on this dev database, the trip for "today" was
+    found `in_progress` (and duplicate Trip rows exist for several
+    dates, including one *future* date already `in_progress`, which no
+    real departure-time transition explains). `GET /trips/search/`
+    forces `status=SCHEDULED`, so a passenger-facing search finds
+    nothing. Confirmed unrelated to the `trip-search` fix above (that
+    fix's own job — reaching the *route* regardless of count — is
+    verified working; this is the *trip*, a level down, drifting for
+    reasons this session didn't trace further). Likely accumulated
+    corruption from repeated non-idempotent test/status mutations
+    against this one long-lived dev database across many past sessions,
+    not a code defect — `seed_e2e_users` only ever creates a missing
+    Trip, never resets an existing one's `status`.

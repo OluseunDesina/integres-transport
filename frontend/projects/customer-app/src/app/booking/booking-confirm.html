@@ -52,28 +52,57 @@
       </dd>
     </dl>
 
-    <!-- The "held" promise is only made where it is true. Choosing
-         seats genuinely holds them until the expiry sweep; buying
-         places may not — open seating holds nothing at all, a place is
-         counted when a ticket is issued at payment
-         (docs/specs/10-booking-modes.md). This screen cannot tell open
-         seating from quick book (both arrive as `places`), so the
-         wording it uses there is one that is true of both. -->
-    <ui-alert variant="warning">
-      @if (seatNumbers()) {
-        Payment is not collected yet — your seats are held once you reserve.
-      } @else {
-        Payment is not collected yet — your booking is confirmed once you pay.
-      }
-    </ui-alert>
+    @if (createdBooking(); as booking) {
+      <!-- Unlike the pre-submit warning below, this reads the real
+           `hold_expires_in_seconds` rather than guessing from
+           `seatNumbers()` — it can tell open seating (holds nothing)
+           from quick book (holds a real seat) even though the review
+           form above could not. -->
+      <ui-alert variant="success">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span>
+            @if (booking.hold_expires_in_seconds !== null) {
+              Your seats are held — pay before the timer runs out.
+            } @else {
+              Your booking is confirmed once you pay.
+            }
+          </span>
+          <ui-countdown
+            [secondsRemaining]="booking.hold_expires_in_seconds"
+            (expired)="onHoldExpired()"
+          />
+        </div>
+      </ui-alert>
 
-    <div class="flex gap-2">
-      <ui-button variant="secondary" [disabled]="submitting()" (pressed)="backToSeats()">
-        Back
-      </ui-button>
-      <ui-button [loading]="submitting()" (pressed)="submit()">
-        {{ seatNumbers() ? 'Reserve seats' : 'Reserve places' }}
-      </ui-button>
-    </div>
+      <div class="flex gap-2">
+        <ui-button (pressed)="continueToMyBookings()">Continue to My Bookings</ui-button>
+      </div>
+    } @else {
+      <!-- The "held" promise is only made where it is true. Choosing
+           seats genuinely holds them until the expiry sweep; buying
+           places may not — open seating holds nothing at all, a place
+           is counted when a ticket is issued at payment
+           (docs/specs/10-booking-modes.md). This screen cannot tell
+           open seating from quick book (both arrive as `places`)
+           *before* submitting, so the wording here is one that is true
+           of both — the panel above, shown after submitting, can tell
+           them apart for real. -->
+      <ui-alert variant="warning">
+        @if (seatNumbers()) {
+          Payment is not collected yet — your seats are held once you reserve.
+        } @else {
+          Payment is not collected yet — your booking is confirmed once you pay.
+        }
+      </ui-alert>
+
+      <div class="flex gap-2">
+        <ui-button variant="secondary" [disabled]="submitting()" (pressed)="backToSeats()">
+          Back
+        </ui-button>
+        <ui-button [loading]="submitting()" (pressed)="submit()">
+          {{ seatNumbers() ? 'Reserve seats' : 'Reserve places' }}
+        </ui-button>
+      </div>
+    }
   </div>
 }

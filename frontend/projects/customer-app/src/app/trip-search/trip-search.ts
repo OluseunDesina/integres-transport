@@ -1,5 +1,13 @@
 import { DatePipe } from '@angular/common';
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
@@ -29,10 +37,22 @@ const PICK_ROUTE_OPTION: SelectOption = { value: '', label: 'Select a route' };
 const PICK_STOP_OPTION: SelectOption = { value: '', label: 'Select a stop' };
 
 // Every Route the browse endpoint returns is guaranteed to have >=2
-// active stops (backend enforces it), so a page of routes is small and
-// bounded — one unpaginated fetch is correct here rather than a
-// ListStore. Same for a single route+date's departures.
+// active stops (backend enforces it), so *for a single route+date's
+// departures* a page is small and bounded — one unpaginated fetch is
+// correct there rather than a ListStore. The route list itself is a
+// different claim: a Client can run more than this many routes, and an
+// unfiltered top-100 silently hid any route past that cap (self-check
+// 2026-09-12-specs19-21). `?search=` (added to the same request) is
+// what keeps this cap safe rather than removing it — a real search
+// term narrows the match set well under 100 regardless of how many
+// routes exist in total.
 const MAX_OPTIONS = 100;
+
+// Debounced here rather than by a shared component: this screen has
+// exactly one search box, wired to a single signal, and pulling in
+// `ui-filter-bar` (built for a list/table's chips and multi-filter
+// bar) for one input would be more machinery than the problem needs.
+const SEARCH_DEBOUNCE_MS = 300;
 
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'detail' in error) {
@@ -74,10 +94,13 @@ function toErrorMessage(error: unknown, fallback: string): string {
 export class TripSearch implements OnInit {
   private readonly api = inject(API_CLIENT);
   private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
 
   private readonly routes = signal<RouteBrowse[]>([]);
   protected readonly routesError = signal<string | null>(null);
   protected readonly loadingRoutes = signal(false);
+  protected readonly routeSearchTerm = signal('');
+  private searchDebounceHandle: ReturnType<typeof setTimeout> | null = null;
 
   protected readonly routeId = signal('');
   protected readonly fromStopId = signal('');
@@ -161,8 +184,29 @@ export class TripSearch implements OnInit {
       this.serviceDate() !== ''
   );
 
+  constructor() {
+    // A pending debounce after the screen is gone would fetch into a
+    // destroyed component.
+    this.destroyRef.onDestroy(() => {
+      if (this.searchDebounceHandle !== null) {
+        clearTimeout(this.searchDebounceHandle);
+      }
+    });
+  }
+
   async ngOnInit(): Promise<void> {
     await this.loadRoutes();
+  }
+
+  protected onRouteSearchInput(value: string): void {
+    this.routeSearchTerm.set(value);
+    if (this.searchDebounceHandle !== null) {
+      clearTimeout(this.searchDebounceHandle);
+    }
+    this.searchDebounceHandle = setTimeout(() => {
+      this.searchDebounceHandle = null;
+      void this.loadRoutes();
+    }, SEARCH_DEBOUNCE_MS);
   }
 
   protected departureCountLabel(): string {
@@ -236,8 +280,9 @@ export class TripSearch implements OnInit {
   protected async loadRoutes(): Promise<void> {
     this.loadingRoutes.set(true);
     this.routesError.set(null);
+    const search = this.routeSearchTerm().trim();
     const { data, error } = await this.api.GET('/api/v1/routes/browse/', {
-      params: { query: { limit: MAX_OPTIONS, offset: 0 } },
+      params: { query: { limit: MAX_OPTIONS, offset: 0, search: search || undefined } },
     });
     this.loadingRoutes.set(false);
     if (!data) {

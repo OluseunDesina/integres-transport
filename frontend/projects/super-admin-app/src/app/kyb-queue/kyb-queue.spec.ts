@@ -29,12 +29,14 @@ function makeBusiness(overrides: Partial<BusinessKybQueueItem> = {}): BusinessKy
 class FakeKybQueueStore {
   items = signal<BusinessKybQueueItem[]>([]);
   total = signal(0);
+  query = signal<{ search?: string }>({});
   page = signal({ limit: 25, offset: 0 });
   loading = signal(false);
   error = signal<string | null>(null);
   isEmpty = signal(false);
   getAll = jasmine.createSpy('getAll').and.resolveTo();
   changePage = jasmine.createSpy('changePage').and.resolveTo();
+  updateQuery = jasmine.createSpy('updateQuery').and.resolveTo();
 }
 
 describe('KybQueue', () => {
@@ -91,6 +93,21 @@ describe('KybQueue', () => {
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('No submissions to review');
+  });
+
+  it('shows a search-aware empty state when a search matches nothing', () => {
+    store.isEmpty.set(true);
+    store.query.set({ search: 'nowhere' });
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('No matching submissions');
+    expect(fixture.nativeElement.textContent).toContain('nowhere');
+  });
+
+  it('forwards the filter bar search input to the store', () => {
+    fixture.componentInstance['onSearchChange']('lagos');
+
+    expect(store.updateQuery).toHaveBeenCalledWith({ search: 'lagos' });
   });
 
   it('renders a row per queued business', () => {

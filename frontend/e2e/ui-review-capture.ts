@@ -84,12 +84,27 @@ export function captureUiReview(config: CaptureConfig): void {
     const dir = join('..', 'docs', 'ui-review', specDir, outDir as string, testInfo.project.name);
     mkdirSync(dir, { recursive: true });
 
+    // Spec 21 slice 3's own dual-mode pass: `UI_REVIEW_SENIOR=1` runs the
+    // identical screen/flow list with Senior Mode already on, filed
+    // alongside the default-mode run rather than in a second directory —
+    // a reviewer comparing `home-390.png` to `home-390-senior.png` is the
+    // whole point of this being a suffix, not a separate `outDir`.
+    const senior = !!process.env['UI_REVIEW_SENIOR'];
+    const suffix = senior ? '-senior' : '';
+
     for (const { name: widthName, width, height } of WIDTHS) {
       await page.setViewportSize({ width, height });
       // Start each width from a clean session so the run is reproducible
       // and /login is genuinely captured signed-out.
       await page.goto('/login');
       await page.evaluate(() => localStorage.clear());
+      if (senior) {
+        // Set before sign-in rather than clicked through the header
+        // toggle: `SeniorModeStore` reads this key once at construction,
+        // so every one of the ~10 screens below boots already in Senior
+        // Mode instead of needing a click on each one.
+        await page.evaluate(() => localStorage.setItem('integra.senior-mode', 'true'));
+      }
 
       for (const [name, path] of config.screens) {
         if (path !== '/login') {
@@ -122,7 +137,7 @@ export function captureUiReview(config: CaptureConfig): void {
           `${name} (${path}) rendered no <h1> — wrong route, or the app failed to boot`
         ).toBeVisible({ timeout: 5_000 });
 
-        await page.screenshot({ path: join(dir, `${name}-${widthName}.png`), fullPage: true });
+        await page.screenshot({ path: join(dir, `${name}-${widthName}${suffix}.png`), fullPage: true });
       }
 
       for (const { name, walk } of config.flows ?? []) {
@@ -133,7 +148,7 @@ export function captureUiReview(config: CaptureConfig): void {
           page.getByRole('heading', { level: 1 }),
           `${name} rendered no <h1> at the end of its walk`
         ).toBeVisible({ timeout: 5_000 });
-        await page.screenshot({ path: join(dir, `${name}-${widthName}.png`), fullPage: true });
+        await page.screenshot({ path: join(dir, `${name}-${widthName}${suffix}.png`), fullPage: true });
       }
     }
 

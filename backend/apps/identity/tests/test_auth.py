@@ -17,11 +17,13 @@ from apps.identity.tests.factories import (
 
 pytestmark = pytest.mark.django_db
 
+_TEST_PASSWORD = "correct-horse"  # noqa: S105  # nosec B105
+
 
 def test_passenger_can_obtain_customer_token() -> None:
-    user = PassengerUserFactory(password="correct-horse")
+    user = PassengerUserFactory(password=_TEST_PASSWORD)
     response = APIClient().post(
-        reverse("customer-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("customer-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
     assert response.status_code == status.HTTP_200_OK
     access = AccessToken(response.data["access"])
@@ -31,17 +33,17 @@ def test_passenger_can_obtain_customer_token() -> None:
 
 
 def test_client_staff_cannot_obtain_customer_token() -> None:
-    user = ClientStaffUserFactory(password="correct-horse")
+    user = ClientStaffUserFactory(password=_TEST_PASSWORD)
     response = APIClient().post(
-        reverse("customer-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("customer-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 def test_client_staff_can_obtain_client_admin_token() -> None:
-    user = ClientStaffUserFactory(password="correct-horse")
+    user = ClientStaffUserFactory(password=_TEST_PASSWORD)
     response = APIClient().post(
-        reverse("client-admin-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("client-admin-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
     assert response.status_code == status.HTTP_200_OK
     access = AccessToken(response.data["access"])
@@ -49,17 +51,17 @@ def test_client_staff_can_obtain_client_admin_token() -> None:
 
 
 def test_passenger_cannot_obtain_client_admin_token() -> None:
-    user = PassengerUserFactory(password="correct-horse")
+    user = PassengerUserFactory(password=_TEST_PASSWORD)
     response = APIClient().post(
-        reverse("client-admin-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("client-admin-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 def test_platform_staff_can_obtain_super_admin_token_with_no_client_claim() -> None:
-    user = PlatformStaffUserFactory(password="correct-horse")
+    user = PlatformStaffUserFactory(password=_TEST_PASSWORD)
     response = APIClient().post(
-        reverse("super-admin-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("super-admin-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
     assert response.status_code == status.HTTP_200_OK
     access = AccessToken(response.data["access"])
@@ -69,9 +71,9 @@ def test_platform_staff_can_obtain_super_admin_token_with_no_client_claim() -> N
 
 
 def test_tenant_staff_cannot_obtain_super_admin_token() -> None:
-    user = ClientStaffUserFactory(password="correct-horse")
+    user = ClientStaffUserFactory(password=_TEST_PASSWORD)
     response = APIClient().post(
-        reverse("super-admin-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("super-admin-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -119,9 +121,9 @@ def test_me_endpoint_requires_authentication() -> None:
 
 
 def test_me_endpoint_returns_authenticated_user() -> None:
-    user = PassengerUserFactory(password="correct-horse")
+    user = PassengerUserFactory(password=_TEST_PASSWORD)
     login = APIClient().post(
-        reverse("customer-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("customer-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {login.data['access']}")
@@ -131,9 +133,9 @@ def test_me_endpoint_returns_authenticated_user() -> None:
 
 
 def test_token_refresh_issues_a_new_access_token_carrying_the_same_custom_claims() -> None:
-    user = PassengerUserFactory(password="correct-horse")
+    user = PassengerUserFactory(password=_TEST_PASSWORD)
     login = APIClient().post(
-        reverse("customer-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("customer-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
 
     refresh_response = APIClient().post(
@@ -167,9 +169,9 @@ def test_access_token_lifetime_is_sixty_minutes() -> None:
 def test_issued_access_tokens_carry_the_sixty_minute_window() -> None:
     """The setting assertion above proves configuration; this proves it
     reaches a token a real login actually hands out."""
-    user = PassengerUserFactory(password="correct-horse")
+    user = PassengerUserFactory(password=_TEST_PASSWORD)
     login = APIClient().post(
-        reverse("customer-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("customer-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
 
     token = AccessToken(login.data["access"])
@@ -195,9 +197,9 @@ def test_token_refresh_rotates_the_refresh_token() -> None:
     """ROTATE_REFRESH_TOKENS is on, so the response carries a *new*
     refresh token. The frontend must persist it — storing only `access`
     is what silently kills a session once the original refresh expires."""
-    user = PassengerUserFactory(password="correct-horse")
+    user = PassengerUserFactory(password=_TEST_PASSWORD)
     login = APIClient().post(
-        reverse("customer-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("customer-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
 
     refreshed = APIClient().post(reverse("token-refresh"), {"refresh": login.data["refresh"]})
@@ -219,9 +221,9 @@ def test_a_rotated_away_refresh_token_still_works() -> None:
     fails here loudly — which is the moment to also solve the multi-tab
     refresh race in @auth's middleware, since blacklisting makes two
     tabs able to invalidate each other's session."""
-    user = PassengerUserFactory(password="correct-horse")
+    user = PassengerUserFactory(password=_TEST_PASSWORD)
     login = APIClient().post(
-        reverse("customer-token-obtain"), {"email": user.email, "password": "correct-horse"}
+        reverse("customer-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
     )
     original_refresh = login.data["refresh"]
     APIClient().post(reverse("token-refresh"), {"refresh": original_refresh})

@@ -13,13 +13,15 @@ from apps.identity.tests.factories import PassengerUserFactory
 
 pytestmark = pytest.mark.django_db
 
+_TEST_PASSWORD = "correct-horse"  # noqa: S105  # nosec B105
+
 
 def test_repeated_login_attempts_are_throttled() -> None:
-    user = PassengerUserFactory(password="correct-horse")
+    user = PassengerUserFactory(password=_TEST_PASSWORD)
 
     responses = [
         APIClient().post(
-            reverse("customer-token-obtain"), {"email": user.email, "password": "correct-horse"}
+            reverse("customer-token-obtain"), {"email": user.email, "password": _TEST_PASSWORD}  # noqa: S106
         )
         for _ in range(11)
     ]

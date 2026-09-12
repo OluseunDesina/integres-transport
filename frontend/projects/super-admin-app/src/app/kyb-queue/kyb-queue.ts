@@ -17,6 +17,7 @@ import {
   CONFIRM_DIALOG_TITLE_ID,
   ConfirmDialog,
   EmptyState,
+  FilterBar,
   PageHeader,
   Paginator,
   RadioGroup,
@@ -52,6 +53,7 @@ function extractFirstErrorMessage(error: unknown): string {
     Alert,
     Button,
     EmptyState,
+    FilterBar,
     PageHeader,
     Paginator,
     RadioGroup,
@@ -65,6 +67,10 @@ export class KybQueue implements OnInit {
   protected readonly store = inject(KybQueueStore);
   private readonly dialog = inject(Dialog);
   private readonly api = inject(API_CLIENT);
+
+  protected onSearchChange(value: string): void {
+    void this.store.updateQuery({ search: value || undefined });
+  }
 
   @ViewChild('decideBody') private readonly decideBody!: TemplateRef<unknown>;
 
@@ -160,16 +166,26 @@ export class KybQueue implements OnInit {
       },
     });
 
-    // Refetch either way — a cancelled review leaves the row unchanged,
-    // a confirmed one leaves it decided; both cases are naturally
-    // reflected by the same unconditional reload. Deferred one tick:
-    // `getAll()` flips `ui-table`'s `loading` state, which tears down and
-    // recreates the whole table (including the Review button CDK is
-    // restoring focus to) — refetching in the same synchronous tick as
-    // the dialog's own close/focus-restoration sequence raced it and
-    // silently dropped focus onto nothing.
-    ref.closed.subscribe(() => {
-      setTimeout(() => void this.store.getAll());
+    // Only refetch on an actual decision (`ref.close(true)`), not on
+    // cancel/Escape (`false`/`undefined`) — a cancelled review leaves
+    // the row genuinely unchanged, so there is nothing to reload. This
+    // was previously unconditional ("both cases are naturally reflected
+    // by the same unconditional reload"), which was itself a real bug
+    // (confirmed empirically against `kyc-queue.ts`'s identical
+    // pattern): a refetch flips `ui-table`'s `loading` state, tearing
+    // down and recreating the whole table — including the Review
+    // button CDK's Dialog had *just* synchronously restored focus to —
+    // and the freshly-created button is a different DOM node that
+    // `focus()` was never called on. The `setTimeout` deferral only
+    // avoided racing that initial synchronous restoration; it did
+    // nothing to stop this second, later loss once the deferred
+    // refetch itself fired and rebuilt the row a moment later.
+    // Confirmed dialogs still need the reload; Escape and Cancel now
+    // correctly leave both the data and the focused element alone.
+    ref.closed.subscribe((result) => {
+      if (result) {
+        void this.store.getAll();
+      }
     });
   }
 
