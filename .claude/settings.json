@@ -238,7 +238,11 @@
       "Bash(awk 'NR>=908 && NR<=955' docs/status.md)",
       "Bash(UI_REVIEW_DIR=item2-verify UI_REVIEW_SPEC=fix-batch UI_REVIEW_SENIOR=1 npx playwright test --project=customer-app -g \"@ui-review capture\")",
       "Bash(UI_REVIEW_DIR=item3-verify UI_REVIEW_SPEC=fix-batch npx playwright test --project=client-admin-app -g \"@ui-review capture\")",
-      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; head -30 \"{}\"')"
+      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\"; head -30 \"{}\"')",
+      "Bash(curl -s -o /dev/null -w \"health: %{http_code}\\\\n\" https://integres-transport.vercel.app/api/v1/health/ --max-time 15)",
+      "Bash(curl -s -o /dev/null -w \"incidents \\(needs auth, expect 401/403 not 500\\): %{http_code}\\\\n\" https://integres-transport.vercel.app/api/v1/incidents/ --max-time 15)",
+      "Bash(curl -s -o /dev/null -w \"notifications: %{http_code}\\\\n\" https://integres-transport.vercel.app/api/v1/notifications/ --max-time 15)",
+      "Bash(curl -s -o /dev/null -w \"schema \\(drf-spectacular\\): %{http_code}\\\\n\" https://integres-transport.vercel.app/api/v1/schema/ --max-time 15)"
     ]
   }
 }

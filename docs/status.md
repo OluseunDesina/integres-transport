@@ -1799,6 +1799,34 @@ than calling `set_rls_session_vars` directly.
     shared "Yaba → Lekki" e2e fixture trip (duplicate rows, one
     incorrectly `in_progress`) — all recorded in `docs/traps.md`'s
     "Known gaps" section rather than chased in the same pass.
+  - **The live Vercel + Supabase deployment had silently drifted a
+    month behind (found and fixed 2026-09-13)**: `docs/deployment.md`'s
+    runbook was carried out exactly once, on 2026-08-19 (commit
+    `92ddabd`), but the backend Vercel project kept auto-deploying on
+    every push after that — so the live backend had been running code
+    from as far as `e221594` (2026-09-08) against a database schema
+    frozen at day one. Three apps built since then (`incidents`,
+    `notifications`, `telemetry`) had no tables in Supabase at all, and
+    schema changes to `booking`/`businesses`/`network`/`scheduling`/
+    `ticketing`/`payments`/`ledger`/`identity`/`fares`/`fleet` were
+    likewise unapplied — confirmed live as `500`s on `/incidents/`,
+    `/notifications/mine/`, and even `/api/v1/schema/`. Fixed by running
+    the full pending migration set (40 files) against Supabase's direct
+    connection, then pushing the fix batch (`6e5f179`) on top — no code
+    change was needed for this specific gap, only catching the database
+    up. Separately found and fixed while auditing this: the two
+    notification-sweep cron workflows (added 2026-08-20, one day after
+    the only deploy) never had `BACKEND_URL`/`INTERNAL_TASK_SECRET`
+    configured as GitHub Actions secrets, so they'd never run
+    successfully against real infrastructure — added now, confirmed via
+    a manual `workflow_dispatch` run on all four cron workflows. The
+    lesson, restated in `docs/deployment.md` §5: **auto-deploy on push
+    and manually-run migrations are two independent mechanisms on this
+    platform, and nothing keeps them in sync** — a deploy that changes
+    schema silently breaks production the moment newer code reaches a
+    database that was never migrated to match it. Storage for KYC/KYB
+    documents remains ephemeral on Vercel (§7) — unrelated to this
+    incident and still not fixed.
 
 ---
 

@@ -355,6 +355,23 @@ worry about either way.)
   `requirements.txt` isn't regenerated first (§2), Vercel will build
   with stale/missing dependencies, not fail loudly at migrate time —
   check this before every deploy that touched `backend/pyproject.toml`.
+- **Auto-deploy on push and `migrate` are two independent mechanisms,
+  and nothing keeps them in sync** — found live, not anticipated. This
+  runbook's §4 ran exactly once (2026-08-19), but the backend Vercel
+  project kept auto-deploying on every subsequent push regardless,
+  because that's just how Vercel's GitHub integration works — it has no
+  awareness of whether a migration ran. The result: by 2026-09-13 the
+  live backend was serving a month of code (three apps with no tables
+  in Supabase at all — `incidents`/`notifications`/`telemetry` — plus
+  schema changes to ten more apps) against the schema `migrate` had
+  last produced on day one, surfacing as `500`s on every endpoint that
+  touched the drift (`/incidents/`, `/notifications/mine/`, even
+  `/api/v1/schema/` itself). Fixed by running the full pending
+  migration set once, out of band. **The real fix is discipline, not
+  tooling**: treat "I pushed code with a migration" and "I ran that
+  migration against Supabase" as two separate steps that must both
+  happen, every time — pushing alone is not a complete deploy on this
+  platform, however much it looks like one.
 
 ## 6. Post-deploy verification
 

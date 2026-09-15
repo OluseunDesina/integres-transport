@@ -101,71 +101,94 @@ export class AppShell {
     // Permissions stay empty — this is where Staff lands too, and the
     // screen itself decides what it can show them.
     { label: 'Dashboard', path: '/home', icon: 'chart-bar', permissions: [] },
+    // Grouped (2026-09-15): 21 flat items measured as genuinely too many
+    // to scan — see docs/traps.md. Groups are a first-pass IA call, not
+    // load-bearing on anything else: relabel/reshuffle freely, `group`
+    // is a plain display string with no other meaning (NavShell's own
+    // `navRows`).
     {
       label: 'Businesses',
       path: '/businesses',
       icon: 'building-office',
       permissions: ['client.view'],
+      group: 'Network & fleet',
     },
     {
       label: 'Routes',
       path: '/routes',
       icon: 'map',
       permissions: ['network.view'],
+      group: 'Network & fleet',
     },
     {
       label: 'Stops',
       path: '/stops',
       icon: 'map-pin',
       permissions: ['network.view'],
+      group: 'Network & fleet',
     },
     {
       label: 'Vehicle types',
       path: '/vehicle-types',
       icon: 'squares-2x2',
       permissions: ['fleet.view'],
+      group: 'Network & fleet',
     },
     {
       label: 'Vehicles',
       path: '/vehicles',
       icon: 'truck',
       permissions: ['fleet.view'],
+      group: 'Network & fleet',
     },
     {
       label: 'Drivers',
       path: '/drivers',
       icon: 'user-circle',
       permissions: ['fleet.view'],
+      group: 'Network & fleet',
     },
     {
       label: 'Schedules',
       path: '/schedules',
       icon: 'calendar-days',
       permissions: ['scheduling.view'],
+      group: 'Network & fleet',
     },
     {
       label: 'Trips',
       path: '/trips',
       icon: 'clock',
       permissions: ['scheduling.view'],
+      group: 'Operations',
     },
     {
       label: 'Live operations',
       path: '/live-operations',
       icon: 'signal',
       permissions: ['scheduling.view'],
+      group: 'Operations',
     },
     {
       label: 'Bookings',
       path: '/bookings',
       icon: 'document-check',
       permissions: ['booking.view'],
+      group: 'Operations',
+    },
+    {
+      label: 'Incidents',
+      path: '/incidents',
+      icon: 'exclamation-triangle',
+      permissions: ['incidents.view'],
+      group: 'Operations',
     },
     {
       label: 'Fares',
       path: '/fares',
       icon: 'tag',
       permissions: ['fares.view'],
+      group: 'Finance',
     },
     // "Pay as you go", not "Tap & Go", as of
     // docs/specs/10-booking-modes.md: what this screen lists is
@@ -179,54 +202,56 @@ export class AppShell {
       path: '/tap-go',
       icon: 'bolt',
       permissions: ['tapngo.view'],
+      group: 'Finance',
     },
     {
       label: 'Revenue',
       path: '/revenue',
       icon: 'chart-bar',
       permissions: ['analytics.view'],
-    },
-    {
-      label: 'Incidents',
-      path: '/incidents',
-      icon: 'exclamation-triangle',
-      permissions: ['incidents.view'],
+      group: 'Finance',
     },
     {
       label: 'Payments',
       path: '/payments',
       icon: 'banknotes',
       permissions: ['payments.view'],
+      group: 'Finance',
     },
     {
       label: 'Ledger',
       path: '/ledger',
       icon: 'book-open',
       permissions: ['ledger.view'],
+      group: 'Finance',
     },
     {
       label: 'Wallet lookup',
       path: '/wallet',
       icon: 'credit-card',
       permissions: ['wallet.view'],
+      group: 'Finance',
     },
     {
       label: 'Staff',
       path: '/staff',
       icon: 'users',
       permissions: ['staff.manage'],
+      group: 'Admin',
     },
     {
       label: 'KYC status',
       path: '/kyc',
       icon: 'identification',
       permissions: ['client.view'],
+      group: 'Admin',
     },
     {
       label: 'White label',
       path: '/white-label',
       icon: 'swatch',
       permissions: ['whitelabel.manage'],
+      group: 'Admin',
     },
   ];
 

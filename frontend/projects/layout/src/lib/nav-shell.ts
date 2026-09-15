@@ -24,7 +24,21 @@ export interface NavItem {
   path: string;
   icon: IconName;
   permissions: readonly string[];
+  /**
+   * Optional section label rendered above the first item carrying it —
+   * consecutive items sharing the same value are one visual group, with
+   * no other behavior change (still one flat permission-filtered list
+   * underneath). Omit it and an item renders exactly as before; a caller
+   * with a short nav (`customer-app`, `validator-app`) has no reason to
+   * set it. Purely a display grouping, not a collapsible one — see
+   * `navRows`.
+   */
+  group?: string;
 }
+
+type NavRow =
+  | { kind: 'header'; key: string; label: string }
+  | { kind: 'item'; key: string; item: NavItem };
 
 /** A row in the profile menu's business switcher — caller-supplied
  * (client-admin-app-only concept; @layout stays app-agnostic, same
@@ -142,10 +156,22 @@ const DRAWER_BREAKPOINT = '(max-width: 639px)';
       ></button>
     }
 
+    <!-- \`h-screen\`, always: bounds this column to the viewport instead
+         of stretching to match \`<main>\`'s content height (the host stays
+         \`min-h-screen\`, unchanged, matching every other shell in this
+         codebase — only this component needs a fixed-height sidebar).
+         \`sticky top-0\` (desktop/tablet only — the drawer's own \`fixed\`
+         already pins it at every width below DRAWER_BREAKPOINT) keeps it
+         pinned while the page's own document scroll handles \`<main>\`'s
+         overflow, the standard pinned-sidebar pattern. Neither alone
+         fixes the nav list itself scrolling internally — see \`<nav>\`'s
+         own \`min-h-0\` below for that half. -->
     <aside
-      class="flex shrink-0 flex-col border-r border-border bg-surface transition-[width,transform] duration-150 motion-reduce:transition-none"
+      class="flex h-screen shrink-0 flex-col border-r border-border bg-surface transition-[width,transform] duration-150 motion-reduce:transition-none"
       [class.w-64]="!effectiveCollapsed()"
       [class.w-16]="effectiveCollapsed()"
+      [class.sticky]="!isNarrowestViewport()"
+      [class.top-0]="!isNarrowestViewport()"
       [class.fixed]="isNarrowestViewport()"
       [class.inset-y-0]="isNarrowestViewport()"
       [class.left-0]="isNarrowestViewport()"
@@ -164,27 +190,40 @@ const DRAWER_BREAKPOINT = '(max-width: 639px)';
         }
       </div>
 
+      <!-- \`min-h-0\`: a flex item's default \`min-height: auto\` refuses to
+           shrink below its own content's height, which silently defeats
+           \`overflow-y-auto\` above — a classic flexbox gotcha, not a typo.
+           Without this, a nav list taller than \`<aside>\` just grows the
+           aside instead of scrolling internally. -->
       <nav
         role="navigation"
         [attr.aria-label]="appName() + ' primary'"
-        class="flex flex-1 flex-col gap-1 overflow-y-auto p-2"
+        class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2"
       >
-        @for (item of visibleNavItems(); track item.path) {
-          <a
-            [routerLink]="item.path"
-            routerLinkActive="bg-primary-subtle text-strong font-medium"
-            #rla="routerLinkActive"
-            [attr.aria-current]="rla.isActive ? 'page' : null"
-            [attr.aria-label]="effectiveCollapsed() ? item.label : null"
-            [title]="effectiveCollapsed() ? item.label : null"
-            (click)="closeDrawer(false)"
-            class="inline-flex min-h-11 min-w-11 items-center gap-3 rounded-md px-3 text-sm text-default hover:bg-surface-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-          >
-            <ui-icon [name]="item.icon" />
+        @for (row of navRows(); track row.key) {
+          @if (row.kind === 'header') {
             @if (!effectiveCollapsed()) {
-              <span class="truncate">{{ item.label }}</span>
+              <p class="mt-2 truncate px-3 pt-1 pb-1 text-xs font-medium tracking-wide text-muted uppercase first:mt-0">
+                {{ row.label }}
+              </p>
             }
-          </a>
+          } @else {
+            <a
+              [routerLink]="row.item.path"
+              routerLinkActive="bg-primary-subtle text-strong font-medium"
+              #rla="routerLinkActive"
+              [attr.aria-current]="rla.isActive ? 'page' : null"
+              [attr.aria-label]="effectiveCollapsed() ? row.item.label : null"
+              [title]="effectiveCollapsed() ? row.item.label : null"
+              (click)="closeDrawer(false)"
+              class="inline-flex min-h-11 min-w-11 items-center gap-3 rounded-md px-3 text-sm text-default hover:bg-surface-muted hover:text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            >
+              <ui-icon [name]="row.item.icon" />
+              @if (!effectiveCollapsed()) {
+                <span class="truncate">{{ row.item.label }}</span>
+              }
+            </a>
+          }
         }
       </nav>
 
@@ -397,6 +436,31 @@ export class NavShell {
       (item) => item.permissions.length === 0 || this.permissionsService.hasAny(item.permissions)
     )
   );
+
+  /**
+   * Flattens `visibleNavItems` into a render-ready row list, inserting a
+   * `'header'` row wherever `item.group` changes from the previous item
+   * — one row per distinct group run, not per group overall, since two
+   * separated runs of the same group name (unusual, but not prevented)
+   * should still get two headers rather than silently merging. An
+   * ungrouped item (`group` undefined) never gets a header, so a caller
+   * that sets no `group` at all (`customer-app`, `super-admin-app`,
+   * `validator-app`) renders exactly the flat list it always has.
+   */
+  protected readonly navRows = computed<NavRow[]>(() => {
+    const rows: NavRow[] = [];
+    let currentGroup: string | undefined;
+    for (const item of this.visibleNavItems()) {
+      if (item.group !== currentGroup) {
+        currentGroup = item.group;
+        if (currentGroup) {
+          rows.push({ kind: 'header', key: `group:${currentGroup}:${item.path}`, label: currentGroup });
+        }
+      }
+      rows.push({ kind: 'item', key: item.path, item });
+    }
+    return rows;
+  });
 
   /** Permission-gated the same way `visibleNavItems` is — a create
    * action a user cannot perform must not be offered. */
