@@ -383,3 +383,76 @@ def refresh_seat_holds(*, booking: Booking, hold_minutes: int) -> int:
     return SeatReservation.objects.filter(
         booking=booking, status=SeatReservation.Status.HELD
     ).update(held_until=timezone.now() + timedelta(minutes=hold_minutes))
+
+
+def expire_stale_holds_for_locked_booking(locked_booking: Booking) -> bool:
+    """The actual expiry check, for a caller that has *already* locked
+    `locked_booking` (`select_for_update()`) inside its own open
+    transaction — `apps.payments.services.pay_booking_from_wallet` is
+    the one caller today. Split out from `expire_stale_holds_for_booking`
+    below so that caller, which takes its own lock on the same row a few
+    lines later regardless, can run this against that single lock
+    instead of acquiring a second, separate one first: two sequential
+    `select_for_update()` calls on the same row (one here, one there)
+    cost nothing extra inside one transaction, but doing them as two
+    *separate* transactions, back to back, measurably widened a real
+    deadlock window in
+    `test_blend_settlement_and_a_concurrent_wallet_spend_race_safely`
+    (caught empirically — repeated runs, not assumed) once this was
+    first added as its own `transaction.atomic()` block called just
+    before that function's own."""
+    if locked_booking.status != Booking.Status.PENDING_PAYMENT:
+        return False
+    expired_count = SeatReservation.all_objects.filter(
+        booking=locked_booking,
+        status=SeatReservation.Status.HELD,
+        held_until__lt=timezone.now(),
+    ).update(status=SeatReservation.Status.EXPIRED)
+    if expired_count == 0:
+        return False
+    still_held = SeatReservation.all_objects.filter(
+        booking=locked_booking, status=SeatReservation.Status.HELD
+    ).exists()
+    if still_held:
+        return False
+    locked_booking.status = Booking.Status.EXPIRED
+    locked_booking.save(update_fields=["status"])
+    return True
+
+
+def expire_stale_holds_for_booking(*, booking: Booking) -> bool:
+    """Synchronous, single-booking equivalent of
+    `apps.seating.tasks.expire_seat_holds`'s periodic sweep —
+    docs/specs/22-marketplace.md slice 2. Closes a real race window: that
+    sweep runs once a minute, so a hold can sit past its `held_until` for
+    up to that long before the sweep actually marks it `expired`. During
+    that window, `booking.status` is still `pending_payment`, so
+    `apps.payments.services.initiate_payment`/
+    `initiate_payment_with_wallet` would both proceed to charge for — and
+    `initiate_payment` would even *re-extend*, via `refresh_seat_holds`
+    above — a hold that has already lapsed. Called before each of those
+    two functions' own `PENDING_PAYMENT` check (after their own
+    idempotency-replay short-circuit, so a legitimate replay of an
+    already-paid booking is unaffected), so that check sees the correct,
+    up-to-date status regardless of whether the periodic sweep has run
+    yet. `apps.payments.services.pay_booking_from_wallet` does *not* call
+    this — see `expire_stale_holds_for_locked_booking`'s own docstring
+    for why it runs the same check inline against its own lock instead.
+
+    Same `select_for_update()`-then-check shape as
+    `apps.booking.services.cancel_booking`, no `platform_staff_bypass()`:
+    every caller already runs with a real tenancy context established
+    (an authenticated passenger's own request, or the marketplace flow's
+    `as_client()`), the same reasoning that function's own docstring
+    gives for not needing one either.
+
+    A no-op, not an error, when there is nothing to expire — an
+    already-non-pending booking, or one with no stale `HELD` reservations
+    (including every open-seating booking, which holds none at all).
+    Returns whether *this call* is what expired the booking, mirroring
+    `apps.booking.services.mark_booking_paid`'s own `did_transition`
+    shape — not that a caller currently needs to tell that apart from
+    "already expired", but it costs nothing to report correctly."""
+    with transaction.atomic():
+        locked_booking = Booking.all_objects.select_for_update().get(pk=booking.pk)
+        return expire_stale_holds_for_locked_booking(locked_booking)

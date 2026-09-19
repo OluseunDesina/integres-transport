@@ -711,6 +711,47 @@ than calling `set_rls_session_vars` directly.
 
 ---
 
+## Marketplace redesign (spec 24) — the reasoning
+
+Full record: `docs/specs/24-marketplace-redesign.md` (slice 1 done,
+slice 2 next). What follows is the *why* that spec's Implementation note
+only points at.
+
+**Why a survey, not one site.** Slice 1 was first drafted against
+Wakanow alone, because spec 22 had named it. The product owner widened
+the brief the same day: the right baseline is aggregators of *travel and
+mobility options*, not one flight/hotel shop. Six were studied —
+Omio, Busbud, FlixBus, Rome2Rio, BuuPass (the closest market analogue:
+an African multi-operator bus site), Wakanow — plus Treepz, dropped
+because it has pivoted to corporate travel. Landing pages were observed
+live; results pages could not be (Busbud and FlixBus hand search to a
+partner or a new tab), so results patterns come from known behaviour of
+those products and the spec says so.
+
+**What the survey changed.** The Wakanow draft's two-row search card
+became Omio/Busbud/FlixBus's single segmented bar; recent searches,
+a payment-methods line under search (BuuPass), "My bookings" for guests
+(Omio, FlixBus), and Cheapest/Fastest badges on results (Rome2Rio, Omio)
+were added. The navy hero survived because the survey splits on it
+(Busbud and Omio light, Wakanow and FlixBus dark or photographic) — a
+brand choice, not a baseline.
+
+**What it could not change, and why.** The patterns *every* aggregator
+shares that we lack — popular routes, seats-left, an operator wall,
+city → stop grouping in suggestions — are all data problems, not UI
+ones: stop suggestions are alphabetical, search results carry no
+availability, and there is no marketplace operator list. Building any of
+them on today's API would mean hard-coding or inventing, which spec 24
+rules out. They are the obvious backend follow-ups; see `docs/traps.md`'s
+known-gaps entry.
+
+**Two traps worth the time they cost** (one-liners in `docs/traps.md`):
+the shell's first per-route layout switch put two `<router-outlet>`s
+behind an `@if`, and read `ActivatedRoute.firstChild` during
+construction — both blanked the app with the same router error. One
+outlet with a conditional wrapper class, read from
+`router.routerState.snapshot`, fixed it.
+
 ## Known Phase 0 limitations (deliberate, not oversights)
 
 - `TenancyMiddleware` still resolves tenancy from the JWT claim only, per

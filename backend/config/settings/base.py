@@ -63,6 +63,10 @@ INSTALLED_APPS = [
     # ticketing and tapngo for one passenger's own history
     # (docs/specs/20-live-operations.md slice 4).
     "apps.activity",
+    # No models of its own — thin views delegating to the domain apps
+    # above, once a Trip has been resolved across every Client rather
+    # than just the caller's own (docs/adr/0009, docs/specs/22-marketplace.md).
+    "apps.marketplace",
 ]
 
 MIDDLEWARE = [
@@ -171,6 +175,12 @@ REST_FRAMEWORK = {
         "auth_login_client_admin": "10/min",
         "auth_login_super_admin": "10/min",
         "auth_register": "10/min",
+        # docs/specs/22-marketplace.md. Separate from `auth_register`
+        # (Client/business owner registration) per the same
+        # split-per-purpose reasoning above — a passenger self-registering
+        # on the marketplace shouldn't share a budget with, or be starved
+        # by, business registration traffic.
+        "auth_register_customer": "10/min",
         "auth_invite_accept": "10/min",
         # docs/specs/16-operational-analytics.md slice 4. These endpoints
         # are two to three orders of magnitude more expensive than

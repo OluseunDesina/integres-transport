@@ -163,4 +163,29 @@ test.describe('client-admin-app nav collapse', () => {
     await expect(aside).toHaveCSS('position', 'sticky');
     expect((await aside.boundingBox())?.y).toBe(0);
   });
+
+  test('the quick-actions bar stays pinned while main content scrolls', async ({ page }) => {
+    await signIn(page);
+    // `/routes` has enough seeded fixture rows to force real overflow —
+    // the dashboard alone might not, at this viewport.
+    await page.goto('/routes');
+    await page.setViewportSize({ width: 1280, height: 350 });
+
+    const quickActions = page.getByRole('button', { name: 'Create a new record' });
+    const before = (await quickActions.boundingBox())?.y;
+
+    const main = page.locator('main');
+    const [scrollHeight, clientHeight] = await main.evaluate((el) => [el.scrollHeight, el.clientHeight]);
+    expect(scrollHeight).toBeGreaterThan(clientHeight);
+
+    await main.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+
+    // Same position after scrolling `<main>` to its end — the div is
+    // sticky against `<main>`'s own scroll, not just riding along with
+    // the document (which no longer scrolls at all, per this fix).
+    await expect(quickActions).toBeInViewport();
+    expect((await quickActions.boundingBox())?.y).toBe(before);
+  });
 });

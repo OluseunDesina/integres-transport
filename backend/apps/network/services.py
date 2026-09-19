@@ -3,13 +3,15 @@ apps.businesses.services's shape (see
 docs/specs/3-network-scheduling-fleet.md §4)."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
+from django.db.models import QuerySet
 
 from apps.businesses.models import Business
 from apps.core.audit import record_audit_event
+from apps.core.rls import platform_staff_bypass
 from apps.fares.services import route_fare_summary
 from apps.identity.models import User
 from apps.scheduling.models import Trip
@@ -209,6 +211,138 @@ def set_route_status(*, route: Route, new_status: str, actor: User, reason: str 
     return route
 
 
+class RouteStopMatch(NamedTuple):
+    """One `(route, from_stop, to_stop)` pairing `find_route_stop_matches`
+    found, plus the stop count strictly between them — computed here
+    because it needs each `RouteStop`'s `sequence`, which the plain
+    `Stop` rows below don't carry on their own. `stops_between == 0`
+    is a direct connection; the caller (`TripSearchView`) is what turns
+    that into the word "Direct" — this stays a plain int, a display
+    concern doesn't belong in a service function's return shape."""
+
+    route: Route
+    from_stop: Stop
+    to_stop: Stop
+    stops_between: int
+
+
+def find_route_stop_matches(*, origin: str, destination: str) -> list[RouteStopMatch]:
+    """Passenger-facing search entry point: given free-text `origin`/
+    `destination`, returns every matching pairing where both stops sit
+    on the same active Route, in the right travel direction — used by
+    `apps.scheduling.views.TripSearchView` in place of a passenger
+    picking a Route first (docs/specs/4-fares-seating-booking-
+    frontend.md §3.3, reworked for the origin/destination flow).
+    (Named `origin`, not `source` — the latter collides with
+    `rest_framework.serializers.Field`'s own reserved `source`
+    attribute, which the query serializer that feeds this would
+    otherwise fight with; kept consistent here even though this
+    function itself is plain Python, so the name doesn't change again
+    between the API layer and this one.)
+
+    Deliberately not a fuzzy cross-Route text match: `Stop` is a real,
+    shared, Business-owned row (`RouteStop` just orders it onto a
+    Route), so this is a plain relational join — match `Stop.name` on
+    both ends, same Route, `from_stop`'s sequence strictly before
+    `to_stop`'s. A search term matching more than one physical stop
+    (e.g. "Lagos") legitimately produces more than one pair; this
+    returns all of them rather than guessing which the passenger meant
+    — the frontend's suggestion dropdown is what narrows this in
+    practice before a search is even submitted.
+
+    `route__status=ACTIVE` and `stop__is_active=True` mirror
+    `RouteBrowseView`'s own passenger-visible filtering — a draft,
+    inactive or archived Route, or a deactivated Stop, must be exactly
+    as unreachable here as there.
+    """
+    from_matches = RouteStop.objects.filter(
+        stop__name__icontains=origin,
+        stop__is_active=True,
+        route__status=Route.Status.ACTIVE,
+    ).select_related("stop", "route", "route__business")
+    to_matches = RouteStop.objects.filter(
+        stop__name__icontains=destination,
+        stop__is_active=True,
+        route__status=Route.Status.ACTIVE,
+    ).select_related("stop")
+
+    return _pair_route_stops(from_matches, to_matches)
+
+
+def _pair_route_stops(
+    from_matches: QuerySet[RouteStop], to_matches: QuerySet[RouteStop]
+) -> list[RouteStopMatch]:
+    """The actual pairing logic shared by `find_route_stop_matches` and
+    its marketplace variant below — the only difference between them is
+    which manager/predicates built `from_matches`/`to_matches`, never
+    this part."""
+    to_by_route: dict[Any, list[RouteStop]] = {}
+    for candidate in to_matches:
+        to_by_route.setdefault(candidate.route_id, []).append(candidate)
+
+    matches: list[RouteStopMatch] = []
+    for from_candidate in from_matches:
+        for to_candidate in to_by_route.get(from_candidate.route_id, []):
+            if from_candidate.sequence < to_candidate.sequence:
+                matches.append(
+                    RouteStopMatch(
+                        route=from_candidate.route,
+                        from_stop=from_candidate.stop,
+                        to_stop=to_candidate.stop,
+                        stops_between=to_candidate.sequence - from_candidate.sequence - 1,
+                    )
+                )
+    return matches
+
+
+def find_route_stop_matches_across_clients(
+    *, origin: str, destination: str
+) -> list[RouteStopMatch]:
+    """The marketplace's cross-Client variant of `find_route_stop_matches`
+    — docs/adr/0009, docs/specs/22-marketplace.md. Identical matching
+    logic, but `all_objects` instead of `.objects`, since a marketplace
+    passenger's own Client is never the one that owns the Route being
+    searched.
+
+    `route__business__kyb_status=APPROVED` is the one predicate the
+    same-Client version doesn't need: there, RLS's own Client-scoping
+    incidentally guarantees "this Business belongs to a Client I already
+    trust", which stops being true the moment `all_objects` opens this up
+    platform-wide. Confirmed by reading `create_route`'s own docstring:
+    KYB approval is enforced only at route-creation time, never re-checked
+    on any read path — so this must be a first-class, explicit filter
+    here, not an assumption carried over from the same-Client function.
+
+    **`all_objects` alone is not enough.** It only removes the ORM-level
+    filter — `RouteStop`'s Postgres RLS policy still applies regardless
+    of manager, so this also needs `platform_staff_bypass()` to actually
+    see another Client's rows at the database level (confirmed live: an
+    earlier version of this function without it silently returned
+    nothing for a genuinely cross-Client match). This is the first
+    ordinary passenger-facing read to reach for that bypass — every
+    other call site is system/platform-staff code (see its own
+    docstring) — justified here specifically because the four predicates
+    above are exactly the "caller has already established authorization
+    some other way" that docstring asks for: they, not RLS, are what
+    keeps this to only publicly-bookable rows.
+    """
+    with platform_staff_bypass():
+        from_matches = RouteStop.all_objects.filter(
+            stop__name__icontains=origin,
+            stop__is_active=True,
+            route__status=Route.Status.ACTIVE,
+            route__business__kyb_status=Business.KybStatus.APPROVED,
+        ).select_related("stop", "route", "route__business")
+        to_matches = RouteStop.all_objects.filter(
+            stop__name__icontains=destination,
+            stop__is_active=True,
+            route__status=Route.Status.ACTIVE,
+            route__business__kyb_status=Business.KybStatus.APPROVED,
+        ).select_related("stop")
+
+        return _pair_route_stops(from_matches, to_matches)
+
+
 def duplicate_route(*, route: Route, duplicated_by: User) -> Route:
     """Copies `route` and its ordered RouteStop rows. The copy is always
     `draft`, its name suffixed `(copy)`, its `code` cleared — a
@@ -235,9 +369,7 @@ def duplicate_route(*, route: Route, duplicated_by: User) -> Route:
     """
     with transaction.atomic():
         stops = list(
-            RouteStop.all_objects.filter(route=route)
-            .select_related("stop")
-            .order_by("sequence")
+            RouteStop.all_objects.filter(route=route).select_related("stop").order_by("sequence")
         )
         copy = Route.all_objects.create(
             client=route.client,

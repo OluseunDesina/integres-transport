@@ -82,6 +82,29 @@ class BusinessSerializer(serializers.ModelSerializer[Business]):
         return update_business(business=instance, updated_by=request.user, **validated_data)
 
 
+class BusinessSuperAdminQuerySerializer(serializers.Serializer):
+    """Query shape for GET /super-admin/businesses/ — `search` plus the
+    `kyb_status`/`vertical`/`is_active` filters this list gained once the
+    separate KYB queue page was folded into it: both listed `Business`
+    rows with no way to cross-filter between them, so a reviewer now
+    filters this one list instead of switching pages. All four are
+    optional and only ever narrow.
+
+    `is_active` is a `ChoiceField` of `"true"`/`"false"`, not a
+    `BooleanField` — a plain `BooleanField(required=False)` resolves a
+    *missing* key to `False` rather than leaving it out of
+    `validated_data` (DRF's `Field.get_value()` treats a `QueryDict` as
+    HTML form input, where an absent checkbox means unchecked). That
+    would silently apply `is_active=False` to every unfiltered request,
+    hiding every active Business — caught by this endpoint's own test
+    suite, not assumed."""
+
+    search = serializers.CharField(required=False, allow_blank=True)
+    kyb_status = serializers.ChoiceField(choices=Business.KybStatus.choices, required=False)
+    vertical = serializers.ChoiceField(choices=Business.Vertical.choices, required=False)
+    is_active = serializers.ChoiceField(choices=["true", "false"], required=False)
+
+
 class BusinessSuperAdminSerializer(serializers.ModelSerializer[Business]):
     """Read-only cross-client Business search for platform staff —
     Phase 5 frontend Slice C. Unlike `BusinessKybQueueSerializer`, not

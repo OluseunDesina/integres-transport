@@ -1,0 +1,297 @@
+<!-- Hero — docs/specs/24-marketplace-redesign.md. The navy runs on from
+     the header; the search card below pulls up over its bottom edge. -->
+<section class="relative isolate overflow-hidden bg-gradient-to-b from-mk-navy-950 to-mk-navy-900 pb-44 md:pb-36 lg:pb-24">
+  <div
+    aria-hidden="true"
+    class="pointer-events-none absolute -top-40 right-[-10rem] -z-10 h-[32rem] w-[32rem] rounded-full bg-primary/30 blur-3xl"
+  ></div>
+  <div
+    aria-hidden="true"
+    class="pointer-events-none absolute bottom-[-12rem] left-[-8rem] -z-10 h-[26rem] w-[26rem] rounded-full bg-mk-accent/10 blur-3xl"
+  ></div>
+
+  <div class="mx-auto max-w-6xl px-4 pt-10 sm:pt-16">
+    <p class="text-xs font-semibold tracking-[0.2em] text-mk-accent uppercase">One search · every operator</p>
+    <h1 class="mt-3 max-w-2xl text-4xl leading-tight font-bold tracking-tight text-white sm:text-5xl">
+      Every operator. One search.
+    </h1>
+    <p class="mt-4 max-w-xl text-base text-mk-on-navy-muted sm:text-lg">
+      Compare departures, pick your own seat and pay securely — across every bus and shuttle operator on TransitOS.
+    </p>
+
+    <ul class="mt-6 flex flex-wrap gap-x-6 gap-y-2 text-sm text-mk-on-navy-muted" aria-label="Why book here">
+      @for (point of trustPoints; track point.label) {
+        <li class="flex items-center gap-2">
+          <span class="text-mk-accent"><ui-icon [name]="point.icon" [size]="18" /></span>
+          {{ point.label }}
+        </li>
+      }
+    </ul>
+  </div>
+</section>
+
+<!-- Search — one segmented bar from lg up, the way Omio, Busbud and
+     FlixBus lay it out; stacked fields below that. -->
+<div class="relative z-10 mx-auto -mt-36 max-w-6xl px-4 md:-mt-28 lg:-mt-14">
+  <section
+    aria-label="Search trips"
+    class="rounded-2xl bg-surface p-3 shadow-[0_24px_48px_-12px_rgb(8_22_52/0.35)] sm:p-4"
+  >
+    <div
+      class="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_12rem_11rem_auto] lg:gap-0 lg:rounded-xl lg:border lg:border-control"
+    >
+      <!-- From + To share one wrapper so the swap button can sit on the
+           seam between them at every width. -->
+      <div class="relative grid gap-2 lg:col-span-2 lg:grid-cols-2 lg:gap-0">
+        <!-- From -->
+        <div class="relative">
+          <div [class]="fieldBoxClass">
+            <label for="from-stop-input" [class]="fieldLabelClass">From</label>
+            <div class="flex items-center gap-2">
+              <span class="text-muted"><ui-icon name="map-pin" [size]="18" /></span>
+              <input
+                id="from-stop-input"
+                type="text"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="from-stop-listbox"
+                [attr.aria-expanded]="fromField.open()"
+                [value]="fromField.query()"
+                (input)="onFromInput($any($event.target).value)"
+                (focus)="fromField.onFocus()"
+                (blur)="fromField.close()"
+                (keydown.escape)="fromField.close()"
+                placeholder="City or stop"
+                autocomplete="off"
+                [class]="fieldInputClass"
+              />
+            </div>
+          </div>
+          @if (fromField.open()) {
+            <ul
+              id="from-stop-listbox"
+              role="listbox"
+              aria-label="Origin suggestions"
+              (mousedown)="$event.preventDefault()"
+              [class]="listboxClass"
+            >
+              @if (fromField.loading()) {
+                <li class="px-4 py-3 text-sm text-muted">Loading…</li>
+              } @else if (fromField.suggestions().length === 0) {
+                <li class="px-4 py-3 text-sm text-muted">No stops found</li>
+              } @else {
+                @for (row of fromField.suggestions(); track row.id) {
+                  <li
+                    role="option"
+                    tabindex="-1"
+                    [attr.aria-selected]="row.name === fromField.query()"
+                    [class]="optionClass"
+                    (click)="selectFromSuggestion(row)"
+                    (keydown.enter)="selectFromSuggestion(row)"
+                  >
+                    <span class="text-muted"><ui-icon name="map-pin" [size]="16" /></span>
+                    {{ row.name }}
+                  </li>
+                }
+              }
+            </ul>
+          }
+        </div>
+
+        <button
+          type="button"
+          (click)="swap()"
+          aria-label="Swap origin and destination"
+          class="absolute top-1/2 right-4 z-10 inline-flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-control bg-surface text-primary shadow-sm transition hover:bg-primary-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus lg:right-auto lg:left-1/2 lg:-translate-x-1/2"
+        >
+          <span class="rotate-90 lg:rotate-0"><ui-icon name="arrows-right-left" [size]="18" /></span>
+        </button>
+
+        <!-- To -->
+        <div class="relative lg:border-l lg:border-control">
+          <div [class]="fieldBoxClass + ' lg:pl-7'">
+            <label for="to-stop-input" [class]="fieldLabelClass">To</label>
+            <div class="flex items-center gap-2">
+              <span class="text-muted"><ui-icon name="map-pin" [size]="18" /></span>
+              <input
+                id="to-stop-input"
+                type="text"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="to-stop-listbox"
+                [attr.aria-expanded]="toField.open()"
+                [value]="toField.query()"
+                (input)="onToInput($any($event.target).value)"
+                (focus)="toField.onFocus()"
+                (blur)="toField.close()"
+                (keydown.escape)="toField.close()"
+                placeholder="City or stop"
+                autocomplete="off"
+                [class]="fieldInputClass"
+              />
+            </div>
+          </div>
+          @if (toField.open()) {
+            <ul
+              id="to-stop-listbox"
+              role="listbox"
+              aria-label="Destination suggestions"
+              (mousedown)="$event.preventDefault()"
+              [class]="listboxClass"
+            >
+              @if (toField.loading()) {
+                <li class="px-4 py-3 text-sm text-muted">Loading…</li>
+              } @else if (toField.suggestions().length === 0) {
+                <li class="px-4 py-3 text-sm text-muted">No stops found</li>
+              } @else {
+                @for (row of toField.suggestions(); track row.id) {
+                  <li
+                    role="option"
+                    tabindex="-1"
+                    [attr.aria-selected]="row.name === toField.query()"
+                    [class]="optionClass"
+                    (click)="selectToSuggestion(row)"
+                    (keydown.enter)="selectToSuggestion(row)"
+                  >
+                    <span class="text-muted"><ui-icon name="map-pin" [size]="16" /></span>
+                    {{ row.name }}
+                  </li>
+                }
+              }
+            </ul>
+          }
+        </div>
+      </div>
+
+      <!-- Date -->
+      <div class="lg:border-l lg:border-control">
+        <div [class]="fieldBoxClass">
+          <label for="service-date-input" [class]="fieldLabelClass">Travel date</label>
+          <div class="flex items-center gap-2">
+            <span class="text-muted"><ui-icon name="calendar-days" [size]="18" /></span>
+            <input
+              id="service-date-input"
+              type="date"
+              [min]="today"
+              [value]="serviceDate()"
+              (input)="onServiceDateChange($any($event.target).value)"
+              [class]="fieldInputClass"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- Class -->
+      <div class="lg:border-l lg:border-control">
+        <div [class]="fieldBoxClass">
+          <label for="trip-class-select" [class]="fieldLabelClass">Class</label>
+          <div class="flex items-center gap-2">
+            <span class="text-muted"><ui-icon name="tag" [size]="18" /></span>
+            <!-- [selected] per option, not [value] on the select: a value
+                 bound before @for has created the options is dropped
+                 (docs/frontend-patterns.md §9). -->
+            <select
+              id="trip-class-select"
+              (change)="onTripClassChange($any($event.target).value)"
+              [class]="fieldInputClass + ' cursor-pointer'"
+            >
+              @for (option of tripClassOptions; track option.value) {
+                <option [value]="option.value" [selected]="option.value === tripClass()">{{ option.label }}</option>
+              }
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="lg:p-1.5">
+        <button
+          type="button"
+          (click)="search()"
+          [disabled]="!canSearch()"
+          class="inline-flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary px-7 text-base font-semibold text-on-primary shadow-md transition hover:bg-primary-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60 lg:h-full"
+        >
+          <ui-icon name="magnifying-glass" [size]="20" />
+          Search
+        </button>
+      </div>
+    </div>
+
+    <div class="mt-3 flex flex-col gap-3 px-1 lg:flex-row lg:items-center lg:justify-between">
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex gap-2" role="group" aria-label="Quick dates">
+          @for (chip of quickDates; track chip.label) {
+            <button
+              type="button"
+              (click)="onServiceDateChange(chip.value)"
+              [attr.aria-pressed]="serviceDate() === chip.value"
+              [class]="chipClass(serviceDate() === chip.value)"
+            >
+              {{ chip.label }}
+            </button>
+          }
+        </div>
+        @if (recentSearches().length > 0) {
+          <span class="mx-1 hidden h-5 w-px bg-border sm:block" aria-hidden="true"></span>
+          <nav aria-label="Recent searches" class="flex flex-wrap items-center gap-2">
+            <span class="text-xs font-medium text-muted">Recent:</span>
+            @for (recent of recentSearches(); track recent.origin + recent.destination) {
+              <a
+                routerLink="/search/results"
+                [queryParams]="recentQueryParams(recent)"
+                [class]="chipClass(false) + ' gap-1.5'"
+              >
+                <ui-icon name="clock" [size]="14" />
+                {{ recent.origin }} → {{ recent.destination }}
+              </a>
+            }
+          </nav>
+        }
+      </div>
+      <p class="flex items-center gap-2 text-xs text-default">
+        <span class="text-success"><ui-icon name="shield-check" [size]="16" /></span>
+        Pay by card, bank transfer or TransitOS wallet · secured by Paystack
+      </p>
+    </div>
+  </section>
+</div>
+
+<!-- How it works -->
+<section aria-labelledby="how-title" class="mx-auto max-w-6xl px-4 py-16">
+  <p class="text-xs font-semibold tracking-[0.2em] text-primary uppercase">How it works</p>
+  <h2 id="how-title" class="mt-2 text-2xl font-bold tracking-tight text-strong sm:text-3xl">Booked in three steps</h2>
+  <ol class="mt-8 grid gap-4 md:grid-cols-3">
+    @for (step of steps; track step.title; let index = $index) {
+      <li class="relative rounded-2xl border border-border bg-surface p-6 shadow-xs">
+        <div class="flex items-center justify-between">
+          <span class="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary-subtle text-primary">
+            <ui-icon [name]="step.icon" [size]="24" />
+          </span>
+          <span class="text-sm font-semibold text-primary">Step {{ index + 1 }}</span>
+        </div>
+        <h3 class="mt-5 text-lg font-semibold text-strong">{{ step.title }}</h3>
+        <p class="mt-2 text-sm leading-relaxed text-default">{{ step.body }}</p>
+      </li>
+    }
+  </ol>
+</section>
+
+<!-- Manage booking band -->
+<section class="mx-auto max-w-6xl px-4 pb-16">
+  <div
+    class="flex flex-col items-start gap-6 overflow-hidden rounded-2xl bg-mk-navy-900 p-8 sm:flex-row sm:items-center sm:justify-between sm:p-10"
+  >
+    <div>
+      <h2 class="text-2xl font-bold tracking-tight text-white">Already booked?</h2>
+      <p class="mt-2 max-w-lg text-mk-on-navy-muted">
+        See your trips, pay for a held booking, or pull up your QR ticket at the stop.
+      </p>
+    </div>
+    <a
+      routerLink="/my-bookings"
+      class="inline-flex min-h-12 shrink-0 items-center gap-2 rounded-full bg-mk-accent px-6 text-sm font-semibold text-mk-navy-950 hover:bg-amber-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mk-accent"
+    >
+      Manage my bookings
+      <ui-icon name="arrow-right" [size]="18" />
+    </a>
+  </div>
+</section>

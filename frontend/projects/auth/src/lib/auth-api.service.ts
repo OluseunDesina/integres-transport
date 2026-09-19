@@ -49,6 +49,36 @@ export class AuthApiService {
     return { ok: true };
   }
 
+  /**
+   * Passenger self-registration (docs/specs/22-marketplace.md) — under
+   * the platform's singleton Marketplace Client, always audience
+   * `customer`. First consumer is `marketplace-app`; lives here rather
+   * than app-local since it's a genuinely new *auth* capability, not a
+   * marketplace-specific one, matching this file's existing shape for
+   * every other registration/invitation-acceptance flow.
+   */
+  async registerCustomer(
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string
+  ): Promise<LoginResult> {
+    const { data, error } = await this.api.POST('/api/v1/auth/customer/register/', {
+      body: { email, password, first_name: firstName, last_name: lastName },
+    });
+    if (!data) {
+      return { ok: false, message: extractFirstErrorMessage(error) };
+    }
+
+    const user = await this.fetchCurrentUser(data.access);
+    if (!user) {
+      return { ok: false, message: 'Registered, but could not load your account. Try again.' };
+    }
+
+    this.authStore.setSession(data.access, data.refresh, user);
+    return { ok: true };
+  }
+
   async acceptClientInvitation(
     token: string,
     phone: string,

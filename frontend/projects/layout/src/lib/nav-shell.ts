@@ -136,7 +136,15 @@ const DRAWER_BREAKPOINT = '(max-width: 639px)';
   selector: 'app-nav-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
-    class: 'flex min-h-screen bg-surface-muted',
+    // `h-screen`, not `min-h-screen` (a deliberate departure from every
+    // other shell in this codebase — see the class docstring): a flex
+    // container needs a *definite* height, not just a minimum, for
+    // `align-items: stretch` to give a shrinkable cross-size to stretch
+    // against. Without it, `<main>`'s own `min-h-0` has nothing to
+    // shrink relative to and this host just grows to fit content
+    // regardless — confirmed live, not assumed, when the quick-actions
+    // bar's sticky div stayed inert under this fix's first attempt.
+    class: 'flex h-screen bg-surface-muted',
     '(document:click)': 'onDocumentClick($event)',
     '(document:keydown.escape)': 'onDocumentEscape()',
   },
@@ -325,7 +333,15 @@ const DRAWER_BREAKPOINT = '(max-width: 639px)';
       </div>
     </aside>
 
-    <main class="flex min-w-0 flex-1 flex-col overflow-y-auto">
+    <!-- \`min-h-0\`, same flexbox reason as \`<nav>\`'s own comment above:
+         without it this flex child refuses to shrink below its content's
+         height, \`overflow-y-auto\` never engages, and the quick-actions
+         bar's already-\`sticky\` div below has no real scrolling ancestor
+         to stick against — it just scrolls away with the document. With
+         it, \`<main>\` becomes the actual bounded/scrolling pane (the
+         document itself no longer scrolls), and that \`sticky\` finally
+         does what it was written to do. -->
+    <main class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
       @if (isNarrowestViewport()) {
         <!-- Lives in \`main\`'s own flex-column, not as a sibling of
              \`aside\`/\`main\` at the host's flex-row level — a sibling

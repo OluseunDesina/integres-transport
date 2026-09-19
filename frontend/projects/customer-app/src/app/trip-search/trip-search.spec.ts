@@ -4,58 +4,35 @@ import { API_CLIENT } from '@api-client';
 
 import { TripSearch } from './trip-search';
 
-function makeStop(id: string, name: string, sequence: number) {
-  return {
-    id,
-    business: 'biz-1',
-    name,
-    address: '',
-    latitude: null,
-    longitude: null,
-    is_active: true,
-    created_at: '2026-08-01T00:00:00Z',
-    sequence,
-  };
+function makeStopSuggestion(id: string, name: string) {
+  return { id, name };
 }
 
-function makeRoute(overrides: Record<string, unknown> = {}) {
+function makeTripSearchResult(overrides: Record<string, unknown> = {}) {
   return {
-    id: 'route-1',
-    business: { id: 'biz-1', name: 'Lagos Shuttle Co' },
-    name: 'Ikeja → CMS',
-    code: 'IKJ-CMS',
-    description: '',
-    is_active: true,
-    // Empty means "no restriction", which is the state every Route
-    // created before spec 15 is in — so it is the honest default here.
-    available_trip_classes: [],
-    stops: [makeStop('stop-a', 'Ikeja', 1), makeStop('stop-b', 'Yaba', 2), makeStop('stop-c', 'CMS', 3)],
-    created_at: '2026-08-01T00:00:00Z',
-    ...overrides,
-  };
-}
-
-function makeTrip(overrides: Record<string, unknown> = {}) {
-  return {
-    id: 'trip-1',
-    schedule: null,
-    route: { id: 'route-1', name: 'Ikeja → CMS' },
-    business: 'biz-1',
-    service_date: '2026-09-01',
-    scheduled_departure_at: '2026-09-01T06:30:00Z',
-    status: 'scheduled',
-    status_changed_at: null,
-    // docs/specs/16-operational-analytics.md slice 1 — null
-    // on every Trip that has not departed, which is most of them.
-    actual_departure_at: null,
-    actual_arrival_at: null,
-    vehicle: null,
-    driver: null,
-    booking_mode: 'reservation',
-    trip_class: 'standard',
-    cancellation_reason: '',
-    compliance_warnings: [],
-    created_at: '2026-08-06T00:00:00Z',
+    trip: {
+      id: 'trip-1',
+      schedule: null,
+      route: { id: 'route-1', name: 'Ikeja → CMS' },
+      business: 'biz-1',
+      service_date: '2026-09-01',
+      scheduled_departure_at: '2026-09-01T06:30:00Z',
+      status: 'scheduled',
+      status_changed_at: null,
+      actual_departure_at: null,
+      actual_arrival_at: null,
+      vehicle: null,
+      driver: null,
+      booking_mode: 'reservation',
+      trip_class: 'standard',
+      cancellation_reason: '',
+      compliance_warnings: [],
+      created_at: '2026-08-06T00:00:00Z',
+    },
+    from_stop: { id: 'stop-a', name: 'Ikeja' },
+    to_stop: { id: 'stop-c', name: 'CMS' },
+    stops_between: 0,
+    fare: { amount: '750.00', currency: 'NGN' },
     ...overrides,
   };
 }
@@ -65,19 +42,23 @@ describe('TripSearch', () => {
   let fixture: ComponentFixture<TripSearch>;
   let component: TripSearch;
 
-  async function createComponent(): Promise<void> {
+  function createComponent(): void {
     fixture = TestBed.createComponent(TripSearch);
     component = fixture.componentInstance;
     fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
+  }
+
+  async function fillSearchInputs(): Promise<void> {
+    component['fromField'].select(makeStopSuggestion('stop-a', 'Ikeja'));
+    component['toField'].select(makeStopSuggestion('stop-c', 'CMS'));
+    component['onServiceDateChange']('2026-09-01');
   }
 
   beforeEach(() => {
     apiClient = { GET: jasmine.createSpy('GET') };
     apiClient.GET.and.callFake((path: string) =>
-      path === '/api/v1/routes/browse/'
-        ? Promise.resolve({ data: { count: 1, results: [makeRoute()] } })
+      path === '/api/v1/stops/suggest/'
+        ? Promise.resolve({ data: [makeStopSuggestion('stop-a', 'Ikeja')] })
         : Promise.resolve({ data: { count: 0, results: [] } })
     );
 
@@ -87,162 +68,83 @@ describe('TripSearch', () => {
     });
   });
 
-  it('loads browsable routes on init', async () => {
-    await createComponent();
-
-    expect(apiClient.GET).toHaveBeenCalledWith(
-      '/api/v1/routes/browse/',
-      jasmine.objectContaining({
-        params: { query: { limit: 100, offset: 0, search: undefined } },
-      })
-    );
-    expect(component['routeOptions']().map((o) => o.label)).toEqual([
-      'Select a route',
-      'Ikeja → CMS',
-    ]);
-  });
-
-  it('debounces a route search term and forwards it to the browse endpoint', fakeAsync(() => {
-    fixture = TestBed.createComponent(TripSearch);
-    component = fixture.componentInstance;
-    fixture.detectChanges();
-    tick();
-    fixture.detectChanges();
-    apiClient.GET.calls.reset();
-
-    component['onRouteSearchInput']('yaba');
-    // Not yet — a keystroke should not fire a request before the
-    // debounce window closes, or a search term is one HTTP request per
-    // character against a paginated endpoint.
-    expect(apiClient.GET).not.toHaveBeenCalled();
-
-    tick(300);
-
-    expect(apiClient.GET).toHaveBeenCalledWith(
-      '/api/v1/routes/browse/',
-      jasmine.objectContaining({
-        params: { query: { limit: 100, offset: 0, search: 'yaba' } },
-      })
-    );
-  }));
-
-  it('does not fetch again for every keystroke within the debounce window', fakeAsync(() => {
-    fixture = TestBed.createComponent(TripSearch);
-    component = fixture.componentInstance;
-    fixture.detectChanges();
-    tick();
-    fixture.detectChanges();
-    apiClient.GET.calls.reset();
-
-    component['onRouteSearchInput']('y');
-    tick(100);
-    component['onRouteSearchInput']('ya');
-    tick(100);
-    component['onRouteSearchInput']('yab');
-    tick(300);
-
-    expect(apiClient.GET).toHaveBeenCalledTimes(1);
-    expect(apiClient.GET).toHaveBeenCalledWith(
-      '/api/v1/routes/browse/',
-      jasmine.objectContaining({
-        params: { query: { limit: 100, offset: 0, search: 'yab' } },
-      })
-    );
-  }));
-
-  it('labels route options with their Business only when a Client runs several', async () => {
-    apiClient.GET.and.callFake((path: string) =>
-      path === '/api/v1/routes/browse/'
-        ? Promise.resolve({
-            data: {
-              count: 2,
-              results: [
-                makeRoute(),
-                makeRoute({
-                  id: 'route-2',
-                  name: 'Gaborone Loop',
-                  business: { id: 'biz-2', name: 'Botswana Transit' },
-                }),
-              ],
-            },
-          })
-        : Promise.resolve({ data: { count: 0, results: [] } })
-    );
-
-    await createComponent();
-
-    expect(component['routeOptions']().map((o) => o.label)).toEqual([
-      'Select a route',
-      'Ikeja → CMS — Lagos Shuttle Co',
-      'Gaborone Loop — Botswana Transit',
-    ]);
-  });
-
-  it('surfaces a route load failure with a retry affordance', async () => {
-    apiClient.GET.and.resolveTo({ error: { detail: 'Service unavailable.' } });
-
-    await createComponent();
-
-    expect(component['routesError']()).toBe('Service unavailable.');
-    expect((fixture.nativeElement as HTMLElement).querySelector('ui-alert')?.textContent).toContain(
-      'Service unavailable.'
-    );
-  });
-
-  it('populates from-stop options from the selected route', async () => {
-    await createComponent();
-
-    component['onRouteChange']('route-1');
-
-    expect(component['fromStopOptions']().map((o) => o.label)).toEqual([
-      'Select a stop',
-      '1. Ikeja',
-      '2. Yaba',
-      '3. CMS',
-    ]);
-  });
-
-  it('offers only stops after the from-stop, so an invalid segment is unreachable', async () => {
-    await createComponent();
-    component['onRouteChange']('route-1');
-
-    component['onFromStopChange']('stop-b');
-
-    expect(component['toStopOptions']().map((o) => o.label)).toEqual(['Select a stop', '3. CMS']);
-  });
-
-  it('clears the stop selection when the route changes', async () => {
-    await createComponent();
-    component['onRouteChange']('route-1');
-    component['onFromStopChange']('stop-a');
-    component['onToStopChange']('stop-c');
-
-    component['onRouteChange']('route-2');
-
-    expect(component['fromStopId']()).toBe('');
-    expect(component['toStopId']()).toBe('');
-  });
-
-  it('cannot search until route, both stops and a date are chosen', async () => {
-    await createComponent();
+  it('cannot search until both stops and a date are filled in', () => {
+    createComponent();
     expect(component['canSearch']()).toBeFalse();
 
-    component['onRouteChange']('route-1');
-    component['onFromStopChange']('stop-a');
-    component['onToStopChange']('stop-c');
+    component['fromField'].select(makeStopSuggestion('stop-a', 'Ikeja'));
+    expect(component['canSearch']()).toBeFalse();
+
+    component['toField'].select(makeStopSuggestion('stop-c', 'CMS'));
     expect(component['canSearch']()).toBeFalse();
 
     component['onServiceDateChange']('2026-09-01');
     expect(component['canSearch']()).toBeTrue();
   });
 
-  it('searches trips on the chosen route and date', async () => {
-    await createComponent();
-    component['onRouteChange']('route-1');
-    component['onFromStopChange']('stop-a');
-    component['onToStopChange']('stop-c');
-    component['onServiceDateChange']('2026-09-01');
-    apiClient.GET.and.resolveTo({ data: { count: 1, results: [makeTrip()] } });
+  it('fetches default stop suggestions on focus', fakeAsync(() => {
+    createComponent();
+    apiClient.GET.calls.reset();
+
+    component['fromField'].onFocus();
+    tick();
+
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/stops/suggest/',
+      jasmine.objectContaining({ params: { query: { q: undefined } } })
+    );
+    expect(component['fromField'].open()).toBeTrue();
+  }));
+
+  it('debounces typing before fetching filtered stop suggestions', fakeAsync(() => {
+    createComponent();
+    apiClient.GET.calls.reset();
+
+    component['onFromInput']('yab');
+    // Not yet — a keystroke should not fire a request before the
+    // debounce window closes, or a search term is one HTTP request per
+    // character.
+    expect(apiClient.GET).not.toHaveBeenCalled();
+
+    tick(300);
+
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/stops/suggest/',
+      jasmine.objectContaining({ params: { query: { q: 'yab' } } })
+    );
+  }));
+
+  it('does not fetch again for every keystroke within the debounce window', fakeAsync(() => {
+    createComponent();
+    apiClient.GET.calls.reset();
+
+    component['onFromInput']('y');
+    tick(100);
+    component['onFromInput']('ya');
+    tick(100);
+    component['onFromInput']('yab');
+    tick(300);
+
+    expect(apiClient.GET).toHaveBeenCalledTimes(1);
+    expect(apiClient.GET).toHaveBeenCalledWith(
+      '/api/v1/stops/suggest/',
+      jasmine.objectContaining({ params: { query: { q: 'yab' } } })
+    );
+  }));
+
+  it('fills the field and closes the dropdown when a suggestion is chosen', () => {
+    createComponent();
+
+    component['selectFromSuggestion'](makeStopSuggestion('stop-a', 'Ikeja'));
+
+    expect(component['fromField'].query()).toBe('Ikeja');
+    expect(component['fromField'].open()).toBeFalse();
+  });
+
+  it('searches by origin and destination text', async () => {
+    createComponent();
+    await fillSearchInputs();
+    apiClient.GET.and.resolveTo({ data: { count: 1, results: [makeTripSearchResult()] } });
 
     await component['search']();
 
@@ -250,21 +152,36 @@ describe('TripSearch', () => {
       '/api/v1/trips/search/',
       jasmine.objectContaining({
         params: {
-          query: { route: 'route-1', service_date: '2026-09-01', limit: 100, offset: 0 },
+          query: {
+            origin: 'Ikeja',
+            destination: 'CMS',
+            service_date: '2026-09-01',
+            limit: 100,
+            offset: 0,
+          },
         },
       })
     );
-    expect(component['trips']()?.length).toBe(1);
+    expect(component['results']()?.length).toBe(1);
+  });
+
+  it('discards stale results when a search input changes', async () => {
+    createComponent();
+    await fillSearchInputs();
+    apiClient.GET.and.resolveTo({ data: { count: 1, results: [makeTripSearchResult()] } });
+    await component['search']();
+
+    component['onServiceDateChange']('2026-09-02');
+
+    expect(component['results']()).toBeNull();
   });
 
   // --- service classes, docs/specs/15-trip-classes.md slice 3 ---------
 
-  it('offers every class when the route restricts none', async () => {
-    await createComponent();
+  it('offers every class as a filter, unrestricted by any single route', () => {
+    createComponent();
 
-    component['onRouteChange']('route-1');
-
-    expect(component['tripClassOptions']().map((o) => o.label)).toEqual([
+    expect(component['tripClassOptions'].map((o) => o.label)).toEqual([
       'All classes',
       'Premium',
       'Exclusive',
@@ -273,49 +190,9 @@ describe('TripSearch', () => {
     ]);
   });
 
-  it('narrows the class options to what the chosen route runs', async () => {
-    apiClient.GET.and.callFake((path: string) =>
-      path === '/api/v1/routes/browse/'
-        ? Promise.resolve({
-            data: {
-              count: 1,
-              results: [makeRoute({ available_trip_classes: ['premium', 'mini'] })],
-            },
-          })
-        : Promise.resolve({ data: { count: 0, results: [] } })
-    );
-    await createComponent();
-
-    component['onRouteChange']('route-1');
-
-    expect(component['tripClassOptions']().map((o) => o.label)).toEqual([
-      'All classes',
-      'Premium',
-      'Mini',
-    ]);
-  });
-
-  it('clears a chosen class when the route changes, so it cannot outlive its options', async () => {
-    // The trap spec 15 slice 2 recorded: narrowing a <select>'s options
-    // does not move a held value into them. A control still holding
-    // `premium` against a route that does not run it renders a select
-    // with no matching option — it looks empty, keeps its value, and
-    // searches for departures that cannot exist.
-    await createComponent();
-    component['onRouteChange']('route-1');
-    component['onTripClassChange']('premium');
-
-    component['onRouteChange']('route-2');
-
-    expect(component['tripClass']()).toBe('');
-  });
-
   it('sends the chosen class as a query filter', async () => {
-    await createComponent();
-    component['onRouteChange']('route-1');
-    component['onFromStopChange']('stop-a');
-    component['onToStopChange']('stop-c');
-    component['onServiceDateChange']('2026-09-01');
+    createComponent();
+    await fillSearchInputs();
     component['onTripClassChange']('premium');
     apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
 
@@ -326,7 +203,8 @@ describe('TripSearch', () => {
       jasmine.objectContaining({
         params: {
           query: {
-            route: 'route-1',
+            origin: 'Ikeja',
+            destination: 'CMS',
             service_date: '2026-09-01',
             trip_class: 'premium',
             limit: 100,
@@ -340,11 +218,8 @@ describe('TripSearch', () => {
   it('omits the class key entirely when no class is chosen', async () => {
     // `trip_class` is a ChoiceField server-side, so `''` is a 400 rather
     // than "no filter" — the key has to be absent, not empty.
-    await createComponent();
-    component['onRouteChange']('route-1');
-    component['onFromStopChange']('stop-a');
-    component['onToStopChange']('stop-c');
-    component['onServiceDateChange']('2026-09-01');
+    createComponent();
+    await fillSearchInputs();
     apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
 
     await component['search']();
@@ -353,14 +228,49 @@ describe('TripSearch', () => {
     expect('trip_class' in query).toBeFalse();
   });
 
-  it('renders each departure’s class as a pill on its card', async () => {
-    await createComponent();
-    component['onRouteChange']('route-1');
-    component['onFromStopChange']('stop-a');
-    component['onToStopChange']('stop-c');
-    component['onServiceDateChange']('2026-09-01');
+  // --- results -----------------------------------------------------
+
+  it('shows the fare and stop count on each result card', async () => {
+    createComponent();
+    await fillSearchInputs();
     apiClient.GET.and.resolveTo({
-      data: { count: 1, results: [makeTrip({ trip_class: 'premium' })] },
+      data: { count: 1, results: [makeTripSearchResult({ stops_between: 0 })] },
+    });
+
+    await component['search']();
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.textContent).toContain('NGN 750.00');
+    const pills = host.querySelectorAll('ui-status-pill');
+    const labels = Array.from(pills).map((pill) => pill.textContent?.trim());
+    expect(labels).toContain('Direct');
+  });
+
+  it('labels a multi-stop result with a stop count, not "Direct"', async () => {
+    createComponent();
+    await fillSearchInputs();
+    apiClient.GET.and.resolveTo({
+      data: { count: 1, results: [makeTripSearchResult({ stops_between: 2 })] },
+    });
+
+    await component['search']();
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    const pills = host.querySelectorAll('ui-status-pill');
+    const labels = Array.from(pills).map((pill) => pill.textContent?.trim());
+    expect(labels).toContain('2 stops');
+  });
+
+  it('renders each departure’s class as a pill on its card', async () => {
+    createComponent();
+    await fillSearchInputs();
+    apiClient.GET.and.resolveTo({
+      data: {
+        count: 1,
+        results: [makeTripSearchResult({ trip: { ...makeTripSearchResult().trip, trip_class: 'premium' } })],
+      },
     });
 
     await component['search']();
@@ -368,32 +278,25 @@ describe('TripSearch', () => {
 
     const host = fixture.nativeElement as HTMLElement;
     const pill = host.querySelector('ui-status-pill');
-    // The label, not only a colour — the pill is neutral-toned on
-    // purpose, so the word is the whole signal.
     expect(pill?.textContent).toContain('Premium');
-    // On the departure card itself, beside the route it qualifies —
-    // not somewhere else on the page.
-    expect(pill?.closest('li')?.textContent).toContain('Ikeja → CMS');
   });
 
-  it('names the class in a Continue button’s accessible label', async () => {
-    // One route can run two departures minutes apart at two prices; the
-    // pill is not part of the button's accessible name, so without this
-    // a screen reader hears two identical labels.
-    await createComponent();
+  it('names the departure and stop pair in a Continue button’s accessible label', () => {
+    createComponent();
 
-    const label = component['chooseLabel'](makeTrip({ trip_class: 'exclusive' }) as never);
+    const label = component['chooseLabel'](makeTripSearchResult({
+      trip: { ...makeTripSearchResult().trip, trip_class: 'exclusive' },
+    }) as never);
 
     expect(label).toContain('Exclusive');
     expect(label).toContain('Continue');
+    expect(label).toContain('Ikeja');
+    expect(label).toContain('CMS');
   });
 
   it('shows an empty state rather than an error when nothing runs that day', async () => {
-    await createComponent();
-    component['onRouteChange']('route-1');
-    component['onFromStopChange']('stop-a');
-    component['onToStopChange']('stop-c');
-    component['onServiceDateChange']('2026-12-25');
+    createComponent();
+    await fillSearchInputs();
 
     await component['search']();
     fixture.detectChanges();
@@ -403,29 +306,24 @@ describe('TripSearch', () => {
     expect(component['searchError']()).toBeNull();
   });
 
-  it('discards stale results when the search inputs change', async () => {
-    await createComponent();
-    component['onRouteChange']('route-1');
-    component['onFromStopChange']('stop-a');
-    component['onToStopChange']('stop-c');
-    component['onServiceDateChange']('2026-09-01');
-    apiClient.GET.and.resolveTo({ data: { count: 1, results: [makeTrip()] } });
+  it('surfaces a search failure with a retry affordance', async () => {
+    createComponent();
+    await fillSearchInputs();
+    apiClient.GET.and.resolveTo({ error: { detail: 'Service unavailable.' } });
+
     await component['search']();
+    fixture.detectChanges();
 
-    component['onServiceDateChange']('2026-09-02');
-
-    expect(component['trips']()).toBeNull();
+    expect(component['searchError']()).toBe('Service unavailable.');
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('ui-alert')?.textContent).toContain('Service unavailable.');
   });
 
-  it('passes the chosen trip and segment to the seat picker via router state', async () => {
-    await createComponent();
-    component['onRouteChange']('route-1');
-    component['onFromStopChange']('stop-a');
-    component['onToStopChange']('stop-c');
-    component['onServiceDateChange']('2026-09-01');
+  it('passes the matched trip and stop pair to the seat picker via router state', async () => {
+    createComponent();
     const navigateSpy = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
 
-    await component['selectTrip'](makeTrip() as never);
+    await component['selectTrip'](makeTripSearchResult() as never);
 
     expect(navigateSpy).toHaveBeenCalledWith(['/search/seats'], {
       state: {

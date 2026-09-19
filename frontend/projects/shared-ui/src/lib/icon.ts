@@ -65,7 +65,19 @@ export type IconName =
   // rings rather than the existing `map` glyph — `map` already names
   // the static route network, and this screen is about a live signal
   // from a vehicle, not the network it runs on.
-  | 'signal';
+  | 'signal'
+  // Added for spec 24 slice 1: the marketplace redesign. `arrows-right-left`
+  // is the swap-origin-and-destination control, `shield-check`/`ticket`
+  // head the landing page's value props, the chevrons step the results
+  // date strip, `arrow-right` joins an origin to a destination, and
+  // `adjustments-horizontal` opens the results filters on a phone.
+  | 'arrows-right-left'
+  | 'shield-check'
+  | 'ticket'
+  | 'arrow-right'
+  | 'chevron-left'
+  | 'chevron-right'
+  | 'adjustments-horizontal';
 
 const PATHS: Record<IconName, string> = {
   home: 'M2.25 12l8.954-8.955a1.5 1.5 0 0 1 2.122 0L22.28 12M4.5 9.75V21a.75.75 0 0 0 .75.75H9.75v-6a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75v6h4.5a.75.75 0 0 0 .75-.75V9.75',
@@ -126,6 +138,16 @@ const PATHS: Record<IconName, string> = {
     'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z',
   'exclamation-triangle':
     'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z',
+  'arrows-right-left': 'M7.5 21 3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5',
+  'shield-check':
+    'M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z',
+  ticket:
+    'M16.5 6v.75m0 3v.75m0 3v.75m0 3V18m-9-5.25h5.25M7.5 15h3M3.375 5.25c-.621 0-1.125.504-1.125 1.125v3.026a2.999 2.999 0 0 1 0 5.198v3.026c0 .621.504 1.125 1.125 1.125h17.25c.621 0 1.125-.504 1.125-1.125v-3.026a2.999 2.999 0 0 1 0-5.198V6.375c0-.621-.504-1.125-1.125-1.125H3.375Z',
+  'arrow-right': 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3',
+  'chevron-left': 'M15.75 19.5 8.25 12l7.5-7.5',
+  'chevron-right': 'm8.25 4.5 7.5 7.5-7.5 7.5',
+  'adjustments-horizontal':
+    'M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75',
   signal:
     'M9.348 14.652a3.75 3.75 0 0 1 0-5.304m5.304 0a3.75 3.75 0 0 1 0 5.304m-7.425 2.121a6.75 6.75 0 0 1 0-9.546m9.546 0a6.75 6.75 0 0 1 0 9.546M5.106 18.894c-3.808-3.808-3.808-9.98 0-13.789m13.788 0c3.808 3.808 3.808 9.981 0 13.79M12 12h.008v.008H12V12Z',
 };

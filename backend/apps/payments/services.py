@@ -40,7 +40,11 @@ from apps.ledger.services import (
     get_or_create_wallet_account,
     post_journal_entry,
 )
-from apps.seating.services import refresh_seat_holds
+from apps.seating.services import (
+    expire_stale_holds_for_booking,
+    expire_stale_holds_for_locked_booking,
+    refresh_seat_holds,
+)
 from apps.wallet.services import get_wallet_balance
 
 from .models import PaymentIntent, PaystackAccount, WebhookEvent
@@ -121,10 +125,34 @@ def _split_commission(amount: Decimal) -> tuple[Decimal, Decimal]:
 def initiate_payment(*, booking: Booking, passenger: User, idempotency_key: str) -> PaymentIntent:
     """Always called from an authenticated passenger request — real
     tenancy context already established by `TenancyMiddleware`, unlike
-    the webhook path, so no `platform_staff_bypass()` needed here."""
-    if booking.status != Booking.Status.PENDING_PAYMENT:
-        raise BookingNotPayable("This booking cannot be paid for in its current state.")
+    the webhook path, so no `platform_staff_bypass()` needed here.
 
+    `expire_stale_holds_for_booking()` runs after the idempotency-replay
+    check below, not before it — docs/specs/22-marketplace.md slice 2.
+    A *matching* replay must still return the original `PaymentIntent`
+    even though the booking it was paid for has since moved on to
+    `paid`; checking freshness first would reject that legitimate replay
+    outright. For a genuinely new attempt, though, it closes a real
+    race: a hold that lapsed less than a minute ago (the periodic
+    sweep's own cadence) would otherwise still read `pending_payment`
+    here, and this function would not just wrongly accept payment for
+    it but actively *re-extend* it via `refresh_seat_holds` further
+    down. See that function's own docstring for the full reasoning.
+
+    Re-fetches into a fresh local `booking` rather than calling
+    `booking.refresh_from_db()` on the caller's own instance — that
+    method clears Django's cached related-object state (`booking.trip`,
+    `.business`, ...) on whatever object it's called on, and since
+    Python passes objects by reference, mutating the parameter here
+    would silently do the same to the caller's own instance too. A
+    caller that had already accessed `booking.trip` before calling this
+    function (routine — building a request hash, an audit event) would
+    then take a surprise fresh query for it on next access, one that
+    fails outright anywhere outside a tenant context (caught live: an
+    analytics test that read `booking.trip` after paying it, with no
+    tenant context active at that point, only because this function had
+    invisibly evicted the cache the earlier, in-context access had
+    already populated)."""
     request_hash = _payment_intent_request_hash(booking=booking, passenger=passenger)
     client_id = str(booking.client_id)
 
@@ -137,6 +165,11 @@ def initiate_payment(*, booking: Booking, passenger: User, idempotency_key: str)
                 "This Idempotency-Key was already used for a different request."
             )
         return _payment_intent_from_idempotency_record(existing)
+
+    expire_stale_holds_for_booking(booking=booking)
+    booking = Booking.objects.get(pk=booking.pk)
+    if booking.status != Booking.Status.PENDING_PAYMENT:
+        raise BookingNotPayable("This booking cannot be paid for in its current state.")
 
     business = booking.business
     if not PaystackAccount.objects.filter(business=business, is_active=True).exists():
@@ -315,13 +348,27 @@ def pay_booking_from_wallet(
     always serialize on the `select_for_update()` below first — the
     loser sees the booking already `PAID` and raises `BookingNotPayable`
     before ever reaching the `IdempotencyKey` write, so that write can
-    never race with itself for this booking."""
+    never race with itself for this booking.
+
+    Runs the same stale-hold-expiry check `initiate_payment()` runs via
+    `expire_stale_holds_for_booking()` — this function has a direct
+    caller of its own (`apps.booking.staff`'s wallet-settle path), not
+    just `initiate_payment_with_wallet()`'s fully-covered branch, so it
+    needs the same protection independently rather than relying on every
+    caller to have already run it. Inline, against the lock this
+    function already takes below, rather than a second call to that
+    function — `expire_stale_holds_for_locked_booking`'s own docstring
+    explains why: two *separate* lock acquisitions on the same booking
+    row, back to back, measurably widened a real deadlock window in a
+    concurrency test (caught empirically), where one acquisition costs
+    nothing extra."""
     if booking.passenger_id != passenger.id:
         raise BookingNotPayable("You cannot pay for another passenger's booking.")
 
     business = booking.business
     with transaction.atomic():
         locked_booking = Booking.all_objects.select_for_update().get(pk=booking.pk)
+        expire_stale_holds_for_locked_booking(locked_booking)
         if locked_booking.status != Booking.Status.PENDING_PAYMENT:
             raise BookingNotPayable("This booking cannot be paid for in its current state.")
 
@@ -418,10 +465,16 @@ def initiate_payment_with_wallet(
     `amount`) — a client reusing the same Idempotency-Key for a plain
     Paystack attempt and then a wallet-blended one on the same booking
     must see `IdempotencyKeyConflict`, not a silent replay of the
-    wrong one."""
-    if booking.status != Booking.Status.PENDING_PAYMENT:
-        raise BookingNotPayable("This booking cannot be paid for in its current state.")
+    wrong one.
 
+    `expire_stale_holds_for_booking()` runs after the idempotency-replay
+    check below, not before it — same reasoning as `initiate_payment()`'s
+    own identical call: a matching replay must still return the original
+    `PaymentIntent` even once the booking it paid for has moved on. Also
+    re-fetches into a fresh local `booking` rather than calling
+    `refresh_from_db()` on the caller's instance, for the same
+    cached-related-object reason `initiate_payment()`'s own docstring
+    explains in full."""
     request_hash = hash_request(
         {"booking_id": str(booking.id), "passenger": str(passenger.id), "use_wallet_balance": True}
     )
@@ -436,6 +489,11 @@ def initiate_payment_with_wallet(
                 "This Idempotency-Key was already used for a different request."
             )
         return _payment_intent_from_idempotency_record(existing)
+
+    expire_stale_holds_for_booking(booking=booking)
+    booking = Booking.objects.get(pk=booking.pk)
+    if booking.status != Booking.Status.PENDING_PAYMENT:
+        raise BookingNotPayable("This booking cannot be paid for in its current state.")
 
     business = booking.business
     balance = get_wallet_balance(passenger=passenger, business=business)["balance"]

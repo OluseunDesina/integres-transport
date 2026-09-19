@@ -6,6 +6,11 @@ from . import views
 urlpatterns = [
     path("customer/token/", views.CustomerTokenObtainView.as_view(), name="customer-token-obtain"),
     path(
+        "customer/register/",
+        views.CustomerRegistrationView.as_view(),
+        name="customer-register",
+    ),
+    path(
         "client-admin/token/",
         views.ClientAdminTokenObtainView.as_view(),
         name="client-admin-token-obtain",

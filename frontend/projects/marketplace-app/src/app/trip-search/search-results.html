@@ -1,0 +1,356 @@
+<!-- Summary bar — restates the search, with the way back to change it. -->
+<section class="bg-mk-navy-900 text-white">
+  <div class="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-4 py-5">
+    <div class="min-w-0">
+      <h1 class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xl font-bold tracking-tight sm:text-2xl">
+        @if (origin() && destination()) {
+          <span>{{ origin() }}</span>
+          <span class="text-mk-accent"><ui-icon name="arrow-right" [size]="22" /></span>
+          <span>{{ destination() }}</span>
+        } @else {
+          Search results
+        }
+      </h1>
+      <p class="mt-1 flex flex-wrap items-center gap-x-2 text-sm text-mk-on-navy-muted">
+        @if (serviceDate()) {
+          <span>{{ serviceDate() | date: 'EEEE d MMMM y' }}</span>
+          <span aria-hidden="true">·</span>
+        }
+        <span>{{ classLabel(tripClass()) || 'All classes' }}</span>
+        <span aria-hidden="true">·</span>
+        <span>One way</span>
+      </p>
+    </div>
+    <a
+      routerLink="/search"
+      [queryParams]="modifySearchParams()"
+      class="inline-flex min-h-11 items-center gap-2 rounded-full border border-white/40 px-5 text-sm font-semibold text-white hover:bg-mk-navy-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mk-accent"
+    >
+      <ui-icon name="magnifying-glass" [size]="18" />
+      Modify search
+    </a>
+  </div>
+</section>
+
+<div class="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
+  <app-booking-steps current="search" />
+
+  <!-- Date strip -->
+  @if (dateStrip().length > 0) {
+    <nav aria-label="Change travel date" class="flex items-stretch gap-2 rounded-2xl border border-border bg-surface p-2 shadow-xs">
+      <button
+        type="button"
+        (click)="shiftDate(-1)"
+        [disabled]="!canGoToPreviousDay()"
+        aria-label="Previous day"
+        class="inline-flex w-11 shrink-0 items-center justify-center rounded-xl text-default hover:bg-surface-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <ui-icon name="chevron-left" [size]="20" />
+      </button>
+      <ul class="flex min-w-0 flex-1 gap-2 overflow-x-auto [scrollbar-width:none]">
+        @for (day of dateStrip(); track day.value) {
+          <li class="flex-1">
+            <button
+              type="button"
+              (click)="goToDate(day.value)"
+              [attr.aria-current]="day.value === serviceDate() ? 'date' : null"
+              [class]="dayClass(day.value === serviceDate())"
+            >
+              <span class="text-xs font-medium uppercase">{{ day.date | date: 'EEE' }}</span>
+              <span class="text-sm font-semibold">{{ day.date | date: 'd MMM' }}</span>
+            </button>
+          </li>
+        }
+      </ul>
+      <button
+        type="button"
+        (click)="shiftDate(1)"
+        aria-label="Next day"
+        class="inline-flex w-11 shrink-0 items-center justify-center rounded-xl text-default hover:bg-surface-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+      >
+        <ui-icon name="chevron-right" [size]="20" />
+      </button>
+    </nav>
+  }
+
+  @if (searchError(); as message) {
+    <ui-alert>
+      {{ message }}
+      <ui-button variant="secondary" class="mt-2" (pressed)="retry()">Retry</ui-button>
+    </ui-alert>
+  }
+
+  @if (searching()) {
+    <div class="grid gap-6 lg:grid-cols-[17rem_1fr]">
+      <div class="hidden lg:block"><ui-skeleton variant="block" height="24rem" /></div>
+      <div class="flex flex-col gap-3" role="status" aria-busy="true" aria-label="Searching departures">
+        @for (placeholder of [1, 2, 3]; track placeholder) {
+          <ui-skeleton variant="block" height="9rem" />
+        }
+      </div>
+    </div>
+  } @else if (results(); as allRows) {
+    @if (allRows.length === 0) {
+      <ui-empty-state
+        title="No departures found"
+        description="No operator runs between those stops on the date you picked. Try a nearby date above, or change your search."
+      />
+    } @else {
+      <div class="grid items-start gap-6 lg:grid-cols-[17rem_1fr]">
+        <!-- Filters -->
+        <div class="lg:sticky lg:top-4">
+          <button
+            type="button"
+            (click)="toggleFiltersPanel()"
+            [attr.aria-expanded]="filtersOpen()"
+            aria-controls="results-filters"
+            class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-control bg-surface px-4 text-sm font-semibold text-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus lg:hidden"
+          >
+            <ui-icon name="adjustments-horizontal" [size]="18" />
+            Filters
+            @if (activeFilterCount() > 0) {
+              <span class="rounded-full bg-primary px-2 py-0.5 text-xs text-on-primary">{{ activeFilterCount() }}</span>
+            }
+          </button>
+
+          <aside
+            id="results-filters"
+            aria-label="Filter departures"
+            class="mt-3 flex-col gap-6 rounded-2xl border border-border bg-surface p-5 shadow-xs lg:mt-0 lg:flex"
+            [class.flex]="filtersOpen()"
+            [class.hidden]="!filtersOpen()"
+          >
+            <div class="flex items-center justify-between">
+              <h2 class="text-base font-semibold text-strong">Filters</h2>
+              @if (activeFilterCount() > 0) {
+                <button
+                  type="button"
+                  (click)="clearFilters()"
+                  class="rounded text-sm font-medium text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+                >
+                  Clear all
+                </button>
+              }
+            </div>
+
+            <fieldset class="flex min-w-0 flex-col gap-2">
+              <legend class="mb-2 text-xs font-semibold tracking-wider text-muted uppercase">Stops</legend>
+              <label [class]="filterRowClass">
+                <input type="checkbox" [checked]="directOnly()" (change)="toggleDirectOnly()" [class]="checkboxClass" />
+                <span class="flex-1">Direct only</span>
+                <span class="text-muted">{{ directCount() }}</span>
+              </label>
+            </fieldset>
+
+            <fieldset class="flex min-w-0 flex-col gap-2">
+              <legend class="mb-2 text-xs font-semibold tracking-wider text-muted uppercase">Departure time</legend>
+              @for (bucket of timeBuckets; track bucket.id) {
+                <label [class]="filterRowClass">
+                  <input
+                    type="checkbox"
+                    [checked]="selectedTimes().has(bucket.id)"
+                    (change)="toggleTime(bucket.id)"
+                    [class]="checkboxClass"
+                  />
+                  <span class="flex flex-1 flex-col">
+                    <span>{{ bucket.label }}</span>
+                    <span class="text-xs text-muted">{{ bucket.hint }}</span>
+                  </span>
+                  <span class="text-muted">{{ timeCounts()[bucket.id] }}</span>
+                </label>
+              }
+            </fieldset>
+
+            <fieldset class="flex min-w-0 flex-col gap-2">
+              <legend class="mb-2 text-xs font-semibold tracking-wider text-muted uppercase">Operators</legend>
+              @for (operator of operatorOptions(); track operator.name) {
+                <label [class]="filterRowClass">
+                  <input
+                    type="checkbox"
+                    [checked]="selectedOperators().has(operator.name)"
+                    (change)="toggleOperator(operator.name)"
+                    [class]="checkboxClass"
+                  />
+                  <span class="flex min-w-0 flex-1 flex-col">
+                    <span class="truncate">{{ operator.name }}</span>
+                    <span class="text-xs text-muted">from {{ formatFare(operator.minFare, operator.currency) }}</span>
+                  </span>
+                  <span class="text-muted">{{ operator.count }}</span>
+                </label>
+              }
+            </fieldset>
+
+            @if (classOptions().length > 1) {
+              <fieldset class="flex min-w-0 flex-col gap-2">
+                <legend class="mb-2 text-xs font-semibold tracking-wider text-muted uppercase">Class</legend>
+                @for (option of classOptions(); track option.value) {
+                  <label [class]="filterRowClass">
+                    <input
+                      type="checkbox"
+                      [checked]="selectedClasses().has(option.value)"
+                      (change)="toggleClass(option.value)"
+                      [class]="checkboxClass"
+                    />
+                    <span class="flex-1">{{ option.label }}</span>
+                    <span class="text-muted">{{ option.count }}</span>
+                  </label>
+                }
+              </fieldset>
+            }
+          </aside>
+        </div>
+
+        <!-- Results -->
+        <section aria-labelledby="results-count" class="flex min-w-0 flex-col gap-4">
+          <div class="grid grid-cols-3 overflow-hidden rounded-2xl border border-border bg-surface shadow-xs" role="group" aria-label="Sort departures">
+            @for (tab of sortTabs; track tab.key) {
+              <button
+                type="button"
+                (click)="onSortChange(tab.key)"
+                [attr.aria-pressed]="sortKey() === tab.key"
+                [class]="sortTabClass(sortKey() === tab.key)"
+              >
+                <span
+                  class="text-sm font-semibold"
+                  [class.text-primary]="sortKey() === tab.key"
+                  [class.text-strong]="sortKey() !== tab.key"
+                  >{{ tab.label }}</span
+                >
+                <span class="text-xs text-default">
+                  @switch (tab.key) {
+                    @case ('departure') {
+                      {{ sortHighlights().departure ? (sortHighlights().departure | date: 'shortTime') : '—' }}
+                    }
+                    @case ('price') {
+                      {{ sortHighlights().price ?? '—' }}
+                    }
+                    @case ('duration') {
+                      {{ sortHighlights().duration ?? '—' }}
+                    }
+                  }
+                </span>
+                @if (sortKey() === tab.key) {
+                  <span class="absolute inset-x-0 bottom-0 h-0.5 bg-primary" aria-hidden="true"></span>
+                }
+              </button>
+            }
+          </div>
+
+          <h2 id="results-count" class="text-sm font-medium text-muted">
+            {{ departureCountLabel() }}
+          </h2>
+
+          @if (sortedResults(); as rows) {
+            @if (rows.length === 0) {
+              <div class="flex flex-col items-center gap-3 rounded-2xl border border-border bg-surface p-8 text-center">
+                <p class="text-base font-semibold text-strong">No departures match your filters</p>
+                <p class="text-sm text-muted">Loosen a filter to see more of the {{ allRows.length }} departures on this day.</p>
+                <ui-button variant="secondary" (pressed)="clearFilters()">Clear filters</ui-button>
+              </div>
+            } @else {
+              <ul class="flex flex-col gap-4">
+                @for (result of rows; track result.trip.id + result.from_stop.id + result.to_stop.id) {
+                  <!-- Operator leads the card: a flat list across every
+                       operator (never grouped by one, per spec 22), so
+                       whose trip this is is the first thing it says. -->
+                  <!-- Sized by a container query, not the viewport: the
+                       card sits beside a sidebar, so its own width is what
+                       decides whether three columns fit. -->
+                  <li
+                    class="@container overflow-hidden rounded-2xl border border-border bg-surface shadow-xs transition hover:border-primary/40 hover:shadow-md"
+                  >
+                    <div class="grid gap-5 p-5 @2xl:grid-cols-[11rem_minmax(0,1fr)_auto] @2xl:items-center">
+                      <div class="flex min-w-0 items-center gap-3 @2xl:flex-col @2xl:items-start">
+                        <span
+                          aria-hidden="true"
+                          [class]="'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-bold text-white ' + avatarColour(result.business_name)"
+                          >{{ initials(result.business_name) }}</span
+                        >
+                        <div class="w-full min-w-0">
+                          @if (badgesFor(result).length > 0) {
+                            <p class="mb-1 flex flex-wrap gap-1">
+                              @for (badge of badgesFor(result); track badge) {
+                                <span
+                                  class="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                                  [class.bg-success-surface]="badge === 'Cheapest'"
+                                  [class.text-success]="badge === 'Cheapest'"
+                                  [class.bg-info-surface]="badge === 'Fastest'"
+                                  [class.text-info]="badge === 'Fastest'"
+                                  >{{ badge }}</span
+                                >
+                              }
+                            </p>
+                          }
+                          <p class="line-clamp-2 text-sm font-semibold break-words text-strong">{{ result.business_name }}</p>
+                          @if (classLabel(result.trip.trip_class); as serviceClass) {
+                            <p class="text-xs text-muted">{{ serviceClass }} class</p>
+                          }
+                        </div>
+                      </div>
+
+                      <div class="grid grid-cols-[auto_1fr_auto] items-center gap-3">
+                        <div>
+                          <p class="text-2xl font-bold tracking-tight text-strong" data-numeric>
+                            {{ result.trip.scheduled_departure_at | date: 'shortTime' }}
+                          </p>
+                          <p class="max-w-[8rem] truncate text-sm text-default">{{ result.from_stop.name }}</p>
+                        </div>
+                        <div class="flex min-w-0 flex-col items-center gap-1">
+                          <span class="text-xs text-muted">{{ durationLabel(result) ?? 'Duration not set' }}</span>
+                          <span class="flex w-full items-center" aria-hidden="true">
+                            <span class="h-2 w-2 rounded-full border-2 border-primary"></span>
+                            <span class="h-px flex-1 bg-ink-300"></span>
+                            <span class="h-2 w-2 rounded-full bg-primary"></span>
+                          </span>
+                          <ui-status-pill
+                            [tone]="result.stops_between === 0 ? 'positive' : 'neutral'"
+                            [label]="stopsLabel(result.stops_between)"
+                          />
+                        </div>
+                        <div class="text-right">
+                          <p class="text-2xl font-bold tracking-tight text-strong" data-numeric>
+                            @if (result.scheduled_arrival_at) {
+                              {{ result.scheduled_arrival_at | date: 'shortTime' }}
+                            } @else {
+                              <span class="text-muted" aria-hidden="true">--:--</span><span class="sr-only">Arrival time not set</span>
+                            }
+                          </p>
+                          <p class="ml-auto max-w-[8rem] truncate text-sm text-default">{{ result.to_stop.name }}</p>
+                        </div>
+                      </div>
+
+                      <div
+                        class="flex items-center justify-between gap-4 border-t border-dashed border-border pt-4 @2xl:flex-col @2xl:items-end @2xl:border-t-0 @2xl:border-l @2xl:pt-0 @2xl:pl-6"
+                      >
+                        <div class="@2xl:text-right">
+                          <p class="text-xl font-bold text-strong" data-numeric>{{ fareLabel(result) }}</p>
+                          <p class="text-xs text-muted">per seat</p>
+                        </div>
+                        <ui-button [ariaLabel]="chooseLabel(result)" (pressed)="selectTrip(result)">Select seats</ui-button>
+                      </div>
+                    </div>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 border-t border-border bg-surface-muted px-5 py-2.5 text-xs text-default">
+                      <span class="inline-flex items-center gap-1.5">
+                        <ui-icon name="calendar-days" [size]="14" />
+                        {{ result.trip.scheduled_departure_at | date: 'EEE d MMM' }}
+                      </span>
+                      @if (result.trip.vehicle?.vehicle_type) {
+                        <span class="inline-flex items-center gap-1.5">
+                          <ui-icon name="truck" [size]="14" />
+                          {{ result.trip.vehicle!.vehicle_type.name }}
+                        </span>
+                      }
+                      @if (result.trip.vehicle) {
+                        <span>{{ result.trip.vehicle.registration_number }}</span>
+                      }
+                    </div>
+                  </li>
+                }
+              </ul>
+            }
+          }
+        </section>
+      </div>
+    }
+  }
+</div>

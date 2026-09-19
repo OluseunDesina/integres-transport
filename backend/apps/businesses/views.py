@@ -16,6 +16,7 @@ from .serializers import (
     BusinessListQuerySerializer,
     BusinessSeatHoldSerializer,
     BusinessSerializer,
+    BusinessSuperAdminQuerySerializer,
     BusinessSuperAdminSerializer,
     DirectorSerializer,
     KybDecisionSerializer,
@@ -250,7 +251,29 @@ class BusinessSeatHoldView(generics.GenericAPIView[Business]):
             OpenApiParameter.QUERY,
             required=False,
             description="Filter by Business name (icontains).",
-        )
+        ),
+        OpenApiParameter(
+            "kyb_status",
+            str,
+            OpenApiParameter.QUERY,
+            required=False,
+            description="Filter by KYB review status.",
+        ),
+        OpenApiParameter(
+            "vertical",
+            str,
+            OpenApiParameter.QUERY,
+            required=False,
+            description="Filter by business vertical.",
+        ),
+        OpenApiParameter(
+            "is_active",
+            str,
+            OpenApiParameter.QUERY,
+            required=False,
+            enum=["true", "false"],
+            description="Filter by active status.",
+        ),
     ],
     responses=BusinessSuperAdminSerializer,
 )
@@ -260,16 +283,31 @@ class BusinessSuperAdminListView(generics.ListAPIView[Business]):
     that slice's two other endpoints (Paystack account config,
     settlement-run trigger) are usable: neither the tenant-scoped
     `GET /businesses/` nor the kyb_status-filtered `KybQueueListView`
-    let platform staff find an arbitrary, already-approved Business."""
+    let platform staff find an arbitrary, already-approved Business.
+
+    Gained `kyb_status`/`vertical`/`is_active` filtering once the
+    super-admin frontend's separate KYB queue page was folded into this
+    one list (both showed `Business` rows with no way to cross-filter
+    between the two screens). `KybQueueListView`/`KybDecideView` below
+    are unchanged — this list is now the only page that renders them,
+    but the decide endpoint still does the actual mutation."""
 
     permission_classes = [IsPlatformStaff]
     serializer_class = BusinessSuperAdminSerializer
 
     def get_queryset(self) -> QuerySet[Business]:
         queryset = Business.all_objects.select_related("client").all()
-        search = self.request.query_params.get("search", "").strip()
+        query = BusinessSuperAdminQuerySerializer(data=self.request.query_params)
+        query.is_valid(raise_exception=True)
+        search = query.validated_data.get("search", "").strip()
         if search:
             queryset = queryset.filter(name__icontains=search)
+        if "kyb_status" in query.validated_data:
+            queryset = queryset.filter(kyb_status=query.validated_data["kyb_status"])
+        if "vertical" in query.validated_data:
+            queryset = queryset.filter(vertical=query.validated_data["vertical"])
+        if "is_active" in query.validated_data:
+            queryset = queryset.filter(is_active=query.validated_data["is_active"] == "true")
         return queryset
 
 

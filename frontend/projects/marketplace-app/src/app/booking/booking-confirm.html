@@ -1,0 +1,108 @@
+@if (request(); as journey) {
+  <div class="flex flex-col gap-6">
+    <app-booking-steps current="confirm" />
+
+    <ui-page-header
+      title="Review your booking"
+      [description]="
+        'Check the details below, then ' +
+        (seatNumbers() ? 'reserve your seats' : 'reserve your places') + '.'
+      "
+    />
+
+    @if (submitError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+
+    <dl
+      class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-3 rounded-xl border border-border bg-surface p-5 shadow-sm"
+    >
+      <dt class="text-muted">Route</dt>
+      <dd class="font-medium text-strong">{{ journey.routeName }}</dd>
+      <dt class="text-muted">From</dt>
+      <dd class="text-default">{{ journey.fromStop.name }}</dd>
+      <dt class="text-muted">To</dt>
+      <dd class="text-default">{{ journey.toStop.name }}</dd>
+      <!-- Omitted rather than blank when the flow carried no class — a
+           state object written by an older build. A "Service:" row with
+           nothing after it reads as a rendering fault. -->
+      @if (serviceClass(); as serviceClass) {
+        <dt class="text-muted">Service</dt>
+        <dd class="text-default">{{ serviceClass }}</dd>
+      }
+      <dt class="text-muted">Departs</dt>
+      <dd class="text-default">{{ journey.scheduledDepartureAt | date: 'medium' }}</dd>
+      <!-- Seats only where the passenger actually chose some. On a
+           service that does not assign them, a blank "Seats" row would
+           read as a rendering fault rather than as how the service
+           works. -->
+      @if (seatNumbers(); as seats) {
+        <dt class="text-muted">Seats</dt>
+        <dd class="text-default">{{ seats }}</dd>
+      } @else {
+        <dt class="text-muted">Passengers</dt>
+        <dd class="text-default">{{ passengerCount() }}</dd>
+      }
+      <dt class="text-muted">Fare</dt>
+      <dd class="text-default">{{ fareLabel() }} × {{ passengerCount() }}</dd>
+
+      <dt class="border-t border-border pt-3 font-medium text-strong">Total</dt>
+      <dd class="border-t border-border pt-3 text-lg font-semibold text-strong">
+        {{ totalLabel() }}
+      </dd>
+    </dl>
+
+    @if (createdBooking(); as booking) {
+      <!-- Unlike the pre-submit warning below, this reads the real
+           `hold_expires_in_seconds` rather than guessing from
+           `seatNumbers()` — it can tell open seating (holds nothing)
+           from quick book (holds a real seat) even though the review
+           form above could not. -->
+      <ui-alert variant="success">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span>
+            @if (booking.hold_expires_in_seconds !== null) {
+              Your seats are held — pay before the timer runs out.
+            } @else {
+              Your booking is confirmed once you pay.
+            }
+          </span>
+          <ui-countdown
+            [secondsRemaining]="booking.hold_expires_in_seconds"
+            (expired)="onHoldExpired()"
+          />
+        </div>
+      </ui-alert>
+
+      <div class="flex gap-2">
+        <ui-button (pressed)="continueToMyBookings()">Continue to My Bookings</ui-button>
+      </div>
+    } @else {
+      <!-- The "held" promise is only made where it is true. Choosing
+           seats genuinely holds them until the expiry sweep; buying
+           places may not — open seating holds nothing at all, a place
+           is counted when a ticket is issued at payment
+           (docs/specs/10-booking-modes.md). This screen cannot tell
+           open seating from quick book (both arrive as `places`)
+           *before* submitting, so the wording here is one that is true
+           of both — the panel above, shown after submitting, can tell
+           them apart for real. -->
+      <ui-alert variant="warning">
+        @if (seatNumbers()) {
+          Payment is not collected yet — your seats are held once you reserve.
+        } @else {
+          Payment is not collected yet — your booking is confirmed once you pay.
+        }
+      </ui-alert>
+
+      <div class="flex gap-2">
+        <ui-button variant="secondary" [disabled]="submitting()" (pressed)="backToSeats()">
+          Back
+        </ui-button>
+        <ui-button [loading]="submitting()" (pressed)="submit()">
+          {{ seatNumbers() ? 'Reserve seats' : 'Reserve places' }}
+        </ui-button>
+      </div>
+    }
+  </div>
+}

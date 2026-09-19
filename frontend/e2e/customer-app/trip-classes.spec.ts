@@ -23,24 +23,10 @@ async function signIn(page: Page): Promise<void> {
   await expect(page).toHaveURL(/\/home$/);
 }
 
-/**
- * Selects the fixture route by value, matched on a label *prefix* —
- * `trip-search.ts` appends ` — <operator>` once the browse endpoint
- * spans more than one Business, which the tap-and-go fixture guarantees.
- * Same helper booking.spec.ts carries, and for the same recorded reason.
- */
-async function selectFixtureRoute(page: Page): Promise<void> {
-  const select = page.getByLabel('Route');
-  const option = select.locator('option').filter({ hasText: ROUTE_NAME }).first();
-  await expect(option).toBeAttached();
-  await select.selectOption((await option.getAttribute('value')) ?? '');
-}
-
 async function openSearchForm(page: Page): Promise<void> {
   await page.goto('/search');
-  await selectFixtureRoute(page);
-  await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
-  await page.getByLabel('To').selectOption({ label: '3. CMS' });
+  await page.getByLabel('From').fill('Ikeja');
+  await page.getByLabel('To').fill('CMS');
   await page.getByLabel('Travel date').fill(todayISO());
 }
 
@@ -49,16 +35,26 @@ async function openSearchForm(page: Page): Promise<void> {
 test.describe.configure({ mode: 'serial' });
 
 test.describe('customer-app service classes', () => {
-  test('offers only the classes the route runs, not all four', async ({ page }) => {
+  test('offers every class as a pre-search filter, unlike the old Route-first flow', async ({
+    page,
+  }) => {
     await signIn(page);
     await openSearchForm(page);
 
-    // The seeded route's allow-list is [premium, standard]. Exclusive
-    // and Mini exist as classes but this route does not run them, so
-    // offering them would produce an empty result that reads as "sold
-    // out" rather than "not offered here".
+    // A source/destination pair can match more than one Route, each with
+    // its own allow-list — there is no single Route to narrow the filter
+    // against before a search runs, unlike the old flow where a Route
+    // was always chosen first. So the filter itself always offers every
+    // class; `available_trip_classes` narrows which *results* a search
+    // actually returns instead, covered by the next test.
     const options = await page.getByLabel('Class').locator('option').allTextContents();
-    expect(options.map((text) => text.trim())).toEqual(['All classes', 'Premium', 'Standard']);
+    expect(options.map((text) => text.trim())).toEqual([
+      'All classes',
+      'Premium',
+      'Exclusive',
+      'Standard',
+      'Mini',
+    ]);
   });
 
   test('shows both classes unfiltered, and narrows to one when filtered', async ({ page }) => {

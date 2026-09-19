@@ -1,0 +1,46 @@
+<app-marketplace-auth-layout>
+  <h1 class="text-3xl font-bold tracking-tight text-strong">Create your account</h1>
+  <p class="mt-2 mb-8 text-default">Free to join. Book trips with any operator on TransitOS.</p>
+
+  @if (errorMessage(); as message) {
+    <ui-alert class="mb-4">{{ message }}</ui-alert>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+    <div class="grid gap-4 sm:grid-cols-2">
+      <ui-text-field
+        label="First name"
+        type="text"
+        autocomplete="given-name"
+        formControlName="firstName"
+        [invalid]="!!fieldError('firstName')"
+        [errorMessage]="fieldError('firstName')"
+      />
+      <ui-text-field label="Last name" type="text" autocomplete="family-name" formControlName="lastName" />
+    </div>
+    <ui-text-field
+      label="Email"
+      type="email"
+      autocomplete="email"
+      formControlName="email"
+      [invalid]="!!fieldError('email')"
+      [errorMessage]="fieldError('email')"
+    />
+    <ui-text-field
+      label="Password"
+      type="password"
+      autocomplete="new-password"
+      formControlName="password"
+      [invalid]="!!fieldError('password')"
+      [errorMessage]="fieldError('password')"
+    />
+    <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">
+      Create account
+    </ui-button>
+  </form>
+
+  <p class="mt-8 text-center text-sm text-default">
+    Already have an account?
+    <a routerLink="/login" class="font-semibold text-primary underline-offset-2 hover:underline">Sign in</a>
+  </p>
+</app-marketplace-auth-layout>

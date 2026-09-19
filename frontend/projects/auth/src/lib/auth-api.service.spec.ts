@@ -123,6 +123,58 @@ describe('AuthApiService', () => {
     expect(authStore.isAuthenticated()).toBeTrue();
   });
 
+  it('registerCustomer() registers the passenger and stores the session on success', async () => {
+    apiClient.POST.and.resolveTo({ data: { access: 'access-1', refresh: 'refresh-1' } });
+    apiClient.GET.and.resolveTo({
+      data: {
+        id: 'user-1',
+        email: 'passenger@example.com',
+        first_name: 'Ada',
+        last_name: 'Lovelace',
+        client: 'marketplace-client-1',
+        is_platform_staff: false,
+        is_client_staff: false,
+        permissions: ['customer:access'],
+      },
+    });
+
+    const result = await service.registerCustomer(
+      'passenger@example.com',
+      'secret',
+      'Ada',
+      'Lovelace'
+    );
+
+    expect(apiClient.POST).toHaveBeenCalledWith('/api/v1/auth/customer/register/', {
+      body: {
+        email: 'passenger@example.com',
+        password: 'secret',
+        first_name: 'Ada',
+        last_name: 'Lovelace',
+      },
+    });
+    expect(result).toEqual({ ok: true });
+    expect(authStore.isAuthenticated()).toBeTrue();
+    expect(authStore.user()?.email).toBe('passenger@example.com');
+  });
+
+  it('registerCustomer() returns a failure result with the server message when the request errors', async () => {
+    apiClient.POST.and.resolveTo({ error: { email: ['An account with this email already exists.'] } });
+
+    const result = await service.registerCustomer(
+      'passenger@example.com',
+      'secret',
+      'Ada',
+      'Lovelace'
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message: 'An account with this email already exists.',
+    });
+    expect(authStore.isAuthenticated()).toBeFalse();
+  });
+
   it('logout() clears the session', () => {
     spyOn(authStore, 'clear');
 

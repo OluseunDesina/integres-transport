@@ -102,3 +102,74 @@ class Booking(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.reference or self.id} for {self.passenger_id}"
+
+
+class Traveler(BaseModel):
+    """Who is actually travelling — docs/specs/22-marketplace.md slice 2.
+
+    Additive and optional at the base level: `apps.booking`'s own
+    passenger-facing booking flow (`customer-app`) sends none of this,
+    so every Booking made through it simply has no `Traveler` rows.
+    The marketplace booking flow is the one caller that requires it,
+    enforced in `apps.marketplace.views.MarketplaceBookingCreateSerializer`
+    rather than here — this model imposes no such requirement itself.
+
+    `seat_reservation` is null for a places-mode (open-seating /
+    quick-book) booking's single lead traveler, and set for a seats-mode
+    booking's per-seat traveler — the same "two ways to buy" split
+    `apps.booking.services.create_booking` already models, applied here
+    to who is travelling rather than what was bought.
+
+    `seat_reservation` is a **string** FK to `"seating.SeatReservation"`,
+    not a direct import: `apps.seating.models` already imports `Booking`
+    from this module, so an eager import in the other direction would be
+    circular. Django resolves a string reference lazily, at first use,
+    which is what avoids it.
+
+    Both FKs are `CASCADE`, not this codebase's usual `PROTECT` — a
+    `Traveler` has no meaning independent of the `Booking`/
+    `SeatReservation` it describes, the same reasoning
+    `apps.network.models.RouteStop.route` already applies to its own
+    parent.
+    """
+
+    class Title(models.TextChoices):
+        MR = "mr", "Mr"
+        MRS = "mrs", "Mrs"
+        MISS = "miss", "Miss"
+        MS = "ms", "Ms"
+        DR = "dr", "Dr"
+
+    class Gender(models.TextChoices):
+        MALE = "male", "Male"
+        FEMALE = "female", "Female"
+        OTHER = "other", "Other"
+        PREFER_NOT_TO_SAY = "prefer_not_to_say", "Prefer not to say"
+
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name="+")
+    seat_reservation = models.ForeignKey(
+        "seating.SeatReservation",
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="+",
+    )
+    # Blank-allowed throughout except name/phone/email — title, DOB,
+    # gender and nationality are collected but not required by the
+    # model itself (docs/specs/22-marketplace.md's own "basic things"
+    # framing); the marketplace frontend decides what it insists on
+    # before submitting.
+    title = models.CharField(max_length=10, choices=Title.choices, blank=True)
+    first_name = models.CharField(max_length=150)
+    last_name = models.CharField(max_length=150)
+    phone = models.CharField(max_length=32)
+    email = models.EmailField()
+    date_of_birth = models.DateField(null=True, blank=True)
+    gender = models.CharField(max_length=20, choices=Gender.choices, blank=True)
+    nationality = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.first_name} {self.last_name} for booking {self.booking_id}"

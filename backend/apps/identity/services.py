@@ -197,6 +197,57 @@ class PassengerNotFound(Exception):
     existence rule, and this spec's own edge-case table)."""
 
 
+def customer_email_taken(email: str) -> bool:
+    """Shared by `CustomerRegistrationSerializer.validate_email`. Scoped
+    to the Marketplace Client specifically, not global — the same email
+    may already exist under some operator's own Client without conflict
+    (`unique_email_per_client` is `(client, email)`, not `email` alone),
+    mirroring `apps.clients.services.client_email_taken`'s reasoning for
+    the analogous Client-registration case."""
+    from apps.clients.services import get_or_create_marketplace_client
+
+    marketplace_client = get_or_create_marketplace_client()
+    return User.objects.filter(
+        client=marketplace_client, email__iexact=email
+    ).exists()
+
+
+def register_customer(
+    *, email: str, password: str, first_name: str, last_name: str
+) -> User:
+    """Creates a passenger `User` under the singleton Marketplace Client
+    (docs/adr/0009, docs/specs/22-marketplace.md) — the first passenger
+    self-registration path on the platform. Every other passenger account
+    today is provisioned out-of-band and pinned to whichever operator
+    Client created it; a marketplace registrant has no single operator to
+    belong to, so it belongs to the one Client that exists for exactly
+    this purpose.
+
+    `is_client_staff=False`, `is_platform_staff=False`, `role=None` —
+    passengers hold no Role/Permission at all (ADR-0003), same as every
+    other passenger in this codebase. A deferred import of
+    `get_or_create_marketplace_client` avoids a module-level import cycle:
+    `apps.clients.services` already imports from this module.
+    """
+    from apps.clients.services import get_or_create_marketplace_client
+
+    marketplace_client = get_or_create_marketplace_client()
+    user = User.objects.create_user(
+        email=email,
+        password=password,
+        client=marketplace_client,
+        first_name=first_name,
+        last_name=last_name,
+        is_client_staff=False,
+    )
+    # No explicit `client_id=` needed, unlike `register_client`'s
+    # analogous call: `target=user` already has its own `client_id`
+    # attribute (`User.client` is a direct FK), which
+    # `record_audit_event` resolves from automatically.
+    record_audit_event(actor=user, action="customer.registered", target=user)
+    return user
+
+
 def mask_email(email: str) -> str:
     """`ada.obi@example.com` → `a••••••@example.com`.
 

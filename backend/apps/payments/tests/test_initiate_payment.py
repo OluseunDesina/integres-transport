@@ -1,10 +1,12 @@
 """Service-level tests for apps.payments.services.initiate_payment —
 see docs/specs/5-payments-wallet-ledger.md."""
 
+import datetime
 from unittest.mock import patch
 
 import pytest
 from django.conf import settings
+from django.utils import timezone
 
 from apps.booking.models import Booking
 from apps.booking.tests.factories import BookingFactory
@@ -14,6 +16,7 @@ from apps.core.idempotency import IdempotencyKeyConflict
 from apps.core.models import AuditLog
 from apps.core.tests.tenancy import tenant_context
 from apps.identity.tests.factories import PassengerUserFactory
+from apps.seating.models import SeatReservation
 
 from ..models import PaymentIntent
 from ..psp.paystack import PaystackAPIError
@@ -56,6 +59,40 @@ def test_initiate_payment_rejects_a_booking_not_pending_payment() -> None:
         )
         with pytest.raises(BookingNotPayable):
             initiate_payment(booking=booking, passenger=passenger, idempotency_key="k1")
+
+
+def test_initiate_payment_rejects_a_hold_that_lapsed_before_the_sweep_ran() -> None:
+    """docs/specs/22-marketplace.md slice 2: the sweep task
+    (`apps.seating.tasks.expire_seat_holds`) runs once a minute, so a
+    hold can sit past its `held_until` for up to that long while
+    `Booking.status` still reads `pending_payment`. Without
+    `expire_stale_holds_for_booking()` running first, this would
+    previously have succeeded — and even re-extended the lapsed hold via
+    `refresh_seat_holds`."""
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+        PaystackAccountFactory(client=client, business=business)
+    booking, reservation = booking_with_a_held_seat(client, business)
+    with tenant_context(str(client.id)):
+        reservation.held_until = timezone.now() - datetime.timedelta(minutes=1)
+        reservation.save(update_fields=["held_until"])
+
+    with (
+        patch(
+            "apps.payments.services.initialize_transaction", return_value=dict(_FAKE_INIT_DATA)
+        ) as mock_init,
+        tenant_context(str(client.id)),
+        pytest.raises(BookingNotPayable),
+    ):
+        initiate_payment(booking=booking, passenger=booking.passenger, idempotency_key="k1")
+
+    assert mock_init.call_count == 0
+    with tenant_context(str(client.id)):
+        booking.refresh_from_db()
+        reservation.refresh_from_db()
+    assert booking.status == Booking.Status.EXPIRED
+    assert reservation.status == SeatReservation.Status.EXPIRED
 
 
 def test_initiate_payment_success_creates_a_pending_intent_and_refreshes_seat_holds() -> None:

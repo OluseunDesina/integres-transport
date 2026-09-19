@@ -39,7 +39,16 @@ describe('BusinessSuperAdminStore', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/super-admin/businesses/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, search: undefined } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            search: undefined,
+            kyb_status: undefined,
+            vertical: undefined,
+            is_active: undefined,
+          },
+        },
       })
     );
     expect(store.items().length).toBe(1);
@@ -64,7 +73,16 @@ describe('BusinessSuperAdminStore', () => {
     expect(apiClient.GET).toHaveBeenCalledWith(
       '/api/v1/super-admin/businesses/',
       jasmine.objectContaining({
-        params: { query: { limit: 25, offset: 0, search: 'Lagos' } },
+        params: {
+          query: {
+            limit: 25,
+            offset: 0,
+            search: 'Lagos',
+            kyb_status: undefined,
+            vertical: undefined,
+            is_active: undefined,
+          },
+        },
       })
     );
   });
@@ -106,13 +124,31 @@ describe('BusinessSuperAdminStore', () => {
       expect(apiClient.GET).toHaveBeenCalledWith(
         '/api/v1/super-admin/businesses/',
         jasmine.objectContaining({
-          params: { query: { limit: 100, offset: 0, search: undefined } },
+          params: {
+            query: {
+              limit: 100,
+              offset: 0,
+              search: undefined,
+              kyb_status: undefined,
+              vertical: undefined,
+              is_active: undefined,
+            },
+          },
         })
       );
       expect(apiClient.GET).toHaveBeenCalledWith(
         '/api/v1/super-admin/businesses/',
         jasmine.objectContaining({
-          params: { query: { limit: 100, offset: 100, search: undefined } },
+          params: {
+            query: {
+              limit: 100,
+              offset: 100,
+              search: undefined,
+              kyb_status: undefined,
+              vertical: undefined,
+              is_active: undefined,
+            },
+          },
         })
       );
     });

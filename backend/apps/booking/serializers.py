@@ -16,7 +16,7 @@ from apps.scheduling.models import Trip
 from apps.seating.models import Seat, SeatReservation
 
 from .manifest import MANIFEST_KIND_CHOICES
-from .models import Booking
+from .models import Booking, Traveler
 from .services import is_quick_book
 from .staff import STAFF_BOOKING_PAYMENT_STATUS_CHOICES
 
@@ -44,10 +44,33 @@ def _resolve_trip(value: Any) -> Trip:
         raise serializers.ValidationError("Unknown trip.", code="unknown_trip") from None
 
 
+class TravelerInputSerializer(serializers.Serializer):
+    """Who is actually travelling — docs/specs/22-marketplace.md slice 2.
+    Nested per seat on `BookingSeatRequestSerializer` for a true
+    seats-mode booking, or once at the top level on
+    `BookingCreateSerializer` for a places-mode (open-seating/
+    quick-book) booking's single lead traveler — see
+    `apps.booking.services.create_booking`'s own docstring for which is
+    which. Entirely optional on both: `apps.booking`'s own endpoint
+    accepts a body with no traveler at all; only
+    `apps.marketplace.views.MarketplaceBookingCreateSerializer` requires
+    one."""
+
+    title = serializers.ChoiceField(choices=Traveler.Title.choices, required=False)
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    phone = serializers.CharField(max_length=32)
+    email = serializers.EmailField()
+    date_of_birth = serializers.DateField(required=False, allow_null=True)
+    gender = serializers.ChoiceField(choices=Traveler.Gender.choices, required=False)
+    nationality = serializers.CharField(max_length=100, required=False, allow_blank=True)
+
+
 class BookingSeatRequestSerializer(serializers.Serializer):
     seat = serializers.UUIDField()
     from_stop = serializers.UUIDField()
     to_stop = serializers.UUIDField()
+    traveler = TravelerInputSerializer(required=False)
 
     def validate_seat(self, value: Any) -> Seat:
         return _resolve_seat(value)
@@ -81,6 +104,14 @@ class BookingCreateSerializer(serializers.Serializer):
     # for the whole booking rather than per seat.
     from_stop = serializers.UUIDField(required=False)
     to_stop = serializers.UUIDField(required=False)
+    # docs/specs/22-marketplace.md slice 2. The places-mode (open-seating
+    # or quick-book) single lead traveler — see
+    # `TravelerInputSerializer`'s own docstring for the seats-mode/
+    # places-mode split. Not cross-validated against `seats` here the
+    # way `passenger_count` is: an extraneous `traveler` alongside
+    # `seats` is simply ignored by `create_booking` (each seat's own
+    # nested `traveler` is what's read instead), not worth a 400 for.
+    traveler = TravelerInputSerializer(required=False)
 
     def validate_trip(self, value: Any) -> Trip:
         return _resolve_trip(value)
@@ -321,6 +352,12 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
     seats = serializers.SerializerMethodField()
     hold_expires_at = serializers.SerializerMethodField()
     hold_expires_in_seconds = serializers.SerializerMethodField()
+    # docs/adr/0009 / docs/specs/22-marketplace.md. `business` above is a
+    # bare id — every other consumer of this serializer belongs to one
+    # Client and needed nothing more, but a marketplace passenger's own
+    # "my bookings" list can legitimately span several different
+    # operators at once, and a bare id names none of them.
+    business_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
@@ -334,6 +371,7 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
             # call.
             "reference",
             "business",
+            "business_name",
             "trip",
             "passenger",
             "status",
@@ -363,6 +401,13 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
             "service_date": obj.trip.service_date,
             "trip_class": obj.trip.trip_class,
         }
+
+    def get_business_name(self, obj: Booking) -> str:
+        # Reads through Booking's own `business` FK, not `trip.route`'s
+        # — same one, but this is the direct path. Every view returning
+        # this serializer must select_related("business") for the same
+        # N+1 reason `get_trip` already documents for `trip__route`.
+        return obj.business.name
 
     def _reservations(self, obj: Booking) -> Sequence[SeatReservation]:
         # `reservations_by_booking` (context): the list view batch-fetches

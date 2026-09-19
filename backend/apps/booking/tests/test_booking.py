@@ -304,6 +304,7 @@ def test_passenger_can_create_a_booking() -> None:
     assert len(response.data["seats"]) == 1
     assert response.data["seats"][0]["amount"] == "750.00"
     assert response.data["seats"][0]["seat"] == "1A"
+    assert response.data["business_name"] == trip.business.name
 
 
 def test_create_booking_requires_the_idempotency_key_header() -> None:
@@ -684,7 +685,21 @@ def test_cancel_booking_rejects_an_unauthenticated_request() -> None:
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
-def test_cancel_booking_404s_for_another_clients_booking() -> None:
+def test_cancel_booking_403s_for_another_clients_booking() -> None:
+    """Cross-Client, not just cross-passenger, and still refused.
+
+    Was a 404 before docs/adr/0009: `BookingCancelView` read through
+    `.objects`, so RLS silently hid `booking_b` from `passenger_a`
+    entirely. It now reads through `all_objects` +
+    `platform_staff_bypass()` (a marketplace passenger must be able to
+    cancel a booking whose Client is the operator's, not their own), so
+    the ownership check below — the same one that already 403s a
+    same-Client stranger's booking — is the *only* gate left, and is
+    still the one that catches this. The status code changed (404 -> 403,
+    consistent with the same-Client case rather than a special cross-
+    Client one); the actual guarantee — passenger_a cannot cancel
+    passenger_b's booking — did not.
+    """
     client_a = ClientFactory()
     passenger_a = PassengerUserFactory(client=client_a)
     client_b = ClientFactory()
@@ -705,7 +720,7 @@ def test_cancel_booking_404s_for_another_clients_booking() -> None:
     response = _auth_client(passenger_a).post(
         reverse("booking-cancel", kwargs={"pk": str(booking_b.id)})
     )
-    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 # --- BookingSerializer.trip nesting -------------------------------------

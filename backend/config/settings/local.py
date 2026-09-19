@@ -12,6 +12,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:4201",
     "http://localhost:4202",
     "http://localhost:4203",  # validator-app — docs/specs/4b-tap-and-go.md
+    "http://localhost:4204",  # marketplace-app — docs/specs/22-marketplace.md
 ]
 
 SECRET_KEY = config("DJANGO_SECRET_KEY", default="local-insecure-secret-key-do-not-use-in-prod")
@@ -54,6 +55,7 @@ REST_FRAMEWORK = {
         "auth_login_client_admin": "100/min",
         "auth_login_super_admin": "100/min",
         "auth_register": "100/min",
+        "auth_register_customer": "100/min",
         "auth_invite_accept": "100/min",
         # Playwright downloads several exports in one run.
         "export": "100/min",

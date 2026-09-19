@@ -83,7 +83,6 @@ describe('Home', () => {
 
     expect(links.map((a) => a.getAttribute('href'))).toEqual([
       '/kyc-queue',
-      '/kyb-queue',
       '/businesses',
       '/invite-client',
     ]);

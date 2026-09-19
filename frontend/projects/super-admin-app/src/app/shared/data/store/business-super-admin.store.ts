@@ -7,6 +7,17 @@ export type BusinessSuperAdmin = components['schemas']['BusinessSuperAdmin'];
 
 export interface BusinessSuperAdminQuery {
   search?: string;
+  kyb_status?: BusinessSuperAdmin['kyb_status'];
+  vertical?: BusinessSuperAdmin['vertical'];
+  /**
+   * A string, not a boolean — matches the query param the backend
+   * actually accepts (`apps.businesses.serializers.BusinessSuperAdminQuerySerializer`
+   * declares it as a `"true"`/`"false"` `ChoiceField`, not a
+   * `BooleanField`: a plain optional boolean silently resolves a missing
+   * key to `false` under DRF's HTML-form `get_value()` semantics, which
+   * would filter out every active Business on an unfiltered request).
+   */
+  is_active?: 'true' | 'false';
 }
 
 function toErrorMessage(error: unknown): string {
@@ -45,7 +56,14 @@ export class BusinessSuperAdminStore extends ListStore<
   ): Promise<{ items: BusinessSuperAdmin[]; total: number }> {
     const { data, error } = await this.api.GET('/api/v1/super-admin/businesses/', {
       params: {
-        query: { limit: page.limit, offset: page.offset, search: query.search },
+        query: {
+          limit: page.limit,
+          offset: page.offset,
+          search: query.search,
+          kyb_status: query.kyb_status,
+          vertical: query.vertical,
+          is_active: query.is_active,
+        },
       },
     });
     if (!data) {

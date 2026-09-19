@@ -21,6 +21,8 @@ from .serializers import (
     RouteStopsUpdateSerializer,
     StopCreateSerializer,
     StopSerializer,
+    StopSuggestQuerySerializer,
+    StopSuggestSerializer,
 )
 from .services import (
     RouteHasFutureTrips,
@@ -245,6 +247,69 @@ class RouteBrowseView(generics.ListAPIView[Route]):
         # rows any more than the bare `business` filter above already
         # could not.
         return _apply_list_query(queryset, self.request.query_params, ["name", "code"])
+
+
+_STOP_SUGGEST_QUERY_PARAMS = [
+    OpenApiParameter(
+        "q",
+        str,
+        OpenApiParameter.QUERY,
+        required=False,
+        description="Case-insensitive substring match against Stop name. "
+        "Omit (or leave blank) for a default list.",
+    ),
+    OpenApiParameter(
+        "limit",
+        int,
+        OpenApiParameter.QUERY,
+        required=False,
+        description="Maximum rows to return (default 10, max 50).",
+    ),
+]
+
+
+@extend_schema(parameters=_STOP_SUGGEST_QUERY_PARAMS, responses=StopSuggestSerializer(many=True))
+class StopSuggestView(generics.ListAPIView[Stop]):
+    """GET /stops/suggest/?q=&limit= — the passenger-facing Stop
+    suggestion list backing customer-app's origin/destination typeahead
+    fields, see docs/specs/4-fares-seating-booking-frontend.md §3.3
+    (reworked flow) and `apps.scheduling.views.TripSearchView`, the
+    endpoint an accepted suggestion is actually searched against.
+
+    Same posture as `RouteBrowseView` just above: `IsAuthenticated`, not
+    permission-codename gated — passengers hold no Role (docs/adr/0003).
+
+    `pagination_class = None`: a bare, capped (`limit`, max 50) list,
+    not a paginated resource — same reasoning and precedent as
+    `apps.businesses.views.ClientKycQueueView`/
+    `apps.seating.views.VehicleTypeSeatsView`, both linked from that
+    same override elsewhere in this codebase. Without it drf-spectacular
+    documents this as the paginated `{count, results}` envelope every
+    other list endpoint here uses, which is not what this actually
+    returns.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = StopSuggestSerializer
+    pagination_class = None
+
+    def get_queryset(self) -> QuerySet[Stop]:
+        query = StopSuggestQuerySerializer(data=self.request.query_params)
+        query.is_valid(raise_exception=True)
+        q = query.validated_data["q"].strip()
+        limit = query.validated_data["limit"]
+
+        queryset = Stop.objects.filter(is_active=True)
+        if q:
+            queryset = queryset.filter(name__icontains=q)
+        # `.distinct("name")` is Postgres `DISTINCT ON` — requires the
+        # query's own leading `order_by` to match, which is also the
+        # alphabetical default this view's own docstring on `q` already
+        # promises. A search term matching several differently-named
+        # Businesses' own same-named Stop rows collapses to one
+        # suggestion per name; which specific row survives is arbitrary
+        # and does not matter (see StopSuggestSerializer's own note).
+        return queryset.order_by("name").distinct("name")[:limit]
 
 
 @extend_schema_view(

@@ -273,3 +273,40 @@ believing a new one is broken.
 | An older response overwrites a newer one | no monotonic request id in the store |
 | A hint reaches only sighted users | not wired through `describedBy`/`aria-describedby` |
 | A capture pass is entirely empty | the harness lost its active Business |
+
+## 10. Consumer storefront (`marketplace-app`)
+
+The marketplace is the one app styled as a consumer travel storefront
+rather than an operator console. Its design baseline is a survey of
+travel/mobility aggregators — Omio, Busbud, FlixBus, Rome2Rio, BuuPass,
+Wakanow — recorded in `docs/specs/24-marketplace-redesign.md`. When
+adding a marketplace screen, check that table first: it says which
+aggregator patterns we follow, which are deferred, and which are ruled
+out until an endpoint can back them.
+
+- **Tokens.** `mk-navy-950/900/800`, `mk-accent` (amber),
+  `mk-on-navy-muted` live in `marketplace-app/src/styles.css`, layered
+  on spec 14's theme. Amber is text/highlight **on navy only** — never a
+  fill behind white text (1.67:1); where it is a fill, its text is
+  `mk-navy-950`. Primary actions stay `bg-primary`.
+- **Page width.** A route that needs the full width (hero, sidebar
+  layout) sets `data: { fullBleed: true }`; everything else gets the
+  shell's `max-w-4xl` column. `docs/traps.md`'s frontend section says
+  why this is one outlet and a router-snapshot read.
+- **Search bar.** One segmented bar from `lg` (fields borderless, split
+  by `border-control` dividers, the bar drawing the outline), stacked
+  bordered boxes below it; swap button on the From/To seam.
+- **Result cards.** `@container` on the card, `@2xl:` for the
+  three-column layout — the card's width, not the viewport's, decides.
+  Operator first (flat cross-operator list), then depart — duration —
+  arrive, then price and one action. Badges ("Cheapest", "Fastest") are
+  computed over the *filtered* rows.
+- **Claims.** Trust strips, payment lines and badges state only what the
+  platform does today. No counts, ratings, or popularity we can't cite.
+- **Browser storage** (recent searches) is a per-viewer convenience:
+  every read/write wrapped, corrupt data ignored, and the page must work
+  with none (`shared/recent-searches.ts`).
+- **Dates** are local `YYYY-MM-DD` via `shared/dates.ts` — never
+  `toISOString().slice(0, 10)`, which names yesterday in Lagos between
+  00:00 and 01:00.
+

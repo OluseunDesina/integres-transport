@@ -2,8 +2,6 @@ import { expect, type Page } from '@playwright/test';
 
 import { captureUiReview } from '../ui-review-capture';
 
-const ROUTE_NAME = 'Ikeja → CMS';
-
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -11,20 +9,11 @@ function todayISO(): string {
 /**
  * Drives the booking flow far enough to photograph a screen that has no
  * URL of its own.
- *
- * Matches the route on a label *prefix*, same as `booking.spec.ts`:
- * `trip-search` appends " — <operator>" to every option once the browse
- * endpoint spans more than one Business, which the tap-and-go fixture
- * alone guarantees.
  */
 async function search(page: Page, tripClass?: string): Promise<void> {
   await page.goto('/search');
-  const select = page.getByLabel('Route');
-  const option = select.locator('option').filter({ hasText: ROUTE_NAME }).first();
-  await expect(option).toBeAttached();
-  await select.selectOption((await option.getAttribute('value')) ?? '');
-  await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
-  await page.getByLabel('To').selectOption({ label: '3. CMS' });
+  await page.getByLabel('From').fill('Ikeja');
+  await page.getByLabel('To').fill('CMS');
   await page.getByLabel('Travel date').fill(todayISO());
   if (tripClass) {
     await page.getByLabel('Class').selectOption({ label: tripClass });
@@ -130,6 +119,17 @@ captureUiReview({
     // empty form, so the class pills — the whole visible surface of this
     // slice on that screen — were not in the capture set at all.
     { name: 'search-results', walk: (page) => search(page) },
+    // The reworked From/To suggestion combobox (docs/specs/4-fares-
+    // seating-booking-frontend.md §3.3) never had a capture at all —
+    // `search` on its own only shows the closed inputs.
+    {
+      name: 'search-suggestions',
+      walk: async (page) => {
+        await page.goto('/search');
+        await page.getByLabel('From').fill('a');
+        await expect(page.getByRole('listbox').first()).toBeVisible();
+      },
+    },
     { name: 'seat-picker-premium', walk: (page) => openSeatPicker(page, 'Premium') },
     {
       name: 'booking-confirm-premium',

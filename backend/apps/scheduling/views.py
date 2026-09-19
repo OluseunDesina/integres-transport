@@ -9,7 +9,9 @@ from rest_framework.serializers import BaseSerializer
 
 from apps.businesses.models import Business
 from apps.core.permissions import HasPermission
+from apps.fares.services import FareNotConfigured, get_fare
 from apps.identity.models import User
+from apps.network.services import find_route_stop_matches
 
 from .models import Schedule, Trip
 from .serializers import (
@@ -21,6 +23,7 @@ from .serializers import (
     TripCreateSerializer,
     TripListQuerySerializer,
     TripSearchQuerySerializer,
+    TripSearchResultSerializer,
     TripSerializer,
     TripStatusSerializer,
 )
@@ -221,7 +224,22 @@ class TripListCreateView(generics.ListCreateAPIView[Trip]):
 
 @extend_schema(
     parameters=[
-        OpenApiParameter("route", str, OpenApiParameter.QUERY, required=True),
+        OpenApiParameter(
+            "origin",
+            str,
+            OpenApiParameter.QUERY,
+            required=True,
+            description="Where the passenger is travelling from — matched "
+            "against Stop names (case-insensitive, partial).",
+        ),
+        OpenApiParameter(
+            "destination",
+            str,
+            OpenApiParameter.QUERY,
+            required=True,
+            description="Where the passenger is travelling to — matched "
+            "against Stop names (case-insensitive, partial).",
+        ),
         OpenApiParameter(
             "service_date",
             str,
@@ -231,49 +249,91 @@ class TripListCreateView(generics.ListCreateAPIView[Trip]):
         ),
         _TRIP_CLASS_QUERY_PARAM,
     ],
-    responses=TripSerializer(many=True),
+    responses=TripSearchResultSerializer(many=True),
 )
-class TripSearchView(generics.ListAPIView[Trip]):
-    """GET /trips/search/ — the passenger-facing Trip list, see
-    docs/specs/4-fares-seating-booking-frontend.md §3.3.
+class TripSearchView(generics.GenericAPIView[Trip]):
+    """GET /trips/search/ — the passenger-facing Trip search, see
+    docs/specs/4-fares-seating-booking-frontend.md §3.3 (reworked:
+    origin/destination text instead of a pre-chosen Route — a passenger
+    no longer needs to already know which Route connects them).
 
-    Separate from TripListCreateView for the same reason
-    apps.network.views.RouteBrowseView is separate from
-    RouteListCreateView: passengers hold no Role/Permission
-    (docs/adr/0003), so this is IsAuthenticated + ordinary tenancy
-    scoping. Reuses TripSerializer unchanged — `compliance_warnings` is
-    useful rather than sensitive to a passenger choosing between
-    departures, so forking a passenger-only subset would be extra
-    surface for no gain.
+    A plain `ListAPIView` no longer fits: results come from
+    `apps.network.services.find_route_stop_matches` fanning out across
+    however many `(route, from_stop, to_stop)` pairs it finds, not one
+    queryset — so this builds a plain list of result rows itself and
+    hands it to DRF's own pagination machinery, which works on any
+    sized, sliceable sequence, not only a queryset.
+
+    Still `IsAuthenticated` + ordinary tenancy scoping only, same
+    posture as before and as `apps.network.views.RouteBrowseView`
+    (passengers hold no Role/Permission — docs/adr/0003).
     """
 
     permission_classes = [IsAuthenticated]
-    serializer_class = TripSerializer
+    serializer_class = TripSearchResultSerializer
 
-    def get_queryset(self) -> QuerySet[Trip]:
-        query = TripSearchQuerySerializer(data=self.request.query_params)
+    def get(self, request: Request) -> Response:
+        query = TripSearchQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
-        # status and fare_collection_mode are forced here, never read
-        # from the query params — a passenger must not be able to widen
-        # this to reach a cancelled, completed or pay-as-you-go Trip.
-        #
-        # Filters on fare_collection_mode, not booking_mode: what makes
-        # a trip buyable in advance is that it is prepaid, not that it
-        # has assigned seats. Open-seating trips are bookable too
-        # (docs/specs/10-booking-modes.md).
-        queryset = Trip.objects.select_related("route", "vehicle", "driver").filter(
-            route=query.validated_data["route"],
-            service_date=query.validated_data["service_date"],
-            status=Trip.Status.SCHEDULED,
-            fare_collection_mode=Business.FareCollectionMode.PREPAID,
-        )
-        # Optional and passenger-supplied, unlike the two forced filters
-        # above — narrowing to a class they want is not a way to reach a
-        # Trip they should not see.
         trip_class = query.validated_data.get("trip_class")
-        if trip_class is not None:
-            queryset = queryset.filter(trip_class=trip_class)
-        return queryset
+
+        results: list[dict[str, object]] = []
+        matches = find_route_stop_matches(
+            origin=query.validated_data["origin"],
+            destination=query.validated_data["destination"],
+        )
+        for match in matches:
+            # status and fare_collection_mode are forced here, never read
+            # from the query params — a passenger must not be able to
+            # widen this to reach a cancelled, completed or
+            # pay-as-you-go Trip.
+            #
+            # Filters on fare_collection_mode, not booking_mode: what
+            # makes a trip buyable in advance is that it is prepaid, not
+            # that it has assigned seats. Open-seating trips are
+            # bookable too (docs/specs/10-booking-modes.md).
+            # "business" — TripSearchResultSerializer.get_business_name
+            # reads through it; without this it's one extra query per
+            # result row. "vehicle__vehicle_type" — TripSerializer.get_vehicle
+            # reads through it for the same reason.
+            trips = Trip.objects.select_related(
+                "route", "vehicle__vehicle_type", "driver", "business"
+            ).filter(
+                route=match.route,
+                service_date=query.validated_data["service_date"],
+                status=Trip.Status.SCHEDULED,
+                fare_collection_mode=Business.FareCollectionMode.PREPAID,
+            )
+            # Optional and passenger-supplied, unlike the two forced
+            # filters above — narrowing to a class they want is not a
+            # way to reach a Trip they should not see.
+            if trip_class is not None:
+                trips = trips.filter(trip_class=trip_class)
+            for trip in trips:
+                try:
+                    quote = get_fare(trip=trip, from_stop=match.from_stop, to_stop=match.to_stop)
+                except FareNotConfigured:
+                    # An unpriced trip is excluded from the list rather
+                    # than shown with no price — the whole point of this
+                    # endpoint post-rework is a price-first result list
+                    # (docs/specs/21-passenger-experience.md's own
+                    # seat-picker precedent: an unconfigured fare blocks
+                    # booking, applied here at the list level since
+                    # there is no booking step yet to block).
+                    continue
+                results.append(
+                    {
+                        "trip": trip,
+                        "from_stop": match.from_stop,
+                        "to_stop": match.to_stop,
+                        "stops_between": match.stops_between,
+                        "fare": {"amount": quote.amount, "currency": quote.currency},
+                    }
+                )
+
+        page = self.paginate_queryset(results)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
 
 @extend_schema(request=TripAssignmentSerializer, responses=TripSerializer)

@@ -107,3 +107,86 @@ def test_approved_business_still_appears_unlike_kyb_queue() -> None:
     assert response.status_code == status.HTTP_200_OK
     ids = [row["id"] for row in response.data["results"]]
     assert str(business.id) in ids
+
+
+# --- kyb_status/vertical/is_active filters, added once the super-admin
+# frontend's separate KYB queue page was folded into this one list. ---
+
+
+def test_filters_by_kyb_status() -> None:
+    with tenant_context(None, is_platform_staff=True):
+        submitted = BusinessFactory(kyb_status=Business.KybStatus.SUBMITTED)
+        BusinessFactory(kyb_status=Business.KybStatus.APPROVED)
+    platform_staff = PlatformStaffUserFactory()
+
+    response = _auth_client(platform_staff, platform_staff=True).get(
+        reverse("business-super-admin-list"), {"kyb_status": "submitted"}
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    ids = [row["id"] for row in response.data["results"]]
+    assert ids == [str(submitted.id)]
+
+
+def test_filters_by_vertical() -> None:
+    with tenant_context(None, is_platform_staff=True):
+        shuttle = BusinessFactory(vertical=Business.Vertical.SHUTTLE)
+        BusinessFactory(vertical=Business.Vertical.METRO)
+    platform_staff = PlatformStaffUserFactory()
+
+    response = _auth_client(platform_staff, platform_staff=True).get(
+        reverse("business-super-admin-list"), {"vertical": "shuttle"}
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    ids = [row["id"] for row in response.data["results"]]
+    assert ids == [str(shuttle.id)]
+
+
+def test_filters_by_is_active() -> None:
+    with tenant_context(None, is_platform_staff=True):
+        inactive = BusinessFactory(is_active=False)
+        BusinessFactory(is_active=True)
+    platform_staff = PlatformStaffUserFactory()
+
+    response = _auth_client(platform_staff, platform_staff=True).get(
+        reverse("business-super-admin-list"), {"is_active": "false"}
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    ids = [row["id"] for row in response.data["results"]]
+    assert ids == [str(inactive.id)]
+
+
+def test_filters_combine() -> None:
+    with tenant_context(None, is_platform_staff=True):
+        target = BusinessFactory(
+            kyb_status=Business.KybStatus.SUBMITTED,
+            vertical=Business.Vertical.INTERCITY,
+            name="Jos Express",
+        )
+        BusinessFactory(
+            kyb_status=Business.KybStatus.SUBMITTED,
+            vertical=Business.Vertical.SHUTTLE,
+            name="Jos Shuttle",
+        )
+    platform_staff = PlatformStaffUserFactory()
+
+    response = _auth_client(platform_staff, platform_staff=True).get(
+        reverse("business-super-admin-list"),
+        {"kyb_status": "submitted", "vertical": "intercity", "search": "Jos"},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    ids = [row["id"] for row in response.data["results"]]
+    assert ids == [str(target.id)]
+
+
+def test_unknown_kyb_status_value_400s() -> None:
+    platform_staff = PlatformStaffUserFactory()
+
+    response = _auth_client(platform_staff, platform_staff=True).get(
+        reverse("business-super-admin-list"), {"kyb_status": "not-a-real-status"}
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST

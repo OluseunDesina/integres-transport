@@ -205,6 +205,21 @@ def update_white_label(*, client: Client, updated_by: User, **fields: Any) -> Wh
     return config
 
 
+def get_or_create_marketplace_client() -> Client:
+    """The one Client every marketplace-registered passenger's `User.client`
+    points at (docs/adr/0009, docs/specs/22-marketplace.md). `Client`
+    carries no RLS — it *is* the tenant (see its own docstring) — so this
+    needs none of `resolve_white_label_by_domain`'s `platform_staff_bypass()`
+    handling. The `single_marketplace_client` constraint on `Client` is
+    what actually guarantees there is ever only one; this just finds it,
+    or creates it the first time (e.g. a fresh environment where the seed
+    migration has not run)."""
+    client, _ = Client.objects.get_or_create(
+        is_marketplace=True, defaults={"name": "TransitOS Marketplace"}
+    )
+    return client
+
+
 def resolve_white_label_by_domain(domain: str) -> WhiteLabelConfig | None:
     """Anonymous, cross-client by nature (a visitor's browser Host header
     could belong to any Client) — needs the platform-staff RLS bypass the

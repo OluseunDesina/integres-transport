@@ -1,0 +1,33 @@
+<app-marketplace-auth-layout>
+  <h1 class="text-3xl font-bold tracking-tight text-strong">Welcome back</h1>
+  <p class="mt-2 mb-8 text-default">Sign in to book, pay and view your tickets.</p>
+
+  @if (errorMessage(); as message) {
+    <ui-alert class="mb-4">{{ message }}</ui-alert>
+  }
+
+  <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4" novalidate>
+    <ui-text-field
+      label="Email"
+      type="email"
+      autocomplete="email"
+      formControlName="email"
+      [invalid]="!!fieldError('email')"
+      [errorMessage]="fieldError('email')"
+    />
+    <ui-text-field
+      label="Password"
+      type="password"
+      autocomplete="current-password"
+      formControlName="password"
+      [invalid]="!!fieldError('password')"
+      [errorMessage]="fieldError('password')"
+    />
+    <ui-button type="submit" [loading]="submitting()" [disabled]="submitting()">Sign in</ui-button>
+  </form>
+
+  <p class="mt-8 text-center text-sm text-default">
+    New here?
+    <a routerLink="/register" class="font-semibold text-primary underline-offset-2 hover:underline">Create an account</a>
+  </p>
+</app-marketplace-auth-layout>

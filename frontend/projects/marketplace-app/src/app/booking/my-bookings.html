@@ -1,0 +1,178 @@
+<div class="flex flex-col gap-6">
+  <ui-page-header title="My bookings" description="Pay for, show or cancel a trip you have booked.">
+    <ui-button actions variant="secondary" (pressed)="goToSearch()">Book a trip</ui-button>
+  </ui-page-header>
+
+  @if (store.error(); as message) {
+    <ui-alert>{{ message }}</ui-alert>
+  } @else if (store.isEmpty()) {
+    <ui-empty-state
+      title="No bookings yet"
+      description="Once you reserve a seat, your trips will show up here."
+    >
+      <ui-button (pressed)="goToSearch()">Search trips</ui-button>
+    </ui-empty-state>
+  } @else {
+    @if (paymentError(); as message) {
+      <ui-alert>{{ message }}</ui-alert>
+    }
+    @if (paymentSuccess(); as message) {
+      <ui-alert variant="success">{{ message }}</ui-alert>
+    }
+    <ui-table label="My bookings" [loading]="store.loading()">
+      <thead>
+        <tr class="border-b border-border text-xs uppercase tracking-wide text-muted">
+          <th class="py-2">Route</th>
+          <th class="hidden py-2 md:table-cell">Departure</th>
+          <th class="hidden py-2 md:table-cell">Seats</th>
+          <th class="hidden py-2 md:table-cell">Total</th>
+          <!-- Status re-flows into the sub-line below `md` like the
+               other secondary columns. Keeping it as a third visible
+               column at 390px left Route about 60px wide — a pill
+               reading "Pending payment" plus Pay plus the menu take
+               everything else, and "Yaba → Lekki" wrapped to two lines
+               (iteration-15). It leads the sub-line, so it is still the
+               first thing read about the row. -->
+          <th class="hidden py-2 md:table-cell">Status</th>
+          <th class="py-2 text-right"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (booking of store.items(); track booking.id) {
+          <tr class="border-b border-border last:border-0 hover:bg-surface-muted">
+            <td class="py-2 font-medium text-strong">
+              <!-- The operator name leads, same reasoning as the search
+                   result cards: this passenger's own bookings can span
+                   more than one operator, and a bare route name says
+                   nothing about which. -->
+              <span class="block text-xs font-normal text-muted">{{ booking.business_name }}</span>
+              <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>{{ booking.trip.route.name }}</span>
+                <!-- Neutral tone, label only — spec 15 slice 2's ruling.
+                     Beside the route name rather than in a column or in
+                     the md:hidden sub-line; see serviceClass()'s own
+                     comment for why neither of those works here. -->
+                @if (serviceClass(booking); as tripClass) {
+                  <ui-status-pill tone="neutral" [label]="tripClass" />
+                }
+              </span>
+              <!-- The columns hidden below `md`, re-flowed. This app has
+                   no row drawer, so everything hidden is one tier and
+                   lands here rather than behind a menu.
+
+                   text-sm, not text-xs: the passenger app's body type is
+                   16px now, and 12px beside it is too small a step. -->
+              <span class="mt-1 flex flex-wrap items-center gap-x-2 font-normal md:hidden">
+                <ui-status-pill
+                  [tone]="statusTone[booking.status]"
+                  [label]="statusLabel[booking.status]"
+                />
+                <ui-countdown
+                  [secondsRemaining]="booking.hold_expires_in_seconds"
+                  (expired)="onHoldExpired()"
+                />
+                <span class="text-sm text-muted">{{ summaryFor(booking) }}</span>
+              </span>
+            </td>
+            <td class="hidden py-2 md:table-cell">
+              {{ booking.trip.scheduled_departure_at | date: 'short' }}
+            </td>
+            <td class="hidden py-2 md:table-cell">{{ seatNumbers(booking) }}</td>
+            <td class="hidden py-2 md:table-cell">{{ totalLabel(booking) }}</td>
+            <td class="hidden py-2 md:table-cell">
+              <div class="flex flex-wrap items-center gap-2">
+                <ui-status-pill
+                  [tone]="statusTone[booking.status]"
+                  [label]="statusLabel[booking.status]"
+                />
+                <ui-countdown
+                  [secondsRemaining]="booking.hold_expires_in_seconds"
+                  (expired)="onHoldExpired()"
+                />
+              </div>
+            </td>
+            <td class="py-2">
+              <!-- One primary action and a menu, not up to three buttons
+                   and a bare checkbox. The old cell put a write control
+                   (Use wallet balance) loose in a read table and squeezed
+                   the Route column at 390px doing it; the payment options
+                   now live in the Pay dialog, where they are read before
+                   money moves rather than beside it. -->
+              <div class="flex items-center justify-end gap-2">
+                @if (canPay(booking)) {
+                  <ui-button
+                    [loading]="payingBookingIds().has(booking.id)"
+                    [ariaLabel]="'Pay for ' + booking.trip.route.name"
+                    (pressed)="openPayDialog(booking)"
+                  >
+                    Pay
+                  </ui-button>
+                }
+                @if (menuItemsFor(booking); as items) {
+                  @if (items.length > 0) {
+                    <ui-action-menu
+                      [items]="items"
+                      [label]="'Actions for ' + booking.trip.route.name"
+                      (selected)="onAction(booking, $event)"
+                    />
+                  }
+                }
+              </div>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </ui-table>
+    <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
+  }
+</div>
+
+<ng-template #cancelBody>
+  <p class="text-default">Your seats will be released and this booking cannot be reinstated.</p>
+  <div class="mt-4">
+    <ui-textarea
+      label="Reason (optional)"
+      [rows]="3"
+      [ngModel]="cancelReason()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="setCancelReason($event)"
+    />
+  </div>
+</ng-template>
+
+<ng-template #payBody>
+  @if (payingBooking(); as booking) {
+    <dl class="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2">
+      <dt class="text-muted">Operator</dt>
+      <dd class="text-default">{{ booking.business_name }}</dd>
+      <dt class="text-muted">Trip</dt>
+      <dd class="text-default">{{ booking.trip.route.name }}</dd>
+      <dt class="text-muted">Departs</dt>
+      <dd class="text-default">{{ booking.trip.scheduled_departure_at | date: 'medium' }}</dd>
+      <dt class="text-muted">Amount</dt>
+      <dd class="font-semibold text-strong">{{ totalLabel(booking) }}</dd>
+    </dl>
+
+    @if (canUseWalletBalance(booking)) {
+      <div class="mt-4 flex items-start gap-3 rounded-md border border-border p-3">
+        <ui-toggle
+          label="Use my wallet balance"
+          describedBy="pay-wallet-explainer"
+          [checked]="isUsingWalletBalance(booking)"
+          (toggled)="toggleUseWalletBalance(booking, $event)"
+        />
+        <div class="min-w-0">
+          <p class="font-medium text-strong">Use my wallet balance</p>
+          <!-- Wired through describedBy, not left as a loose <p>:
+               ui-toggle renders no text of its own, so a paragraph
+               beside it reaches sighted users only (spec 10's rule). -->
+          <p id="pay-wallet-explainer" class="text-sm text-muted">
+            {{ walletExplainer(booking) }}
+          </p>
+        </div>
+      </div>
+    }
+
+    <p class="mt-4 text-sm text-muted">{{ payOutcomeHint(booking) }}</p>
+  }
+</ng-template>

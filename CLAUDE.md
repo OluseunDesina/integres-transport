@@ -15,7 +15,7 @@ when you need the *why*; read this to know what to type.
 | What has been built, and why it is that way | [`docs/status.md`](docs/status.md) |
 | What to build next | [`docs/specs/README-transit-os-adoption.md`](docs/specs/README-transit-os-adoption.md) |
 | A feature's design + implementation record | `docs/specs/<n>-*.md` |
-| Load-bearing architectural decisions | `docs/adr/0001`–`0008` (all Accepted) |
+| Load-bearing architectural decisions | `docs/adr/0001`–`0009` (all Accepted) |
 | Concrete traps, "never do this", known gaps | [`docs/traps.md`](docs/traps.md) |
 | What "done" means | [`docs/self-check.md`](docs/self-check.md) |
 | System reference, technical / non-technical | `docs/architecture.md` / `docs/executive-overview.md` |
@@ -24,18 +24,29 @@ when you need the *why*; read this to know what to type.
 
 Integra AFC — an Automated Fare Collection platform for African
 transport operators (Lagos commuter shuttle, intercity bus, Botswana
-metro). One Django/DRF backend; four white-labeled Angular 20 frontends
-(customer, client-admin, super-admin, validator) sharing libraries in
-one Angular CLI workspace. `validator-app` is an installable PWA
-standing in for the still-out-of-scope Flutter validator app.
+metro). One Django/DRF backend; five Angular 20 frontends (customer,
+client-admin, super-admin, validator — all white-labeled — plus
+`marketplace-app`, a cross-operator trip marketplace with no
+white-labeling of its own) sharing libraries in one Angular CLI
+workspace. `validator-app` is an installable PWA standing in for the
+still-out-of-scope Flutter validator app.
 
 **Status: phases 0–12 and specs 13–21 are all complete — the Transit OS
-adoption roadmap is done.** 1185/1185 backend tests, 1645 frontend unit
-tests, four Playwright projects. See `docs/status.md` and the roadmap.
+adoption roadmap is done.** Specs 22 (a cross-operator marketplace, two
+slices) and 23 (a super-admin Business/KYB list merge) are a separate,
+later arc, also complete; spec 24 (marketplace redesign, baselined on a
+travel/mobility aggregator survey) is one slice in. 1261/1261 backend tests, 1673 frontend unit
+tests, four Playwright projects (none yet for `marketplace-app` — see
+that spec's own "Named, not fixed"). See `docs/status.md` and the
+roadmap.
 
-**Next: nothing scheduled.** The roadmap
+**Next: spec 24 slice 2** — the marketplace redesign's booking-flow screens
+(`docs/specs/24-marketplace-redesign.md`); slice 1, the storefront, is done.
+Before spec 24, the Transit OS adoption roadmap
 ([`docs/specs/README-transit-os-adoption.md`](docs/specs/README-transit-os-adoption.md))
-has no further spec. The self-check catch-up for specs 19–21
+has no further spec, and specs 22–23 are both closed too — see each
+spec's own Implementation note for what shipped and what's
+named-but-not-fixed. The self-check catch-up for specs 19–21
 (`docs/self-check-2026-09-12-specs19-21.md`) and the fix batch it led
 to are both done — every gap that report and `docs/traps.md` named
 (`ui-map` contrast, `ui-table` Senior Mode density, `trip-search`'s

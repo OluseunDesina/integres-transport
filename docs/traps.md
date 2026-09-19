@@ -257,6 +257,30 @@ one-liner here and the full reasoning in `docs/status.md`, same split
   it for the first time. Fixed with `position: relative` on the
   wrapper.
 
+- **Never put two `<router-outlet>`s behind an `@if`/`@else`** to vary a
+  shell's layout per route. Swapping outlets mid-navigation re-activates
+  the route into a destroyed context: the router throws `Cannot read
+  properties of undefined (reading 'data')` and the app renders blank.
+  Keep one outlet and vary a wrapper's `[class]` (`marketplace-app`'s
+  `AppShell`, spec 24).
+- **Don't read the live `ActivatedRoute` tree (`route.firstChild…`) in a
+  shell's constructor or a `toSignal` `initialValue`.** The child routes
+  aren't wired yet and the router throws the same `reading 'data'` error.
+  Walk `router.routerState.snapshot.root` instead.
+- **A `<fieldset>` defaults to `min-width: min-content`**, so `truncate`
+  on anything inside it silently does nothing and long text overflows
+  its column. Add `min-w-0` to the fieldset (`search-results` filter
+  sidebar, spec 24).
+- **A card beside a sidebar should size by container, not viewport.** A
+  `md:` three-column card collided at 1280px because the sidebar left it
+  ~520px; `@container` on the card + `@2xl:` variants fixed it.
+- **axe checks the contrast of `aria-hidden` text too.** Decorative
+  large numerals in `ink-200` failed `color-contrast` even though hidden
+  from assistive tech — use a real, readable label or draw it as SVG.
+- **`text-muted` on `primary-subtle` is 4.3:1 — below AA.** An active
+  tab/pill tinted `primary-subtle` needs `text-default` for secondary
+  text.
+
 ## Testing traps
 
 - **If a large number of unrelated tests fail in a permission/tenancy
@@ -375,6 +399,18 @@ one-liner here and the full reasoning in `docs/status.md`, same split
   hoping default order keeps it inside the first 100. `booking.spec.ts`
   and `open-seating.spec.ts`'s fixture-route helpers both use it now.
   `BusinessOptionsService` remains the one open instance of this class.
+- **`marketplace-app` storefront gaps (spec 24's survey).** Every
+  surveyed aggregator (Omio, Busbud, FlixBus, Rome2Rio, BuuPass, Wakanow)
+  shows popular routes; FlixBus shows seats left; Busbud and BuuPass show
+  an operator wall. None is built, because nothing backs them honestly:
+  `/marketplace/stops/suggest/` returns stops alphabetically (no
+  popularity), the search response carries no availability, and there is
+  no marketplace operator-list endpoint or operator logo. Each needs
+  backend work first — see spec 24's baseline table (⛔ rows).
+- **`NotificationBell` has no dark-header variant.** `marketplace-app`'s
+  navy `AppShell` recolours its trigger with a descendant selector
+  (`[&_app-notification-bell>div>button]`). A second dark header should
+  add a `tone` input to the component instead.
 - **Django admin cannot read RLS-protected models** — an admin request
   authenticates by cookie, resolves as anonymous, and sees zero rows.
 - **Production reverse-proxy topology for white-labeled custom domains**

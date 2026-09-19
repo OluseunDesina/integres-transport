@@ -35,6 +35,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.identity.models import Role, StaffInvitation, User
+from apps.identity.services import customer_email_taken, register_customer
 
 _GENERIC_AUTH_ERROR = "No active account found with the given credentials."
 _AMBIGUOUS_CLIENT_ERROR = (
@@ -132,6 +133,49 @@ class TokenObtainResponseSerializer(serializers.Serializer):
 
     access = serializers.CharField()
     refresh = serializers.CharField()
+
+
+class CustomerRegistrationSerializer(serializers.Serializer):
+    """`POST /api/v1/auth/customer/register/` (docs/specs/22-marketplace.md)
+    — the first passenger self-registration path on the platform.
+    Deliberately minimal, matching this app's existing posture (no
+    phone, no verification flow) — see `apps.identity.services
+    .register_customer`'s own docstring for why every registrant lands
+    under the one Marketplace Client rather than picking one.
+
+    Email uniqueness is checked against `(client, email)`
+    (`unique_email_per_client`), scoped to the Marketplace Client
+    specifically — the same email may already exist under some
+    operator's own Client without conflict, matching
+    `ClientRegistrationSerializer.validate_email`'s reasoning next door.
+    """
+
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, trim_whitespace=False)
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+
+    def validate_email(self, value: str) -> str:
+        if customer_email_taken(value):
+            raise serializers.ValidationError(
+                "An account with this email already exists.", code="duplicate_email"
+            )
+        return value
+
+    def validate_password(self, value: str) -> str:
+        try:
+            django_validate_password(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages)) from exc
+        return value
+
+    def create(self, validated_data: dict[str, Any]) -> Any:
+        return register_customer(
+            email=validated_data["email"],
+            password=validated_data["password"],
+            first_name=validated_data["first_name"],
+            last_name=validated_data.get("last_name", ""),
+        )
 
 
 class MeSerializer(serializers.ModelSerializer[User]):

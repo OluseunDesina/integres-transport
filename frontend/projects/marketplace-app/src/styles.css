@@ -1,0 +1,46 @@
+/* Self-hosted Inter, latin subsets only — no external font request, and
+   no Cyrillic/Greek weight this UI never renders. */
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-500.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
+
+@import 'tailwindcss';
+
+/* Design tokens — must come after the Tailwind import so its `@theme`
+   block extends the default theme rather than being overwritten by it.
+   See docs/specs/14-design-system-and-ui-rebuild.md. */
+@import '../../shared-ui/src/theme.css';
+
+/* Marketplace storefront tokens — docs/specs/24-marketplace-redesign.md.
+   Layered on spec 14's theme rather than replacing it: primary actions
+   stay brand blue. The marketplace has no white-labelling, so none of
+   these ever meet BrandThemeService. Every pairing is measured in the
+   spec; the amber is for text/highlights *on navy* and is never a fill
+   behind white text (1.67:1). */
+@theme static {
+  --color-mk-navy-950: #081634;
+  --color-mk-navy-900: #0c1f4a;
+  --color-mk-navy-800: #132c66;
+  --color-mk-accent: #fbbf24;
+  --color-mk-on-navy-muted: #c7d2fe;
+}
+
+/* `ui-map` (spec 20 slice 4 — passenger vehicle tracking). See
+   client-admin-app/src/styles.css's own comment on this import: only
+   the map *tiles* fetch over the network at runtime, and markers are
+   custom `L.divIcon`s styled from this app's own tokens. */
+@import 'leaflet/dist/leaflet.css';
+
+/* Leaflet's own attribution link ("OpenStreetMap contributors",
+   required by their tile usage policy) ships with 2.55:1 contrast
+   against its control's background and no non-colour styling — axe's
+   `link-in-text-block` rule (a real, previously unrun finding from
+   spec 21 slice 1). Underlining it is the fix that keeps the link
+   itself untouched — this is Leaflet/OSM's own text, not this app's
+   copy to recolour — and is enough on its own regardless of contrast,
+   since the rule only requires the link be distinguishable from
+   surrounding text by *some* means, not colour specifically. */
+.leaflet-control-attribution a {
+  text-decoration: underline;
+}

@@ -1,21 +1,22 @@
 """Views for apps.notifications — see docs/specs/9-notifications.md.
 
 `GET /notifications/mine/` and `POST /notifications/{id}/read/` both
-branch on `request.user.is_platform_staff`, reading through
-`Notification.objects` (the ordinary tenant-scoped manager) for a
-client-scoped recipient, or `Notification.all_objects` for a
-platform-staff one — the latter's own notifications can span several
+read through `Notification.all_objects`, not the ordinary tenant-scoped
+`.objects` — originally (see git history) this branched on
+`request.user.is_platform_staff`, `.all_objects` only for that case,
+since a platform-staff recipient's own notifications can span several
 different Clients (see `apps.notifications.models`'s module docstring:
 `client` on a KYC/KYB-submission row is the *submitting* Client, not
-the recipient's own, since platform staff have none), so `.objects`
-(which filters to the current request's single session client_id)
-would silently return nothing for them. `.all_objects` relies on RLS's
-own `client_id = session OR is_platform_staff` policy for the real
-boundary — the same trust model every other `IsPlatformStaff`-reachable
-cross-client read in this codebase already uses (e.g.
-`apps.businesses.views.BusinessSuperAdminListView`), just picked
-per-request here instead of via a separate view/permission class,
-since the same endpoint genuinely serves both kinds of caller.
+the recipient's own). docs/adr/0009 needs the identical treatment for an
+*ordinary* passenger too — a marketplace passenger's ticket-reminder
+notification carries the operator's own Client, not the passenger's own
+(Marketplace) one — so the branch was collapsed to always use
+`all_objects`: `recipient=user` is already the sole real authorization
+check either way, and using it unconditionally changes nothing for an
+operator-Client passenger (their own notifications only ever carry their
+own Client regardless of manager). Every caller must be inside
+`platform_staff_bypass()` — RLS itself, not just the ORM filter, still
+has to be satisfied, same as everywhere else docs/adr/0009 touches.
 """
 
 from django.db.models import QuerySet
@@ -26,6 +27,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from apps.core.rls import platform_staff_bypass
 from apps.identity.models import User
 
 from .models import Notification
@@ -46,9 +48,7 @@ _UNREAD_ONLY_PARAM = OpenApiParameter(
 
 
 def _notifications_for(user: User) -> QuerySet[Notification]:
-    if user.is_platform_staff:
-        return Notification.all_objects.filter(recipient=user)
-    return Notification.objects.filter(recipient=user)
+    return Notification.all_objects.filter(recipient=user, deleted_at__isnull=True)
 
 
 @extend_schema(parameters=[_UNREAD_ONLY_PARAM])
@@ -71,6 +71,10 @@ class NotificationMineView(generics.ListAPIView[Notification]):
             queryset = queryset.filter(read_at__isnull=True)
         return queryset
 
+    def list(self, request: Request, *args: object, **kwargs: object) -> Response:
+        with platform_staff_bypass():
+            return super().list(request, *args, **kwargs)
+
 
 @extend_schema(request=None, responses=NotificationSerializer)
 class NotificationReadView(generics.GenericAPIView[Notification]):
@@ -80,9 +84,10 @@ class NotificationReadView(generics.GenericAPIView[Notification]):
     def post(self, request: Request, pk: str) -> Response:
         user = request.user
         assert isinstance(user, User)
-        notification = get_object_or_404(_notifications_for(user), pk=pk)
-        notification = mark_notification_read(notification=notification)
-        return Response(NotificationSerializer(notification).data)
+        with platform_staff_bypass():
+            notification = get_object_or_404(_notifications_for(user), pk=pk)
+            notification = mark_notification_read(notification=notification)
+            return Response(NotificationSerializer(notification).data)
 
 
 @extend_schema(request=None, responses=NotificationReadAllResponseSerializer)
@@ -93,5 +98,6 @@ class NotificationReadAllView(generics.GenericAPIView[Notification]):
     def post(self, request: Request) -> Response:
         user = request.user
         assert isinstance(user, User)
-        count = mark_all_notifications_read(recipient=user)
+        with platform_staff_bypass():
+            count = mark_all_notifications_read(recipient=user)
         return Response(NotificationReadAllResponseSerializer({"marked_read": count}).data)

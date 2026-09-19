@@ -1,9 +1,11 @@
+from datetime import timedelta
 from typing import Any
 
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from apps.businesses.models import Business
+from apps.fares.serializers import TripFareQuoteSerializer
 from apps.fleet.models import Driver, Vehicle
 from apps.fleet.services import compliance_warnings_for
 from apps.network.models import Route
@@ -175,9 +177,23 @@ class TripRouteSerializer(serializers.Serializer):
     name = serializers.CharField()
 
 
+class TripVehicleTypeSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    name = serializers.CharField()
+
+
 class TripVehicleSerializer(serializers.Serializer):
     id = serializers.UUIDField()
     registration_number = serializers.CharField()
+    # docs/specs/22-marketplace.md slice 2. A marketplace search result
+    # spans operators a passenger has no other way to compare, and the
+    # kind of vehicle is one of the things Wakanow/TravelBeta/Trip.com
+    # style results always show — added to the shared serializer rather
+    # than a marketplace-only one, same reasoning as `business_name` on
+    # `TripSearchResultSerializer` below. Not nullable itself
+    # (`Vehicle.vehicle_type` has no `null=True`) — only the whole
+    # `vehicle` dict is, when `Trip.vehicle` has no vehicle assigned yet.
+    vehicle_type = TripVehicleTypeSerializer()
 
 
 class TripDriverSerializer(serializers.Serializer):
@@ -231,7 +247,11 @@ class TripSerializer(serializers.ModelSerializer[Trip]):
         vehicle = obj.vehicle
         if vehicle is None:
             return None
-        return {"id": vehicle.id, "registration_number": vehicle.registration_number}
+        return {
+            "id": vehicle.id,
+            "registration_number": vehicle.registration_number,
+            "vehicle_type": {"id": vehicle.vehicle_type.id, "name": vehicle.vehicle_type.name},
+        }
 
     @extend_schema_field(TripDriverSerializer(allow_null=True))
     def get_driver(self, obj: Trip) -> dict[str, Any] | None:
@@ -248,6 +268,73 @@ class TripSerializer(serializers.ModelSerializer[Trip]):
         if obj.driver is not None:
             warnings += compliance_warnings_for(obj.driver)
         return warnings
+
+
+class TripSearchStopSerializer(serializers.Serializer):
+    """Schema-only shape for the `from_stop`/`to_stop` pair on a
+    TripSearchResultSerializer row — just enough for the frontend to
+    label the result and hand the ids on to seat-picker, not the full
+    Stop record (`RouteStopEntrySerializer`'s own heavier shape) a
+    search result has no use for."""
+
+    id = serializers.UUIDField()
+    name = serializers.CharField()
+
+
+class TripSearchResultSerializer(serializers.Serializer):
+    """One row of GET /trips/search/ — a bookable Trip matched against an
+    origin/destination search, docs/specs/4-fares-seating-booking-
+    frontend.md §3.3 (reworked for that flow). Wraps `TripSerializer`'s
+    existing shape rather than replacing it: everything a passenger
+    already saw about a Trip (time, class, vehicle, compliance
+    warnings...) still applies unchanged, this just adds the specific
+    stop pair and fare *this* result was matched against — which lives
+    here, not on Trip itself, because the same Trip's Route can match a
+    single search on more than one valid stop pair (see
+    apps.network.services.find_route_stop_matches)."""
+
+    trip = TripSerializer()
+    from_stop = TripSearchStopSerializer()
+    to_stop = TripSearchStopSerializer()
+    # 0 means a direct connection — the frontend renders that as "Direct"
+    # rather than "0 stops"; that's display wording, not this
+    # serializer's job.
+    stops_between = serializers.IntegerField()
+    fare = TripFareQuoteSerializer()
+    # `Trip.business` (on `trip` above) is a bare id — this app's own
+    # single-Client search never needed the name, since every result
+    # already belongs to the searching passenger's own Client/Business.
+    # docs/specs/22-marketplace.md's marketplace search reuses this same
+    # serializer across every Client, where which operator a result
+    # belongs to is the one piece of context a flat, non-grouped result
+    # list cannot do without — added here rather than as a
+    # marketplace-only serializer so both callers share one shape.
+    business_name = serializers.SerializerMethodField()
+    # docs/specs/22-marketplace.md slice 2. Both derived from
+    # `Route.estimated_duration_minutes` (docs/specs/19-route-lifecycle.md
+    # — an existing, nullable, operator-set field; no migration needed),
+    # never stored on `Trip` itself, so there is nothing to keep in sync
+    # if a route's estimate is edited after Trips already exist against
+    # it. Both are `None` when the operator hasn't set a duration for
+    # this route yet — "the trip duration if available", not assumed to
+    # always exist.
+    duration_minutes = serializers.SerializerMethodField()
+    scheduled_arrival_at = serializers.SerializerMethodField()
+
+    def get_business_name(self, obj: dict[str, Any]) -> str:
+        return obj["trip"].business.name
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_duration_minutes(self, obj: dict[str, Any]) -> int | None:
+        return obj["trip"].route.estimated_duration_minutes
+
+    @extend_schema_field(serializers.DateTimeField(allow_null=True))
+    def get_scheduled_arrival_at(self, obj: dict[str, Any]) -> Any:
+        duration = self.get_duration_minutes(obj)
+        if duration is None:
+            return None
+        trip: Trip = obj["trip"]
+        return trip.scheduled_departure_at + timedelta(minutes=duration)
 
 
 class TripCreateSerializer(serializers.Serializer):
@@ -388,11 +475,22 @@ class TripStatusSerializer(serializers.Serializer):
 
 class TripSearchQuerySerializer(serializers.Serializer):
     """Query shape for the passenger-facing GET /trips/search/ — see
-    docs/specs/4-fares-seating-booking-frontend.md §3.3. Both params are
-    required (400 when either is missing or malformed), the same
+    docs/specs/4-fares-seating-booking-frontend.md §3.3, reworked for
+    the origin/destination flow (customer-app no longer makes a
+    passenger pick a Route first). `origin`/`destination`/`service_date`
+    are all required (400 when missing or malformed), the same
     convention apps.fares.serializers.TripFareQuerySerializer and
     apps.seating.serializers.TripAvailabilityQuerySerializer already use
     for their own required params.
+
+    **Named `origin`, not `source`**: `source` is a reserved attribute
+    every `rest_framework.serializers.Field` already carries (it names
+    which attribute *this* field reads from its parent instance) — a
+    field declared with that literal name works at runtime (DRF's
+    metaclass collects declared fields independently of that), but it
+    shadows the inherited type at the class-attribute level, which is
+    exactly the kind of thing worth not doing on a serializer field
+    class body just because it happens to work.
 
     Note what is deliberately *absent*: no `status` or
     `fare_collection_mode` field. Both are forced server-side by the
@@ -400,7 +498,8 @@ class TripSearchQuerySerializer(serializers.Serializer):
     or pay-as-you-go Trip by guessing query values.
     """
 
-    route = serializers.UUIDField()
+    origin = serializers.CharField(max_length=255)
+    destination = serializers.CharField(max_length=255)
     service_date = serializers.DateField()
     # Optional, unlike the two above: a passenger who has not chosen a
     # class should see every class on the route, not none of them.

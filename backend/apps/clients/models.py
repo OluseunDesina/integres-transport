@@ -33,6 +33,14 @@ class Client(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # docs/specs/22-marketplace.md / docs/adr/0009. The one Client every
+    # marketplace-registered passenger belongs to — never `NULL`, which
+    # is reserved for platform staff (ADR-0003), and never a hardcoded
+    # UUID (no precedent for one anywhere; every Client id auto-generates).
+    # Looked up via apps.clients.services.get_or_create_marketplace_client(),
+    # never by name.
+    is_marketplace = models.BooleanField(default=False)
+
     email = models.EmailField(unique=True, null=True, blank=True)
     # ASSUMPTION: no phone format validation in Phase 1 (E.164 or similar
     # could be added later without a migration — plain text for now).
@@ -50,6 +58,15 @@ class Client(models.Model):
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            # Mirrors apps.ledger's own single_integra_commission_account
+            # constraint exactly — at most one row may claim this.
+            models.UniqueConstraint(
+                fields=["is_marketplace"],
+                condition=models.Q(is_marketplace=True),
+                name="single_marketplace_client",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.name

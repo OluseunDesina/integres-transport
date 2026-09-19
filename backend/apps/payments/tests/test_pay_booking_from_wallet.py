@@ -6,9 +6,11 @@ removed when the blended-payment feature unified it into
 `POST /payments/` (see test_blended_payment.py and
 test_payments_views.py's own wallet-covers-it-all case)."""
 
+import datetime
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone
 
 from apps.booking.models import Booking
 from apps.businesses.tests.factories import BusinessFactory
@@ -111,6 +113,40 @@ def test_pay_booking_from_wallet_rejects_a_zero_balance() -> None:
     booking, _reservation = booking_with_a_held_seat(client, business, amount="200.00")
 
     with tenant_context(str(client.id)), pytest.raises(InsufficientWalletBalance):
+        pay_booking_from_wallet(booking=booking, passenger=booking.passenger)
+
+
+def test_pay_booking_from_wallet_rejects_a_hold_that_lapsed_before_the_sweep_ran() -> None:
+    """docs/specs/22-marketplace.md slice 2 — same race
+    `test_initiate_payment_rejects_a_hold_that_lapsed_before_the_sweep_ran`
+    proves for `initiate_payment`, here for this function's own direct
+    caller (`apps.booking.staff`'s wallet-settle path), which never goes
+    through `initiate_payment_with_wallet` at all.
+
+    Unlike that test, this does **not** assert the booking/reservation
+    rows are already `expired` in the database afterwards — they are
+    not: `expire_stale_holds_for_locked_booking` runs *inside* this
+    function's own `transaction.atomic()` block
+    (`apps.seating.services`'s own docstring explains why, as a
+    deliberate trade against a real deadlock this once caused), so
+    raising `BookingNotPayable` from that same block rolls the expiry
+    write back along with everything else. The periodic sweep still
+    catches it within a minute, same as before this fix existed — the
+    one thing that must hold here, and does, is that payment is
+    genuinely refused for a lapsed hold, not that the row is already
+    marked so this instant."""
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+    booking, reservation = booking_with_a_held_seat(client, business, amount="200.00")
+    _fund_wallet(
+        client=client, business=business, passenger=booking.passenger, amount=Decimal("500.00")
+    )
+    with tenant_context(str(client.id)):
+        reservation.held_until = timezone.now() - datetime.timedelta(minutes=1)
+        reservation.save(update_fields=["held_until"])
+
+    with tenant_context(str(client.id)), pytest.raises(BookingNotPayable):
         pay_booking_from_wallet(booking=booking, passenger=booking.passenger)
 
 

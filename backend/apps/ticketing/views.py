@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from apps.booking.models import Booking
 from apps.core.idempotency import IdempotencyKeyConflict
 from apps.core.permissions import HasPermission
+from apps.core.rls import platform_staff_bypass
 from apps.identity.models import User
 from apps.scheduling.models import Trip
 from apps.tapngo.services import CredentialInactive, UnknownToken
@@ -55,7 +56,16 @@ class BookingTicketsView(generics.ListAPIView[Ticket]):
     `apps.booking.views.BookingCancelView`'s own precedent; a real but
     not-yet-`paid` Booking returns 404 (no Tickets exist yet), matching
     `PaystackAccountConfigView`'s "distinct 404 for a real-but-not-yet-
-    configured state" precedent."""
+    configured state" precedent.
+
+    `all_objects` + `platform_staff_bypass()` throughout, not `.objects`
+    — docs/adr/0009, same reasoning as `BookingMineView`. The explicit
+    `booking.passenger_id != user.id` check below is what authorizes
+    this instead of RLS's Client-match; `all_objects.all()` on its own
+    Booking lookup deliberately narrows nothing further, exactly as
+    `.objects` didn't either — the ownership check is the only gate
+    either way.
+    """
 
     permission_classes = [IsAuthenticated]
     serializer_class = TicketSerializer
@@ -68,25 +78,26 @@ class BookingTicketsView(generics.ListAPIView[Ticket]):
         # `select_related` is load-bearing, not an optimisation:
         # TicketSerializer.trip_class reads through booking -> trip, so
         # without it every row costs two extra queries.
-        return Ticket.objects.select_related("booking__trip").filter(
-            booking_id=self.kwargs["booking_id"]
+        return Ticket.all_objects.select_related("booking__trip").filter(
+            booking_id=self.kwargs["booking_id"], deleted_at__isnull=True
         )
 
     def list(self, request: Request, *args: object, **kwargs: object) -> Response:
-        booking = get_object_or_404(Booking.objects.all(), pk=self.kwargs["booking_id"])
-        user = request.user
-        assert isinstance(user, User)
-        if booking.passenger_id != user.id:
-            return Response(
-                {"detail": "You cannot view another passenger's tickets."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-        if booking.status != Booking.Status.PAID:
-            return Response(
-                {"detail": "No tickets have been issued for this booking yet."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        return super().list(request, *args, **kwargs)
+        with platform_staff_bypass():
+            booking = get_object_or_404(Booking.all_objects.all(), pk=self.kwargs["booking_id"])
+            user = request.user
+            assert isinstance(user, User)
+            if booking.passenger_id != user.id:
+                return Response(
+                    {"detail": "You cannot view another passenger's tickets."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if booking.status != Booking.Status.PAID:
+                return Response(
+                    {"detail": "No tickets have been issued for this booking yet."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            return super().list(request, *args, **kwargs)
 
 
 @extend_schema(responses=SigningKeysResponseSerializer)

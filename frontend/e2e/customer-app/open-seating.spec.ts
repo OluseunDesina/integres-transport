@@ -17,28 +17,18 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-/** By value on a label *prefix*, for the reason `booking.spec.ts`'s own
- * helper documents: `trip-search.ts` appends the operator name to every
- * option once the browse endpoint spans more than one Business, which
- * these fixtures guarantee.
- *
- * Searches by name first (self-check 2026-09-12-specs19-21): this dev
- * database accumulates stray e2e-created routes faster than
- * `prune_e2e_test_data` can clear all of them (some are `Schedule`/
- * `Trip`/`FareRule`-protected, which that command deliberately never
- * force-cascades), and the browse endpoint's own picker is capped at
- * 100 results in its default, unfiltered order — enough stray routes
- * pushes this fixture's route past that cap. Typing its name narrows
- * the same request server-side instead, which is the actual fix; the
- * old unfiltered `<select>` was never going to be reliable once this
- * dev database's fixture data crossed the cap, no matter how much
- * pruning ran first. */
-async function selectFixtureRoute(page: Page): Promise<void> {
-  await page.getByLabel('Search').fill(ROUTE_NAME);
-  const select = page.getByLabel('Route', { exact: true });
-  const option = select.locator('option').filter({ hasText: ROUTE_NAME }).first();
-  await expect(option).toBeAttached();
-  await select.selectOption((await option.getAttribute('value')) ?? '');
+/**
+ * Fills the From/To origin/destination fields directly with the fixture
+ * stop names. `trip-search.ts`'s reworked flow (docs/specs/4-fares-
+ * seating-booking-frontend.md §3.3) matches these as free text against
+ * Stop names server-side (`apps.network.services.find_route_stop_matches`)
+ * rather than requiring a Route to be chosen first, so typing the name
+ * is enough — no suggestion needs to be clicked for the search itself to
+ * work.
+ */
+async function searchFixtureTrip(page: Page): Promise<void> {
+  await page.getByLabel('From').fill('Yaba');
+  await page.getByLabel('To').fill('Lekki');
 }
 
 /**
@@ -60,11 +50,13 @@ test.describe('customer-app open seating', () => {
     await signIn(page);
 
     await page.goto('/search');
-    await selectFixtureRoute(page);
-    await page.getByLabel('From').selectOption({ label: '1. Yaba' });
-    await page.getByLabel('To').selectOption({ label: '3. Lekki' });
+    await searchFixtureTrip(page);
     await page.getByLabel('Travel date').fill(todayISO());
     await page.getByRole('button', { name: 'Search' }).click();
+
+    // The fixture's stops are Yaba(1) → Obalende(2) → Lekki(3), so this
+    // search skips over one stop — never labelled "Direct".
+    await expect(page.getByText('1 stop').first()).toBeVisible();
 
     await page.getByRole('button', { name: 'Continue with' }).first().click();
 

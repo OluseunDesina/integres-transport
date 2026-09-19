@@ -143,6 +143,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/customer/register/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description `POST /api/v1/auth/customer/register/` — docs/specs/22-marketplace.md.
+         *     Same shape as `apps.clients.views.ClientRegistrationView`: validate,
+         *     create, log the caller straight in via the same token-obtain path
+         *     login already uses, no separate "verify then sign in" step.
+         */
+        post: operations["auth_customer_register_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/customer/token/": {
         parameters: {
             query?: never;
@@ -256,6 +278,14 @@ export interface paths {
          *     not-yet-`paid` Booking returns 404 (no Tickets exist yet), matching
          *     `PaystackAccountConfigView`'s "distinct 404 for a real-but-not-yet-
          *     configured state" precedent.
+         *
+         *     `all_objects` + `platform_staff_bypass()` throughout, not `.objects`
+         *     — docs/adr/0009, same reasoning as `BookingMineView`. The explicit
+         *     `booking.passenger_id != user.id` check below is what authorizes
+         *     this instead of RLS's Client-match; `all_objects.all()` on its own
+         *     Booking lookup deliberately narrows nothing further, exactly as
+         *     `.objects` didn't either — the ownership check is the only gate
+         *     either way.
          */
         get: operations["bookings_tickets_list"];
         put?: never;
@@ -280,6 +310,13 @@ export interface paths {
          *     `booking.manage` codename exists for staff (§2 of the spec): staff
          *     can see Bookings (`booking.view`), not cancel them on a passenger's
          *     behalf, this phase.
+         *
+         *     `all_objects` + `platform_staff_bypass()`, not `.objects` —
+         *     docs/adr/0009, same reasoning as `BookingMineView`/`BookingTicketsView`:
+         *     a marketplace passenger must be able to cancel a booking whose
+         *     `client` is the operator's, not their own. The
+         *     `booking.passenger_id != user.id` check is the sole authorization
+         *     gate either way, unchanged.
          */
         post: operations["bookings_cancel_create"];
         delete?: never;
@@ -295,7 +332,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description GET /bookings/mine/ — the passenger's own booking history. */
+        /**
+         * @description GET /bookings/mine/ — the passenger's own booking history.
+         *
+         *     `all_objects` + `platform_staff_bypass()`, not `.objects` — docs/adr/0009.
+         *     A marketplace-booked Booking's `client` is its Trip's own (operator)
+         *     Client, never the passenger's own, so RLS's Client-match would hide
+         *     it from the very passenger who made it. `passenger=user` is the sole
+         *     authorization check this relies on instead, same as it always was;
+         *     `deleted_at__isnull=True` is new — `all_objects` does not exclude
+         *     soft-deleted rows the way `.objects` did.
+         */
         get: operations["bookings_mine_list"];
         put?: never;
         post?: never;
@@ -938,6 +985,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/marketplace/bookings/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description POST /marketplace/bookings/ — the cross-Client variant of
+         *     `apps.booking.views.BookingListCreateView`'s `create()`. Same body
+         *     shape, same error mapping; `BookingCreateSerializer`/`create_booking`
+         *     both run unmodified, once the resolved Trip's own Client is assumed
+         *     (docs/adr/0009's third mechanism) — everything they read or write
+         *     (`FareRule`, `Seat`, `Booking` itself) belongs to that Client, not
+         *     the passenger's own (Marketplace) one.
+         */
+        post: operations["marketplace_bookings_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/marketplace/payments/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description POST /marketplace/payments/ — the cross-Client variant of
+         *     `apps.payments.views.PaymentListCreateView`'s `create()`, booking-only
+         *     (no wallet top-up or wallet-balance blend — out of scope for this
+         *     slice, docs/specs/22-marketplace.md). The Booking is resolved via
+         *     `resolve_own_booking_across_clients` (the "my own record" shape,
+         *     docs/adr/0009) rather than `_resolve_booking`, since the latter is
+         *     `.objects`-scoped to the wrong Client at this point.
+         */
+        post: operations["marketplace_payments_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/marketplace/stops/suggest/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /marketplace/stops/suggest/?q=&limit= — the cross-Client
+         *     variant of `apps.network.views.StopSuggestView`. A bare list, not a
+         *     paginated envelope, same reasoning as that view. `AllowAny` — see
+         *     this module's own docstring.
+         */
+        get: operations["marketplace_stops_suggest_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/marketplace/trips/{id}/availability/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /marketplace/trips/{id}/availability/ — the cross-Client
+         *     variant of `apps.seating.views.TripAvailabilityView`. The Trip is
+         *     resolved via `resolve_bookable_trip_across_clients` first (mapped to
+         *     404 on `TripNotBookable`); `TripAvailabilityQuerySerializer`'s own
+         *     `from_stop`/`to_stop` resolution is `.objects`-based, so it only runs
+         *     once the ORM contextvar is pointed at the Trip's own Client.
+         *     `AllowAny` — see this module's own docstring.
+         */
+        get: operations["marketplace_trips_availability_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/marketplace/trips/{id}/fare/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /marketplace/trips/{id}/fare/ — the cross-Client variant of
+         *     `apps.fares.views.TripFareView`. `seat-picker` calls this
+         *     independently of the search result's own embedded fare (prices can
+         *     move between search and seat selection); same resolve-then-assume-
+         *     Client pattern as `MarketplaceTripAvailabilityView`. `AllowAny` —
+         *     see this module's own docstring.
+         */
+        get: operations["marketplace_trips_fare_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/marketplace/trips/search/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /marketplace/trips/search/ — the cross-Client variant of
+         *     `apps.scheduling.views.TripSearchView`. Same query shape
+         *     (`TripSearchQuerySerializer` is plain field validation with no
+         *     tenant-scoped lookups, so it is reused unchanged), same paginated
+         *     response shape. `AllowAny` — see this module's own docstring.
+         */
+        get: operations["marketplace_trips_search_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications/{id}/read/": {
         parameters: {
             query?: never;
@@ -1080,7 +1271,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description GET /payments/{id}/ — own PaymentIntent only. */
+        /**
+         * @description GET /payments/{id}/ — own PaymentIntent only. See
+         *     `PaymentIntentMineView`'s own docstring for the `all_objects` +
+         *     `platform_staff_bypass()` reasoning.
+         */
         get: operations["payments_retrieve"];
         put?: never;
         post?: never;
@@ -1097,7 +1292,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description GET /payments/mine/ — the passenger's own PaymentIntents. */
+        /**
+         * @description GET /payments/mine/ — the passenger's own PaymentIntents.
+         *
+         *     `all_objects` + `platform_staff_bypass()`, not `.objects` —
+         *     docs/adr/0009, same reasoning as `apps.booking.views.BookingMineView`:
+         *     a marketplace-initiated PaymentIntent's `client` is the operator's,
+         *     not the passenger's own. `super().list()` already does the actual
+         *     queryset evaluation (pagination/serialization); wrapping it is
+         *     enough, no custom `list()` body needed here the way `BookingMineView`
+         *     has one for unrelated reasons.
+         */
         get: operations["payments_mine_list"];
         put?: never;
         post?: never;
@@ -1490,6 +1695,41 @@ export interface paths {
         patch: operations["stops_partial_update"];
         trace?: never;
     };
+    "/api/v1/stops/suggest/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * @description GET /stops/suggest/?q=&limit= — the passenger-facing Stop
+         *     suggestion list backing customer-app's origin/destination typeahead
+         *     fields, see docs/specs/4-fares-seating-booking-frontend.md §3.3
+         *     (reworked flow) and `apps.scheduling.views.TripSearchView`, the
+         *     endpoint an accepted suggestion is actually searched against.
+         *
+         *     Same posture as `RouteBrowseView` just above: `IsAuthenticated`, not
+         *     permission-codename gated — passengers hold no Role (docs/adr/0003).
+         *
+         *     `pagination_class = None`: a bare, capped (`limit`, max 50) list,
+         *     not a paginated resource — same reasoning and precedent as
+         *     `apps.businesses.views.ClientKycQueueView`/
+         *     `apps.seating.views.VehicleTypeSeatsView`, both linked from that
+         *     same override elsewhere in this codebase. Without it drf-spectacular
+         *     documents this as the paginated `{count, results}` envelope every
+         *     other list endpoint here uses, which is not what this actually
+         *     returns.
+         */
+        get: operations["stops_suggest_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/super-admin/businesses/": {
         parameters: {
             query?: never;
@@ -1504,6 +1744,13 @@ export interface paths {
          *     settlement-run trigger) are usable: neither the tenant-scoped
          *     `GET /businesses/` nor the kyb_status-filtered `KybQueueListView`
          *     let platform staff find an arbitrary, already-approved Business.
+         *
+         *     Gained `kyb_status`/`vertical`/`is_active` filtering once the
+         *     super-admin frontend's separate KYB queue page was folded into this
+         *     one list (both showed `Business` rows with no way to cross-filter
+         *     between the two screens). `KybQueueListView`/`KybDecideView` below
+         *     are unchanged — this list is now the only page that renders them,
+         *     but the decide endpoint still does the actual mutation.
          */
         get: operations["super_admin_businesses_list"];
         put?: never;
@@ -2120,17 +2367,21 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * @description GET /trips/search/ — the passenger-facing Trip list, see
-         *     docs/specs/4-fares-seating-booking-frontend.md §3.3.
+         * @description GET /trips/search/ — the passenger-facing Trip search, see
+         *     docs/specs/4-fares-seating-booking-frontend.md §3.3 (reworked:
+         *     origin/destination text instead of a pre-chosen Route — a passenger
+         *     no longer needs to already know which Route connects them).
          *
-         *     Separate from TripListCreateView for the same reason
-         *     apps.network.views.RouteBrowseView is separate from
-         *     RouteListCreateView: passengers hold no Role/Permission
-         *     (docs/adr/0003), so this is IsAuthenticated + ordinary tenancy
-         *     scoping. Reuses TripSerializer unchanged — `compliance_warnings` is
-         *     useful rather than sensitive to a passenger choosing between
-         *     departures, so forking a passenger-only subset would be extra
-         *     surface for no gain.
+         *     A plain `ListAPIView` no longer fits: results come from
+         *     `apps.network.services.find_route_stop_matches` fanning out across
+         *     however many `(route, from_stop, to_stop)` pairs it finds, not one
+         *     queryset — so this builds a plain list of result rows itself and
+         *     hands it to DRF's own pagination machinery, which works on any
+         *     sized, sliceable sequence, not only a queryset.
+         *
+         *     Still `IsAuthenticated` + ordinary tenancy scoping only, same
+         *     posture as before and as `apps.network.views.RouteBrowseView`
+         *     (passengers hold no Role/Permission — docs/adr/0003).
          */
         get: operations["trips_search_list"];
         put?: never;
@@ -2368,6 +2619,7 @@ export interface components {
             readonly reference: string;
             /** Format: uuid */
             readonly business: string;
+            readonly business_name: string;
             readonly trip: components["schemas"]["BookingTrip"];
             /** Format: uuid */
             readonly passenger: string;
@@ -2418,6 +2670,11 @@ export interface components {
             from_stop?: string;
             /** Format: uuid */
             to_stop?: string;
+            traveler?: components["schemas"]["TravelerInput"];
+        };
+        BookingId: {
+            /** Format: uuid */
+            booking_id: string;
         };
         /**
          * @description * `reservation` - Reservation
@@ -2438,6 +2695,7 @@ export interface components {
             from_stop: string;
             /** Format: uuid */
             to_stop: string;
+            traveler?: components["schemas"]["TravelerInput"];
         };
         /**
          * @description Nested read-only shape for `BookingSerializer.seats` — queried
@@ -2670,6 +2928,27 @@ export interface components {
          * @enum {string}
          */
         CurrencyEnum: "NGN" | "ZAR" | "GHS" | "KES" | "XOF" | "USD" | "BWP";
+        /**
+         * @description `POST /api/v1/auth/customer/register/` (docs/specs/22-marketplace.md)
+         *     — the first passenger self-registration path on the platform.
+         *     Deliberately minimal, matching this app's existing posture (no
+         *     phone, no verification flow) — see `apps.identity.services
+         *     .register_customer`'s own docstring for why every registrant lands
+         *     under the one Marketplace Client rather than picking one.
+         *
+         *     Email uniqueness is checked against `(client, email)`
+         *     (`unique_email_per_client`), scoped to the Marketplace Client
+         *     specifically — the same email may already exist under some
+         *     operator's own Client without conflict, matching
+         *     `ClientRegistrationSerializer.validate_email`'s reasoning next door.
+         */
+        CustomerRegistration: {
+            /** Format: email */
+            email: string;
+            password: string;
+            first_name: string;
+            last_name?: string;
+        };
         /**
          * @description Shared base for the customer and client-admin serializers, which
          *     both need optional client disambiguation.
@@ -2968,6 +3247,14 @@ export interface components {
             /** Format: date-time */
             effective_from?: string;
         };
+        /**
+         * @description * `male` - Male
+         *     * `female` - Female
+         *     * `other` - Other
+         *     * `prefer_not_to_say` - Prefer not to say
+         * @enum {string}
+         */
+        GenderEnum: "male" | "female" | "other" | "prefer_not_to_say";
         Health: {
             status: string;
         };
@@ -3437,6 +3724,28 @@ export interface components {
             fare_collection_mode: string;
             vehicle: string | null;
             driver: string | null;
+        };
+        /**
+         * @description POST /marketplace/bookings/ body — docs/specs/22-marketplace.md
+         *     slice 2. Same rules as the base `BookingCreateSerializer` (both
+         *     exist unchanged, per this module's own docstring), plus one more:
+         *     a marketplace booking is the one place this platform actually
+         *     captures who is travelling, so `traveler` is required here where
+         *     the base serializer leaves it optional for `apps.booking`'s own
+         *     endpoint. A seats-mode booking needs one per seat; a places-mode
+         *     (open-seating/quick-book) booking needs the single top-level one —
+         *     see `TravelerInputSerializer`'s own docstring for that split.
+         */
+        MarketplaceBookingCreate: {
+            /** Format: uuid */
+            trip: string;
+            seats?: components["schemas"]["BookingSeatRequest"][];
+            passenger_count?: number;
+            /** Format: uuid */
+            from_stop?: string;
+            /** Format: uuid */
+            to_stop?: string;
+            traveler?: components["schemas"]["TravelerInput"];
         };
         /**
          * @description `permissions` is additive to the Phase 0 contract (§4) — passengers
@@ -3935,6 +4244,21 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["Trip"][];
+        };
+        PaginatedTripSearchResultList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=400&limit=100
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?offset=200&limit=100
+             */
+            previous?: string | null;
+            results: components["schemas"]["TripSearchResult"][];
         };
         PaginatedVehicleList: {
             /** @example 123 */
@@ -4801,6 +5125,7 @@ export interface components {
             from_stop?: string;
             /** Format: uuid */
             to_stop?: string;
+            traveler?: components["schemas"]["TravelerInput"];
             /**
              * Format: uuid
              * @description The passenger's id, from `GET /passengers/lookup/`.
@@ -4929,6 +5254,18 @@ export interface components {
             latitude?: string | null;
             /** Format: decimal */
             longitude?: string | null;
+        };
+        /**
+         * @description One suggestion row. `id` is a representative Stop id for the
+         *     dropdown's own `track by` key — the actual search
+         *     (`apps.scheduling.views.TripSearchView`) matches by name text, not
+         *     this id, so which same-named Stop it happens to point at across
+         *     Businesses does not matter.
+         */
+        StopSuggest: {
+            /** Format: uuid */
+            id: string;
+            name: string;
         };
         SuperAdminTokenObtain: {
             /** Format: email */
@@ -5099,6 +5436,15 @@ export interface components {
             booking_status: components["schemas"]["BookingStatusEnum"];
         };
         /**
+         * @description * `mr` - Mr
+         *     * `mrs` - Mrs
+         *     * `miss` - Miss
+         *     * `ms` - Ms
+         *     * `dr` - Dr
+         * @enum {string}
+         */
+        TitleEnum: "mr" | "mrs" | "miss" | "ms" | "dr";
+        /**
          * @description Documents the actual response shape of the three token-obtain
          *     endpoints for drf-spectacular. `AudienceScopedTokenObtainSerializer`
          *     itself only describes the *request* fields (email/password/client),
@@ -5113,6 +5459,30 @@ export interface components {
         TokenRefresh: {
             readonly access: string;
             refresh: string;
+        };
+        /**
+         * @description Who is actually travelling — docs/specs/22-marketplace.md slice 2.
+         *     Nested per seat on `BookingSeatRequestSerializer` for a true
+         *     seats-mode booking, or once at the top level on
+         *     `BookingCreateSerializer` for a places-mode (open-seating/
+         *     quick-book) booking's single lead traveler — see
+         *     `apps.booking.services.create_booking`'s own docstring for which is
+         *     which. Entirely optional on both: `apps.booking`'s own endpoint
+         *     accepts a body with no traveler at all; only
+         *     `apps.marketplace.views.MarketplaceBookingCreateSerializer` requires
+         *     one.
+         */
+        TravelerInput: {
+            title?: components["schemas"]["TitleEnum"];
+            first_name: string;
+            last_name: string;
+            phone: string;
+            /** Format: email */
+            email: string;
+            /** Format: date */
+            date_of_birth?: string | null;
+            gender?: components["schemas"]["GenderEnum"];
+            nationality?: string;
         };
         /**
          * @description Read-only shape — Trip has no plain field-level PATCH; writes go
@@ -5319,6 +5689,41 @@ export interface components {
             name: string;
         };
         /**
+         * @description One row of GET /trips/search/ — a bookable Trip matched against an
+         *     origin/destination search, docs/specs/4-fares-seating-booking-
+         *     frontend.md §3.3 (reworked for that flow). Wraps `TripSerializer`'s
+         *     existing shape rather than replacing it: everything a passenger
+         *     already saw about a Trip (time, class, vehicle, compliance
+         *     warnings...) still applies unchanged, this just adds the specific
+         *     stop pair and fare *this* result was matched against — which lives
+         *     here, not on Trip itself, because the same Trip's Route can match a
+         *     single search on more than one valid stop pair (see
+         *     apps.network.services.find_route_stop_matches).
+         */
+        TripSearchResult: {
+            trip: components["schemas"]["Trip"];
+            from_stop: components["schemas"]["TripSearchStop"];
+            to_stop: components["schemas"]["TripSearchStop"];
+            stops_between: number;
+            fare: components["schemas"]["TripFareQuote"];
+            readonly business_name: string;
+            readonly duration_minutes: number | null;
+            /** Format: date-time */
+            readonly scheduled_arrival_at: string | null;
+        };
+        /**
+         * @description Schema-only shape for the `from_stop`/`to_stop` pair on a
+         *     TripSearchResultSerializer row — just enough for the frontend to
+         *     label the result and hand the ids on to seat-picker, not the full
+         *     Stop record (`RouteStopEntrySerializer`'s own heavier shape) a
+         *     search result has no use for.
+         */
+        TripSearchStop: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        /**
          * @description POST /trips/{id}/status/ body. Mirrors
          *     apps.businesses.serializers.KybDecisionSerializer's
          *     reject-needs-a-reason shape, adapted to "cancelled needs a reason".
@@ -5335,6 +5740,12 @@ export interface components {
             /** Format: uuid */
             id: string;
             registration_number: string;
+            vehicle_type: components["schemas"]["TripVehicleType"];
+        };
+        TripVehicleType: {
+            /** Format: uuid */
+            id: string;
+            name: string;
         };
         TripsLiveResponse: {
             results: components["schemas"]["TripLiveEnvelope"][];
@@ -5649,6 +6060,31 @@ export interface operations {
                 "application/json": components["schemas"]["ClientAdminTokenObtain"];
                 "application/x-www-form-urlencoded": components["schemas"]["ClientAdminTokenObtain"];
                 "multipart/form-data": components["schemas"]["ClientAdminTokenObtain"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenObtainResponse"];
+                };
+            };
+        };
+    };
+    auth_customer_register_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CustomerRegistration"];
+                "application/x-www-form-urlencoded": components["schemas"]["CustomerRegistration"];
+                "multipart/form-data": components["schemas"]["CustomerRegistration"];
             };
         };
         responses: {
@@ -6918,6 +7354,156 @@ export interface operations {
             };
         };
     };
+    marketplace_bookings_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated key. A retried request with the same key and body returns the original result rather than creating a second one — same contract as apps.booking.views/apps.payments.views's own Idempotency-Key parameter. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketplaceBookingCreate"];
+                "application/x-www-form-urlencoded": components["schemas"]["MarketplaceBookingCreate"];
+                "multipart/form-data": components["schemas"]["MarketplaceBookingCreate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Booking"];
+                };
+            };
+        };
+    };
+    marketplace_payments_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Client-generated key. A retried request with the same key and body returns the original result rather than creating a second one — same contract as apps.booking.views/apps.payments.views's own Idempotency-Key parameter. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingId"];
+                "application/x-www-form-urlencoded": components["schemas"]["BookingId"];
+                "multipart/form-data": components["schemas"]["BookingId"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentInitiateResponse"];
+                };
+            };
+        };
+    };
+    marketplace_stops_suggest_list: {
+        parameters: {
+            query?: {
+                limit?: number;
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopSuggest"][];
+                };
+            };
+        };
+    };
+    marketplace_trips_availability_retrieve: {
+        parameters: {
+            query: {
+                from_stop: string;
+                to_stop: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripBookability"];
+                };
+            };
+        };
+    };
+    marketplace_trips_fare_retrieve: {
+        parameters: {
+            query: {
+                from_stop: string;
+                to_stop: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TripFareQuote"];
+                };
+            };
+        };
+    };
+    marketplace_trips_search_list: {
+        parameters: {
+            query?: {
+                /** @description Number of results to return per page. */
+                limit?: number;
+                /** @description The initial index from which to return the results. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTripSearchResultList"];
+                };
+            };
+        };
+    };
     notifications_read_create: {
         parameters: {
             query?: never;
@@ -7753,15 +8339,45 @@ export interface operations {
             };
         };
     };
+    stops_suggest_list: {
+        parameters: {
+            query?: {
+                /** @description Maximum rows to return (default 10, max 50). */
+                limit?: number;
+                /** @description Case-insensitive substring match against Stop name. Omit (or leave blank) for a default list. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StopSuggest"][];
+                };
+            };
+        };
+    };
     super_admin_businesses_list: {
         parameters: {
             query?: {
+                /** @description Filter by active status. */
+                is_active?: "false" | "true";
+                /** @description Filter by KYB review status. */
+                kyb_status?: string;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
                 /** @description Filter by Business name (icontains). */
                 search?: string;
+                /** @description Filter by business vertical. */
+                vertical?: string;
             };
             header?: never;
             path?: never;
@@ -8516,11 +9132,14 @@ export interface operations {
     trips_search_list: {
         parameters: {
             query: {
+                /** @description Where the passenger is travelling to — matched against Stop names (case-insensitive, partial). */
+                destination: string;
                 /** @description Number of results to return per page. */
                 limit?: number;
                 /** @description The initial index from which to return the results. */
                 offset?: number;
-                route: string;
+                /** @description Where the passenger is travelling from — matched against Stop names (case-insensitive, partial). */
+                origin: string;
                 /** @description The service date to search (YYYY-MM-DD). */
                 service_date: string;
                 /** @description Filter to a single service class (premium/exclusive/standard/mini). */
@@ -8537,7 +9156,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedTripList"];
+                    "application/json": components["schemas"]["PaginatedTripSearchResultList"];
                 };
             };
         };

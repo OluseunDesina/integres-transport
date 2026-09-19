@@ -29,7 +29,7 @@ from apps.identity.models import User
 from apps.identity.services import create_default_roles
 from apps.incidents.models import Incident
 from apps.network.models import Route, Stop
-from apps.network.services import create_route, create_stop, set_route_stops
+from apps.network.services import create_route, create_stop, set_route_status, set_route_stops
 from apps.scheduling.models import Trip
 from apps.scheduling.services import create_manual_trip
 from apps.seating.models import Seat
@@ -470,6 +470,29 @@ class Command(BaseCommand):
 
         if not FareRule.all_objects.filter(business=business, route=route).exists():
             create_fare_rule(business=business, route=route, amount=BOOKABLE_FARE, created_by=actor)
+
+        # docs/specs/19-route-lifecycle.md: `create_route` defaults every
+        # new Route to `draft`, and both `RouteBrowseView` and
+        # `find_route_stop_matches` (the passenger-facing search this
+        # fixture exists to feed) require `active` — a route this
+        # command re-creates after a wipe would otherwise sit forever in
+        # a status neither is willing to show. `set_route_status` is a
+        # no-op once already active, so this is safe on every run.
+        #
+        # Unlike every other call in this file, this one needs
+        # `set_current_client_id` around it: `set_route_status`'s own
+        # activation guard reads `RouteStop.objects`/`route_fare_summary`
+        # (tenant-scoped, contextvar-driven), not `all_objects` — the
+        # same trap `_seed_boardable_open_seating_ticket` hits calling
+        # `create_booking`, and `platform_staff_bypass()`'s own docstring
+        # is explicit that it never touches this contextvar, only the
+        # Postgres GUCs.
+        if route.status == Route.Status.DRAFT:
+            client_token = set_current_client_id(str(business.client_id))
+            try:
+                set_route_status(route=route, new_status=Route.Status.ACTIVE, actor=actor)
+            finally:
+                reset_current_client_id(client_token)
 
         # docs/specs/15-trip-classes.md slice 3 — a second class on this
         # same Route, so the passenger app has two prices to tell apart.
@@ -921,6 +944,17 @@ class Command(BaseCommand):
             create_fare_rule(
                 business=business, route=route, amount=OPEN_SEATING_FARE, created_by=actor
             )
+
+        # See the identical note (and the contextvar workaround) in
+        # `_seed_bookable_journey`: a Route this command re-creates after
+        # a wipe starts `draft`, and the passenger-facing search this
+        # fixture feeds only matches `active` routes.
+        if route.status == Route.Status.DRAFT:
+            client_token = set_current_client_id(str(business.client_id))
+            try:
+                set_route_status(route=route, new_status=Route.Status.ACTIVE, actor=actor)
+            finally:
+                reset_current_client_id(client_token)
 
         today = timezone.localdate()
         for offset in range(OPEN_SEATING_TRIP_DAYS):

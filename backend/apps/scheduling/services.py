@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from apps.businesses.models import Business
 from apps.core.audit import record_audit_event
+from apps.core.rls import platform_staff_bypass
 from apps.fleet.models import Driver, Vehicle
 from apps.identity.models import User
 from apps.network.models import Route
@@ -32,6 +33,13 @@ TRIP_TRANSITIONS: dict[str, set[str]] = {
     Trip.Status.COMPLETED: set(),
     Trip.Status.CANCELLED: set(),
 }
+
+
+class TripNotBookable(Exception):
+    """Raised by `resolve_bookable_trip_across_clients` when the four
+    forced predicates don't all hold — mapped to a 404 by the view layer,
+    indistinguishable from "doesn't exist" (same posture as every other
+    not-found-vs-not-authorized case in this codebase)."""
 
 
 class TripClassNotAvailableOnRoute(Exception):
@@ -361,4 +369,43 @@ def transition_trip_status(*, trip: Trip, new_status: str, reason: str, actor: U
     record_audit_event(
         actor=actor, action="trip.status_changed", target=trip, status=new_status, reason=reason
     )
+    return trip
+
+
+def resolve_bookable_trip_across_clients(*, trip_id: str) -> Trip:
+    """The one place `apps.marketplace`'s views resolve a single Trip —
+    docs/adr/0009, docs/specs/22-marketplace.md. Used by both seat
+    availability and booking creation, so these four checks live in
+    exactly one place rather than being re-derived (and potentially
+    drifting) per call site.
+
+    `Trip.all_objects`, since a marketplace passenger's own Client is
+    never the one that owns the Trip being booked. Every one of the four
+    predicates below is forced, first-class, and asserted fresh here —
+    none of them is "already true" the way it incidentally was under
+    RLS's own Client-scoping (see docs/adr/0009's own findings:
+    `TripAvailabilityView` doesn't independently check `status` today,
+    and Business KYB approval is only ever enforced at write time).
+
+    Also needs `platform_staff_bypass()`, not just `all_objects` — RLS
+    applies regardless of manager, so without it this would silently see
+    nothing for a genuinely cross-Client Trip. See
+    `apps.network.services.find_route_stop_matches_across_clients`'s own
+    docstring for the identical reasoning; this is that same, deliberate
+    first passenger-facing use of the bypass.
+    """
+    with platform_staff_bypass():
+        trip = (
+            Trip.all_objects.select_related("route", "business", "vehicle__vehicle_type")
+            .filter(
+                id=trip_id,
+                status=Trip.Status.SCHEDULED,
+                fare_collection_mode=Business.FareCollectionMode.PREPAID,
+                route__status=Route.Status.ACTIVE,
+                business__kyb_status=Business.KybStatus.APPROVED,
+            )
+            .first()
+        )
+    if trip is None:
+        raise TripNotBookable(f"Trip {trip_id} is not bookable on the marketplace.")
     return trip

@@ -373,14 +373,11 @@ def mark_notification_read(*, notification: Notification) -> Notification:
 
 
 def mark_all_notifications_read(*, recipient: User) -> int:
-    # Same read-side branch as NotificationMineView/NotificationReadView:
-    # a platform-staff recipient's own notifications can span several
-    # different Clients (they aren't the client-owner of the rows they
-    # receive — see this module's own top-of-file docstring), so
-    # `.objects` (client_id = current session's client) would silently
-    # match zero rows for them. `.all_objects` relies on RLS's own
-    # `client_id = session OR is_platform_staff` policy for the real
-    # boundary, same as every other IsPlatformStaff-reachable cross-client
-    # read in this codebase.
-    manager = Notification.all_objects if recipient.is_platform_staff else Notification.objects
-    return manager.filter(recipient=recipient, read_at__isnull=True).update(read_at=timezone.now())
+    # `all_objects` unconditionally now (docs/adr/0009) — see
+    # apps.notifications.views's own module docstring for why the
+    # platform-staff-only branch this used to have was collapsed.
+    # Caller must be inside `platform_staff_bypass()`; RLS itself still
+    # gates this, `all_objects` only removes the ORM-level filter.
+    return Notification.all_objects.filter(recipient=recipient, read_at__isnull=True).update(
+        read_at=timezone.now()
+    )

@@ -16,7 +16,11 @@ function makeTrip(overrides: Record<string, unknown> = {}): Trip {
     status_changed_at: null,
     actual_departure_at: null,
     actual_arrival_at: null,
-    vehicle: { id: 'vehicle-1', registration_number: 'LAG-123-XY' },
+    vehicle: {
+      id: 'vehicle-1',
+      registration_number: 'LAG-123-XY',
+      vehicle_type: { id: 'vehicle-type-1', name: 'Standard Bus' },
+    },
     driver: { id: 'driver-1', name: 'Ada Obi' },
     booking_mode: 'reservation',
     fare_collection_mode: 'prepaid',

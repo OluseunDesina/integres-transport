@@ -17,6 +17,7 @@ from rest_framework.serializers import BaseSerializer
 from apps.analytics.filters import apply_to_booking_records, resolve_filters
 from apps.core.idempotency import IdempotencyKeyConflict
 from apps.core.permissions import HasPermission
+from apps.core.rls import platform_staff_bypass
 from apps.fares.services import FareNotConfigured
 from apps.identity.models import User
 from apps.scheduling.models import Trip
@@ -108,9 +109,21 @@ def _reservations_by_booking(bookings: Sequence[Booking]) -> dict[Any, list[Seat
     get_queryset() docstring already flags as a real problem in this
     codebase. `SeatReservation.booking` has `related_name="+"`, so this
     can't be a `Prefetch()` — there is no reverse manager to attach one
-    to."""
-    reservations = SeatReservation.objects.filter(
-        booking_id__in=[booking.id for booking in bookings]
+    to.
+
+    `all_objects`, not `.objects` — `BookingMineView`'s own call site
+    (docs/adr/0009) can pass `bookings` spanning more than one Client at
+    once (a marketplace passenger's own history), and `.objects`'s ORM
+    filter would apply the *caller's* single ambient Client on top of
+    `booking_id__in=`, silently emptying every reservation for a
+    Booking under any other Client. Safe for `BookingListCreateView`'s
+    own (single-Client) call site too: `booking_id__in=` already narrows
+    to exactly the Bookings that call site's own `.objects`-scoped
+    queryset produced, so removing the redundant filter here changes
+    nothing there.
+    """
+    reservations = SeatReservation.all_objects.filter(
+        booking_id__in=[booking.id for booking in bookings], deleted_at__isnull=True
     ).select_related("seat", "from_stop", "to_stop")
     grouped: dict[Any, list[SeatReservation]] = defaultdict(list)
     for reservation in reservations:
@@ -173,7 +186,7 @@ class BookingListCreateView(generics.ListCreateAPIView[Booking]):
         # "trip__route", not just "trip": BookingSerializer.get_trip
         # embeds the route name, which is one query per row without the
         # deeper join.
-        queryset = Booking.objects.select_related("trip__route", "passenger").all()
+        queryset = Booking.objects.select_related("trip__route", "passenger", "business").all()
         query = BookingListQuerySerializer(data=self.request.query_params.dict())
         query.is_valid(raise_exception=True)
 
@@ -237,6 +250,7 @@ class BookingListCreateView(generics.ListCreateAPIView[Booking]):
                 passenger_count=data.get("passenger_count"),
                 from_stop=data.get("from_stop"),
                 to_stop=data.get("to_stop"),
+                traveler=data.get("traveler"),
                 idempotency_key=idempotency_key,
             )
         except FareNotConfigured as exc:
@@ -261,7 +275,16 @@ class BookingListCreateView(generics.ListCreateAPIView[Booking]):
 
 
 class BookingMineView(generics.ListAPIView[Booking]):
-    """GET /bookings/mine/ — the passenger's own booking history."""
+    """GET /bookings/mine/ — the passenger's own booking history.
+
+    `all_objects` + `platform_staff_bypass()`, not `.objects` — docs/adr/0009.
+    A marketplace-booked Booking's `client` is its Trip's own (operator)
+    Client, never the passenger's own, so RLS's Client-match would hide
+    it from the very passenger who made it. `passenger=user` is the sole
+    authorization check this relies on instead, same as it always was;
+    `deleted_at__isnull=True` is new — `all_objects` does not exclude
+    soft-deleted rows the way `.objects` did.
+    """
 
     permission_classes = [IsAuthenticated]
     serializer_class = BookingSerializer
@@ -270,20 +293,23 @@ class BookingMineView(generics.ListAPIView[Booking]):
         user = self.request.user
         assert isinstance(user, User)
         # "trip__route" — see BookingListCreateView.get_queryset().
-        return Booking.objects.select_related("trip__route", "passenger").filter(passenger=user)
+        return Booking.all_objects.select_related("trip__route", "passenger", "business").filter(
+            passenger=user, deleted_at__isnull=True
+        )
 
     def list(self, request: Request, *args: object, **kwargs: object) -> Response:
-        queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        bookings = page if page is not None else list(queryset)
-        context = {
-            **self.get_serializer_context(),
-            "reservations_by_booking": _reservations_by_booking(bookings),
-        }
-        serializer = BookingSerializer(bookings, many=True, context=context)
-        if page is not None:
-            return self.get_paginated_response(serializer.data)
-        return Response(serializer.data)
+        with platform_staff_bypass():
+            queryset = self.filter_queryset(self.get_queryset())
+            page = self.paginate_queryset(queryset)
+            bookings = page if page is not None else list(queryset)
+            context = {
+                **self.get_serializer_context(),
+                "reservations_by_booking": _reservations_by_booking(bookings),
+            }
+            serializer = BookingSerializer(bookings, many=True, context=context)
+            if page is not None:
+                return self.get_paginated_response(serializer.data)
+            return Response(serializer.data)
 
 
 @extend_schema(request=BookingCancelSerializer, responses=BookingSerializer)
@@ -291,31 +317,40 @@ class BookingCancelView(generics.GenericAPIView[Booking]):
     """POST /bookings/{id}/cancel/ — passenger, own booking only. No
     `booking.manage` codename exists for staff (§2 of the spec): staff
     can see Bookings (`booking.view`), not cancel them on a passenger's
-    behalf, this phase."""
+    behalf, this phase.
+
+    `all_objects` + `platform_staff_bypass()`, not `.objects` —
+    docs/adr/0009, same reasoning as `BookingMineView`/`BookingTicketsView`:
+    a marketplace passenger must be able to cancel a booking whose
+    `client` is the operator's, not their own. The
+    `booking.passenger_id != user.id` check is the sole authorization
+    gate either way, unchanged.
+    """
 
     permission_classes = [IsAuthenticated]
     serializer_class = BookingCancelSerializer
 
     def get_queryset(self) -> QuerySet[Booking]:
-        return Booking.objects.all()
+        return Booking.all_objects.filter(deleted_at__isnull=True)
 
     def post(self, request: Request, pk: str) -> Response:
-        booking = get_object_or_404(self.get_queryset(), pk=pk)
-        user = request.user
-        assert isinstance(user, User)
-        if booking.passenger_id != user.id:
-            return Response(
-                {"detail": "You cannot cancel another passenger's booking."},
-                status=status.HTTP_403_FORBIDDEN,
+        with platform_staff_bypass():
+            booking = get_object_or_404(self.get_queryset(), pk=pk)
+            user = request.user
+            assert isinstance(user, User)
+            if booking.passenger_id != user.id:
+                return Response(
+                    {"detail": "You cannot cancel another passenger's booking."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            serializer = BookingCancelSerializer(data=request.data, context={"booking": booking})
+            serializer.is_valid(raise_exception=True)
+            updated = cancel_booking(
+                booking=booking,
+                cancelled_by=user,
+                reason=serializer.validated_data.get("reason", ""),
             )
-        serializer = BookingCancelSerializer(data=request.data, context={"booking": booking})
-        serializer.is_valid(raise_exception=True)
-        updated = cancel_booking(
-            booking=booking,
-            cancelled_by=user,
-            reason=serializer.validated_data.get("reason", ""),
-        )
-        return Response(BookingSerializer(updated).data)
+            return Response(BookingSerializer(updated).data)
 
 
 _INCLUDE_CANCELLED_PARAM = OpenApiParameter(

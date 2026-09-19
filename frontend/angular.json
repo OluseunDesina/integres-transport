@@ -140,6 +140,136 @@
         }
       }
     },
+    "marketplace-app": {
+      "projectType": "application",
+      "schematics": {
+        "@schematics/angular:component": {
+          "style": "scss"
+        }
+      },
+      "root": "projects/marketplace-app",
+      "sourceRoot": "projects/marketplace-app/src",
+      "prefix": "app",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "browser": "projects/marketplace-app/src/main.ts",
+            "polyfills": [
+              "zone.js"
+            ],
+            "tsConfig": "projects/marketplace-app/tsconfig.app.json",
+            "inlineStyleLanguage": "scss",
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "projects/marketplace-app/public"
+              }
+            ],
+            "styles": [
+              "projects/marketplace-app/src/styles.css"
+            ]
+          },
+          "configurations": {
+            "production": {
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "4kB",
+                  "maximumError": "8kB"
+                }
+              ],
+              "outputHashing": "all",
+              "fileReplacements": [
+                {
+                  "replace": "projects/marketplace-app/src/environments/environment.ts",
+                  "with": "projects/marketplace-app/src/environments/environment.production.ts"
+                }
+              ]
+            },
+            "development": {
+              "optimization": false,
+              "extractLicenses": false,
+              "sourceMap": true,
+              "fileReplacements": [
+                {
+                  "replace": "projects/marketplace-app/src/environments/environment.ts",
+                  "with": "projects/marketplace-app/src/environments/environment.development.ts"
+                }
+              ]
+            },
+            "stage": {
+              "optimization": true,
+              "extractLicenses": true,
+              "sourceMap": false,
+              "fileReplacements": [
+                {
+                  "replace": "projects/marketplace-app/src/environments/environment.ts",
+                  "with": "projects/marketplace-app/src/environments/environment.stage.ts"
+                }
+              ]
+            }
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "production": {
+              "buildTarget": "marketplace-app:build:production"
+            },
+            "development": {
+              "buildTarget": "marketplace-app:build:development"
+            },
+            "stage": {
+              "buildTarget": "marketplace-app:build:stage"
+            }
+          },
+          "defaultConfiguration": "development",
+          "options": {
+            "port": 4204
+          }
+        },
+        "extract-i18n": {
+          "builder": "@angular/build:extract-i18n"
+        },
+        "test": {
+          "builder": "@angular/build:karma",
+          "options": {
+            "polyfills": [
+              "zone.js",
+              "zone.js/testing"
+            ],
+            "tsConfig": "projects/marketplace-app/tsconfig.spec.json",
+            "inlineStyleLanguage": "scss",
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "projects/marketplace-app/public"
+              }
+            ],
+            "styles": [
+              "projects/marketplace-app/src/styles.css"
+            ]
+          }
+        },
+        "lint": {
+          "builder": "@angular-eslint/builder:lint",
+          "options": {
+            "lintFilePatterns": [
+              "projects/marketplace-app/**/*.ts",
+              "projects/marketplace-app/**/*.html"
+            ],
+            "eslintConfig": "projects/marketplace-app/eslint.config.js"
+          }
+        }
+      }
+    },
     "client-admin-app": {
       "projectType": "application",
       "schematics": {

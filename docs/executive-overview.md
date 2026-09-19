@@ -83,6 +83,19 @@ wrong was found in the code itself, but it's worth stakeholders
 knowing the process slipped once — every phase since has kept to the
 stop-and-review discipline that slip prompted.
 
+**The passenger marketplace, redesigned (September 2026).** Beyond
+the phases above, Integra now has a cross-operator marketplace: one
+website where a traveller searches every operator on the platform at
+once, the way flight sites compare airlines. Its look and flow were
+rebuilt after studying six of the leading travel and mobility booking
+sites — Omio and Busbud (Europe and North America's multi-operator
+bus/train sites), FlixBus, Rome2Rio, BuuPass (Kenya's bus booking
+leader) and Wakanow (Nigeria). The front page and search results now
+follow what those sites have in common: one search bar, quick repeats of
+recent searches, payment options stated up front, filters, and "Cheapest"
+/ "Fastest" labels on results. The booking pages that follow a search
+are being brought into line next.
+
 ---
 
 ## 3. What's next, and what it's waiting on
@@ -112,6 +125,15 @@ implied to be done:
 - **Production-grade file storage.** Uploaded compliance documents are
   stored on local disk today rather than in cloud storage (e.g. Amazon
   S3) — fine for the current stage, not yet production-hardened.
+- **Marketplace features every competitor has, but we can't show
+  honestly yet.** All six booking sites studied show *popular routes*;
+  most show *how many seats are left* and a wall of *partner operator
+  logos*. We don't, because the system doesn't yet track route
+  popularity, doesn't return seat availability with search results, and
+  has no public list of marketplace operators. Each is a modest backend
+  addition — a business call on which matters most. Customer reviews and
+  "2M+ travellers"-style figures are left out for a simpler reason: we
+  have none to cite, and won't invent them.
 - **Operator custom domains.** Each operator's own branding is fully
   white-labeled inside the product, but the network setup to serve
   that under the operator's *own* web address isn't deployed yet — see

@@ -1,7 +1,7 @@
 <div class="flex flex-col gap-6">
   <ui-page-header
     title="Businesses"
-    description="Every business across every client, and the entry point to their Paystack and settlement configuration."
+    description="Every business across every client — search, filter by KYB status, vertical or active state, and review a submitted KYB packet from its own row."
   />
 
   <ui-filter-bar
@@ -11,9 +11,39 @@
     ariaLabel="Business filters"
     [chips]="chips()"
     (searchChange)="onSearchTermChange($event)"
-    (chipRemoved)="onClearSearch()"
-    (cleared)="onClearSearch()"
-  />
+    (chipRemoved)="onChipRemoved($event)"
+    (cleared)="onFiltersCleared()"
+  >
+    <div filters class="flex flex-wrap gap-3">
+      <div class="w-48">
+        <ui-select
+          label="KYB status"
+          [options]="kybStatusOptions"
+          [ngModel]="kybStatusFilter()"
+          [ngModelOptions]="{ standalone: true }"
+          (ngModelChange)="onKybStatusFilterChange($event)"
+        />
+      </div>
+      <div class="w-44">
+        <ui-select
+          label="Vertical"
+          [options]="verticalOptions"
+          [ngModel]="verticalFilter()"
+          [ngModelOptions]="{ standalone: true }"
+          (ngModelChange)="onVerticalFilterChange($event)"
+        />
+      </div>
+      <div class="w-44">
+        <ui-select
+          label="Status"
+          [options]="activeOptions"
+          [ngModel]="activeFilter()"
+          [ngModelOptions]="{ standalone: true }"
+          (ngModelChange)="onActiveFilterChange($event)"
+        />
+      </div>
+    </div>
+  </ui-filter-bar>
 
   @if (store.error()) {
     <ui-alert>{{ store.error() }}</ui-alert>
@@ -21,8 +51,8 @@
     <ui-empty-state
       title="No businesses found"
       [description]="
-        searchTerm()
-          ? 'No business matches that name. Clear the filter to see all of them.'
+        chips().length
+          ? 'No business matches these filters. Clear one to see more.'
           : 'Businesses across every Client will appear here.'
       "
     />
@@ -67,29 +97,12 @@
                 <ui-status-pill tone="neutral" label="Inactive" />
               }
             </td>
-            <!-- Wrapping, not three links on one line: a link's label is
-                 exempt from `ui-table`'s break-anywhere rule, so three of
-                 them side by side set this column's minimum width and
-                 squeezed the Name column to one character per line at
-                 390px. They stack instead. -->
-            <td class="py-2">
-              <div class="flex flex-wrap justify-end gap-x-4 gap-y-1">
-                <a
-                  [routerLink]="['/businesses', business.id, 'paystack-account']"
-                  class="text-sm font-medium text-default hover:text-strong"
-                  >Paystack</a
-                >
-                <a
-                  [routerLink]="['/businesses', business.id, 'settlement-runs']"
-                  class="text-sm font-medium text-default hover:text-strong"
-                  >Settlements</a
-                >
-                <a
-                  [routerLink]="['/businesses', business.id, 'seat-hold']"
-                  class="text-sm font-medium text-default hover:text-strong"
-                  >Seat hold</a
-                >
-              </div>
+            <td class="py-2 text-right">
+              <ui-action-menu
+                [items]="menuItems(business)"
+                [label]="'Actions for ' + business.name"
+                (selected)="onMenuSelected(business, $event)"
+              />
             </td>
           </tr>
         }
@@ -98,3 +111,30 @@
     <ui-paginator [total]="store.total()" [page]="store.page()" (pageChange)="onPageChange($event)" />
   }
 </div>
+
+<ng-template #decideBody>
+  <div class="flex flex-col gap-4">
+    <ui-radio-group
+      label="Decision"
+      [options]="decisionOptions"
+      [ngModel]="decision()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="setDecision($event)"
+    />
+    <!-- Only when rejecting: an approval needs no justification, and an
+         always-present reason box invites one to be written and then
+         silently discarded. -->
+    @if (decision() === 'reject') {
+      <ui-textarea
+        label="Reason"
+        hint="Shown to the business, so say what they need to fix."
+        [rows]="3"
+        [ngModel]="reason()"
+        [ngModelOptions]="{ standalone: true }"
+        [invalid]="!!reasonError()"
+        [errorMessage]="reasonError()"
+        (ngModelChange)="setReason($event)"
+      />
+    }
+  </div>
+</ng-template>

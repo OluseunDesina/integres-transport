@@ -13,6 +13,7 @@ from apps.core.permissions import HasAnyPermission, HasPermission
 from apps.identity.models import Role, User
 from apps.identity.serializers import (
     ClientAdminTokenObtainSerializer,
+    CustomerRegistrationSerializer,
     CustomerTokenObtainSerializer,
     MeSerializer,
     PassengerLookupQuerySerializer,
@@ -61,6 +62,29 @@ class SuperAdminTokenObtainView(TokenViewBase):
     permission_classes = [AllowAny]  # type: ignore[assignment]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "auth_login_super_admin"
+
+
+@extend_schema(request=CustomerRegistrationSerializer, responses=TokenObtainResponseSerializer)
+class CustomerRegistrationView(APIView):
+    """`POST /api/v1/auth/customer/register/` — docs/specs/22-marketplace.md.
+    Same shape as `apps.clients.views.ClientRegistrationView`: validate,
+    create, log the caller straight in via the same token-obtain path
+    login already uses, no separate "verify then sign in" step."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth_register_customer"
+
+    def post(self, request: Request) -> Response:
+        serializer = CustomerRegistrationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        assert isinstance(user, User)
+        token = CustomerTokenObtainSerializer.get_token(user)
+        return Response(
+            {"refresh": str(token), "access": str(token.access_token)},
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class MeView(generics.RetrieveAPIView[User]):

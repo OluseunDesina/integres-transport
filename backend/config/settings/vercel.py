@@ -20,7 +20,19 @@ makes three real, deliberate departures from them:
    transaction mode, whose prepared-statement support has documented
    bugs; disabling prepared statements client-side is Supabase's own
    documented workaround.
+4. `MEDIA_ROOT` under `/tmp` — Vercel's filesystem is read-only outside
+   `/tmp` (confirmed 2026-09-17: every KYB/KYC document upload against
+   the live deployment was throwing an unhandled `OSError: [Errno 30]
+   Read-only file system`, not silently losing the file the way
+   docs/deployment.md §7 originally assumed). This stops the crash —
+   uploads succeed — but does **not** fix persistence: `/tmp` is still
+   wiped on cold start and not shared across concurrent instances, so a
+   document can still vanish later. Deliberately the fast unblock, not
+   the real fix; docs/deployment.md §7 still names S3 + `django-storages`
+   as what an environment trusted with real documents actually needs.
 """
+
+from pathlib import Path
 
 from .base import *  # noqa: F403
 from .base import DATABASES, config
@@ -48,3 +60,5 @@ CACHES = {
 }
 
 DATABASES["default"]["OPTIONS"] = {"prepare_threshold": None}
+
+MEDIA_ROOT = Path("/tmp") / "mediafiles"  # noqa: S108 — the one writable path on this target, see docstring point 4

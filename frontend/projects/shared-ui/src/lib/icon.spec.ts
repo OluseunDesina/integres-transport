@@ -50,6 +50,13 @@ const ALL_ICON_NAMES: Record<IconName, true> = {
   'chart-bar': true,
   'exclamation-triangle': true,
   signal: true,
+  'arrows-right-left': true,
+  'shield-check': true,
+  ticket: true,
+  'arrow-right': true,
+  'chevron-left': true,
+  'chevron-right': true,
+  'adjustments-horizontal': true,
 };
 
 describe('Icon', () => {

@@ -16,5 +16,8 @@ urlpatterns = [
     ),
     path("routes/<uuid:pk>/stops/", views.RouteStopsView.as_view(), name="route-stops-update"),
     path("stops/", views.StopListCreateView.as_view(), name="stop-list-create"),
+    # Safe above/below `stops/<uuid:pk>/` either way — same reasoning as
+    # `routes/browse/` above.
+    path("stops/suggest/", views.StopSuggestView.as_view(), name="stop-suggest"),
     path("stops/<uuid:pk>/", views.StopUpdateView.as_view(), name="stop-update"),
 ]

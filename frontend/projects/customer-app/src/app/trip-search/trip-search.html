@@ -3,77 +3,129 @@
 
   <ui-page-header
     title="Search trips"
-    description="Choose where you are travelling from and to, then pick a departure."
+    description="Tell us where you're travelling from and to, then pick a departure."
   />
-
-  @if (routesError(); as message) {
-    <ui-alert>
-      {{ message }}
-      <ui-button variant="secondary" class="mt-2" (pressed)="loadRoutes()">Retry</ui-button>
-    </ui-alert>
-  }
 
   <section class="rounded-xl border border-border bg-surface p-5 shadow-sm">
     <div class="grid gap-4 sm:grid-cols-2">
-      <!-- A Client can run more routes than the picker below ever
-           fetches at once (MAX_OPTIONS) — searching narrows what that
-           fetch asks for, rather than filtering an already-truncated
-           list client-side, so a route past the cap is still reachable.
+      <div class="relative flex flex-col gap-1">
+        <label for="from-stop-input" style="font-size: var(--ui-text-body)" class="font-medium text-default"
+          >From</label
+        >
+        <input
+          id="from-stop-input"
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="from-stop-listbox"
+          [attr.aria-expanded]="fromField.open()"
+          [value]="fromField.query()"
+          (input)="onFromInput($any($event.target).value)"
+          (focus)="fromField.onFocus()"
+          (blur)="fromField.close()"
+          (keydown.escape)="fromField.close()"
+          placeholder="e.g. Yaba"
+          autocomplete="off"
+          style="font-size: var(--ui-text-body)"
+          class="min-h-11 w-full rounded-md border border-control px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        />
+        @if (fromField.open()) {
+          <ul
+            id="from-stop-listbox"
+            role="listbox"
+            (mousedown)="$event.preventDefault()"
+            class="absolute top-full z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border border-border bg-surface shadow-md"
+          >
+            @if (fromField.loading()) {
+              <li class="px-3 py-2 text-sm text-muted">Loading…</li>
+            } @else if (fromField.suggestions().length === 0) {
+              <li class="px-3 py-2 text-sm text-muted">No stops found</li>
+            } @else {
+              @for (row of fromField.suggestions(); track row.id) {
+                <li
+                  role="option"
+                  tabindex="-1"
+                  [attr.aria-selected]="row.name === fromField.query()"
+                  class="cursor-pointer px-3 py-2 text-sm hover:bg-surface-sunken"
+                  (click)="selectFromSuggestion(row)"
+                  (keydown.enter)="selectFromSuggestion(row)"
+                >
+                  {{ row.name }}
+                </li>
+              }
+            }
+          </ul>
+        }
+      </div>
 
-           Label deliberately does not contain the word "route": every
-           e2e spec's `getByLabel('Route')` is a substring match, and a
-           label like "Search routes" would resolve two elements (this
-           field and the Route select below) — found by actually running
-           the suite, not by inspection. -->
-      <ui-text-field
-        label="Search"
-        type="text"
-        class="sm:col-span-2"
-        placeholder="Search routes by name…"
-        hint="Narrows the list below to routes matching what you type."
-        [ngModel]="routeSearchTerm()"
-        [ngModelOptions]="{ standalone: true }"
-        (ngModelChange)="onRouteSearchInput($event)"
-      />
-      <ui-select
-        label="Route"
-        class="sm:col-span-2"
-        [options]="routeOptions()"
-        [ngModel]="routeId()"
-        [ngModelOptions]="{ standalone: true }"
-        (ngModelChange)="onRouteChange($event)"
-      />
-      <ui-select
-        label="From"
-        [options]="fromStopOptions()"
-        [ngModel]="fromStopId()"
-        [ngModelOptions]="{ standalone: true }"
-        (ngModelChange)="onFromStopChange($event)"
-      />
-      <ui-select
-        label="To"
-        [options]="toStopOptions()"
-        [ngModel]="toStopId()"
-        [ngModelOptions]="{ standalone: true }"
-        (ngModelChange)="onToStopChange($event)"
-      />
-      <ui-text-field
-        label="Travel date"
-        type="date"
-        [ngModel]="serviceDate()"
-        [ngModelOptions]="{ standalone: true }"
-        (ngModelChange)="onServiceDateChange($event)"
-      />
-      <!-- Options are narrowed to what the chosen route runs, so a
-           passenger can never filter to a class that produces an empty
-           result reading as "sold out" rather than "not offered here".
-           The hint says what the classes are for; the option labels
-           alone ("Premium", "Mini") do not, and ui-select renders a
-           loose <p> beside it to sighted users only. -->
+      <div class="relative flex flex-col gap-1">
+        <label for="to-stop-input" style="font-size: var(--ui-text-body)" class="font-medium text-default"
+          >To</label
+        >
+        <input
+          id="to-stop-input"
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-controls="to-stop-listbox"
+          [attr.aria-expanded]="toField.open()"
+          [value]="toField.query()"
+          (input)="onToInput($any($event.target).value)"
+          (focus)="toField.onFocus()"
+          (blur)="toField.close()"
+          (keydown.escape)="toField.close()"
+          placeholder="e.g. Ikeja"
+          autocomplete="off"
+          style="font-size: var(--ui-text-body)"
+          class="min-h-11 w-full rounded-md border border-control px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        />
+        @if (toField.open()) {
+          <ul
+            id="to-stop-listbox"
+            role="listbox"
+            (mousedown)="$event.preventDefault()"
+            class="absolute top-full z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border border-border bg-surface shadow-md"
+          >
+            @if (toField.loading()) {
+              <li class="px-3 py-2 text-sm text-muted">Loading…</li>
+            } @else if (toField.suggestions().length === 0) {
+              <li class="px-3 py-2 text-sm text-muted">No stops found</li>
+            } @else {
+              @for (row of toField.suggestions(); track row.id) {
+                <li
+                  role="option"
+                  tabindex="-1"
+                  [attr.aria-selected]="row.name === toField.query()"
+                  class="cursor-pointer px-3 py-2 text-sm hover:bg-surface-sunken"
+                  (click)="selectToSuggestion(row)"
+                  (keydown.enter)="selectToSuggestion(row)"
+                >
+                  {{ row.name }}
+                </li>
+              }
+            }
+          </ul>
+        }
+      </div>
+
+      <div class="flex flex-col gap-1">
+        <label for="service-date-input" style="font-size: var(--ui-text-body)" class="font-medium text-default"
+          >Travel date</label
+        >
+        <input
+          id="service-date-input"
+          type="date"
+          [value]="serviceDate()"
+          (input)="onServiceDateChange($any($event.target).value)"
+          style="font-size: var(--ui-text-body)"
+          class="min-h-11 w-full rounded-md border border-control px-3 py-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        />
+      </div>
+
       <ui-select
         label="Class"
         hint="Operators run different service levels at different prices."
-        [options]="tripClassOptions()"
+        [options]="tripClassOptions"
         [ngModel]="tripClass()"
         [ngModelOptions]="{ standalone: true }"
         (ngModelChange)="onTripClassChange($event)"
@@ -103,11 +155,11 @@
         <ui-skeleton variant="block" height="5.5rem" />
       }
     </div>
-  } @else if (trips(); as results) {
-    @if (results.length === 0) {
+  } @else if (results(); as rows) {
+    @if (rows.length === 0) {
       <ui-empty-state
         title="No departures found"
-        description="Nothing runs on this route for the date you picked. Try another date."
+        description="Nothing runs between those stops on the date you picked. Try another date."
       />
     } @else {
       <section class="flex flex-col gap-3">
@@ -115,7 +167,7 @@
           {{ departureCountLabel() }}
         </h2>
         <ul class="flex flex-col gap-3">
-          @for (trip of results; track trip.id) {
+          @for (result of rows; track result.trip.id + result.from_stop.id + result.to_stop.id) {
             <!-- A card per departure rather than a bordered row: on a
                  phone this is the list a passenger actually chooses
                  from, and the departure time is the thing they scan
@@ -125,39 +177,43 @@
             >
               <div class="min-w-0">
                 <p class="text-lg font-semibold text-strong">
-                  {{ trip.scheduled_departure_at | date: 'shortTime' }}
+                  {{ result.trip.scheduled_departure_at | date: 'shortTime' }}
                 </p>
                 <p class="flex flex-wrap items-center gap-2 text-default">
-                  <span class="truncate">{{ trip.route.name }}</span>
+                  <span class="truncate">{{ result.from_stop.name }} → {{ result.to_stop.name }}</span>
                   <!-- Neutral tone, label only (spec 15 slice 2's
                        ruling): ui-status-pill's other tones are
                        semantic, and a Mini is not negative. Colour
                        carries no meaning here, which is also why the
-                       label alone satisfies the a11y bar. -->
-                  @if (classLabel(trip.trip_class); as serviceClass) {
+                       label alone satisfies the a11y bar. Same
+                       reasoning applies to the stop-count pill: "2
+                       stops" is not a warning. -->
+                  @if (classLabel(result.trip.trip_class); as serviceClass) {
                     <ui-status-pill tone="neutral" [label]="serviceClass" />
                   }
+                  <ui-status-pill tone="neutral" [label]="stopsLabel(result.stops_between)" />
                 </p>
                 <p class="text-sm text-muted">
-                  {{ trip.scheduled_departure_at | date: 'EEE d MMM' }}
-                  @if (trip.vehicle) {
-                    · {{ trip.vehicle.registration_number }}
+                  {{ result.trip.scheduled_departure_at | date: 'EEE d MMM' }}
+                  @if (result.trip.vehicle) {
+                    · {{ result.trip.vehicle.registration_number }}
                   }
                 </p>
               </div>
-              <!-- "Continue", not "Choose seats". This screen cannot
-                   know whether the next one will ask for seats or for a
-                   number of passengers: open seating always buys
-                   places, and a reservation-mode trip does too when its
-                   Business has seat_selection_enabled off (quick book,
-                   docs/specs/10-booking-modes.md) — which is decided by
-                   the availability envelope on the next screen, not by
-                   anything on Trip. The old label was simply wrong on
-                   every open-seating departure, and open-seating.spec.ts
-                   clicked it. -->
-              <ui-button [ariaLabel]="chooseLabel(trip)" (pressed)="selectTrip(trip)">
-                Continue
-              </ui-button>
+              <div class="flex items-center gap-4">
+                <p class="text-lg font-semibold text-strong">{{ fareLabel(result) }}</p>
+                <!-- "Continue", not "Choose seats". This screen cannot
+                     know whether the next one will ask for seats or for
+                     a number of passengers: open seating always buys
+                     places, and a reservation-mode trip does too when
+                     its Business has seat_selection_enabled off (quick
+                     book, docs/specs/10-booking-modes.md) — which is
+                     decided by the availability envelope on the next
+                     screen, not by anything on Trip. -->
+                <ui-button [ariaLabel]="chooseLabel(result)" (pressed)="selectTrip(result)">
+                  Continue
+                </ui-button>
+              </div>
             </li>
           }
         </ul>

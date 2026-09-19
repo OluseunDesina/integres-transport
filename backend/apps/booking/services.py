@@ -4,11 +4,12 @@ docs/specs/4-fares-seating-booking.md §4.
 
 import secrets
 from decimal import Decimal
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from django.db import IntegrityError, transaction
 
 from apps.businesses.models import Business
+from apps.clients.models import Client
 from apps.core.audit import record_audit_event
 from apps.core.idempotency import IdempotencyKeyConflict, hash_request
 from apps.core.models import IdempotencyKey
@@ -23,7 +24,7 @@ from apps.ticketing.capacity import TripNotConfigured, TripSoldOut, check_capaci
 from apps.ticketing.models import Ticket
 from apps.ticketing.services import issue_open_seating_tickets, issue_ticket
 
-from .models import Booking
+from .models import Booking, Traveler
 
 _IDEMPOTENCY_ENDPOINT = "booking.create"
 
@@ -38,10 +39,25 @@ _REFERENCE_ATTEMPTS = 5
 _REFERENCE_CONSTRAINT = "unique_booking_reference_per_business"
 
 
+class TravelerInput(TypedDict, total=False):
+    title: str
+    first_name: str
+    last_name: str
+    phone: str
+    email: str
+    date_of_birth: Any
+    gender: str
+    nationality: str
+
+
 class SeatRequest(TypedDict):
     seat: Seat
     from_stop: Stop
     to_stop: Stop
+    # docs/specs/22-marketplace.md slice 2. `NotRequired`, not `total=False`
+    # for the whole dict — `seat`/`from_stop`/`to_stop` stay required;
+    # only the marketplace flow ever supplies a traveler.
+    traveler: NotRequired[TravelerInput]
 
 
 def _generate_reference() -> str:
@@ -170,6 +186,28 @@ def _allocate_seats(
     ]
 
 
+def _create_traveler(
+    *,
+    client: Client,
+    booking: Booking,
+    seat_reservation: SeatReservation | None,
+    data: TravelerInput,
+) -> Traveler:
+    return Traveler.objects.create(
+        client=client,
+        booking=booking,
+        seat_reservation=seat_reservation,
+        title=data.get("title", ""),
+        first_name=data["first_name"],
+        last_name=data["last_name"],
+        phone=data["phone"],
+        email=data["email"],
+        date_of_birth=data.get("date_of_birth"),
+        gender=data.get("gender", ""),
+        nationality=data.get("nationality", ""),
+    )
+
+
 def create_booking(
     *,
     trip: Trip,
@@ -178,6 +216,7 @@ def create_booking(
     passenger_count: int | None = None,
     from_stop: Stop | None = None,
     to_stop: Stop | None = None,
+    traveler: TravelerInput | None = None,
     idempotency_key: str,
 ) -> Booking:
     """The transaction described in the spec's §3: resolves each seat's
@@ -212,6 +251,14 @@ def create_booking(
     same narrow-catch-and-reconcile shape
     `apps.seating.services.create_reservation` already established for
     the exclusion constraint.
+
+    `traveler`/`seat_request["traveler"]` (docs/specs/22-marketplace.md
+    slice 2) are both optional and additive — `apps.booking`'s own
+    endpoint sends neither. Open seating and quick-book are both
+    "places" purchases (a passenger count, not chosen seats), so either
+    takes the single top-level `traveler` as one lead traveler on the
+    `Booking` itself (`seat_reservation=None`); true seats-mode takes a
+    `traveler` per seat, tied to that seat's own `SeatReservation`.
     """
     open_seating = trip.booking_mode == Business.BookingMode.OPEN_SEATING
     seats = seats or []
@@ -271,6 +318,10 @@ def create_booking(
                     to_stop=to_stop,
                 )
                 total_amount: Decimal = booking.total_amount
+                if traveler is not None:
+                    _create_traveler(
+                        client=trip.client, booking=booking, seat_reservation=None, data=traveler
+                    )
                 IdempotencyKey.objects.create(
                     client_id=client_id,
                     endpoint=_IDEMPOTENCY_ENDPOINT,
@@ -287,7 +338,8 @@ def create_booking(
                 )
                 return booking
 
-            if is_quick_book(trip):
+            quick_book = is_quick_book(trip)
+            if quick_book:
                 assert passenger_count is not None
                 assert from_stop is not None and to_stop is not None
                 # Allocated here, inside the transaction, rather than by
@@ -328,7 +380,7 @@ def create_booking(
                 passenger_count=len(seats),
             )
             for seat_request, quote in zip(seats, quotes, strict=True):
-                create_reservation(
+                reservation = create_reservation(
                     trip=trip,
                     seat=seat_request["seat"],
                     from_stop=seat_request["from_stop"],
@@ -338,6 +390,25 @@ def create_booking(
                     amount=quote.amount,
                     fare_rule=quote.fare_rule,
                     fare_segment_rule=quote.fare_segment_rule,
+                )
+                seat_traveler = seat_request.get("traveler")
+                if seat_traveler is not None:
+                    _create_traveler(
+                        client=trip.client,
+                        booking=booking,
+                        seat_reservation=reservation,
+                        data=seat_traveler,
+                    )
+            # Quick-book is a "places" purchase like open seating (the
+            # passenger said how many, not which seats) even though it
+            # holds real named seats under the hood — so its traveler is
+            # the same single lead-traveler-on-the-booking shape open
+            # seating's own early return already uses above, not a
+            # per-seat one (quick-book's own allocated `seats` carry no
+            # `traveler` key at all, since the passenger never named any).
+            if quick_book and traveler is not None:
+                _create_traveler(
+                    client=trip.client, booking=booking, seat_reservation=None, data=traveler
                 )
 
             IdempotencyKey.objects.create(

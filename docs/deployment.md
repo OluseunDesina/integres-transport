@@ -413,14 +413,21 @@ actually works before calling it done:
   plan. Verify live as the very first step of a real deploy attempt;
   the fallback (connecting as Supabase's own `postgres` role) is named
   in §4.1, not silently substituted.
-- **Media storage** — `MEDIA_ROOT` is still local disk
-  (`backend/config/settings/base.py`), and Vercel's filesystem is
-  ephemeral per-invocation, meaningfully worse than Render's for this
-  purpose (not just "not guaranteed to persist across deploys" but
-  effectively per-request). Uploaded KYC/KYB documents will not persist
-  at all on this target — **do not accept this for anything beyond a
-  demo**; a real environment needs S3 + `django-storages` added as its
-  own piece of work first.
+- **Media storage** — updated 2026-09-17: the actual failure mode was
+  worse than this section originally assumed. `MEDIA_ROOT` pointed at
+  `BASE_DIR / "mediafiles"`, part of the read-only deployed code
+  bundle, not just "won't persist" — every KYB/KYC document upload
+  threw an unhandled `OSError: [Errno 30] Read-only file system` and
+  crashed with a 500, confirmed live. Fixed the crash by pointing
+  `MEDIA_ROOT` at `/tmp` in `config/settings/vercel.py` only (`local`/
+  `staging`/`production` untouched, verified by importing each module
+  directly and comparing `settings.MEDIA_ROOT`) — uploads now succeed.
+  **Persistence is still not fixed**: `/tmp` is ephemeral per-instance,
+  wiped on cold start and not shared across concurrent instances, so a
+  document can still vanish later. **Do not accept this for anything
+  beyond a demo** — a real environment needs S3 + `django-storages`
+  added as its own piece of work first; this was a deliberate fast
+  unblock, not that fix.
 - **CI/CD automation** — explicitly out of scope this pass (§0).
 - **Staging/production split** — this plan stands up one environment;
   designing a split is separate, later work.

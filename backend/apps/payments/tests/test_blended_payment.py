@@ -7,11 +7,13 @@ otherwise → Paystack charged for the remainder only, wallet debited at
 settlement) and `_apply_booking_payment()`'s `wallet_component_amount`
 branch, including the balance-shortfall-at-settlement edge case."""
 
+import datetime
 from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
@@ -29,6 +31,7 @@ from apps.seating.models import SeatReservation
 
 from ..models import PaymentIntent
 from ..services import (
+    BookingNotPayable,
     PspNotConfigured,
     initiate_payment,
     initiate_payment_with_wallet,
@@ -125,6 +128,33 @@ def test_wallet_fully_covers_it_replays_on_a_retried_idempotency_key() -> None:
             booking=booking, passenger=booking.passenger, idempotency_key="blend-retry"
         )
     assert second.id == first.id
+
+
+def test_initiate_payment_with_wallet_rejects_a_hold_that_lapsed_before_the_sweep_ran() -> None:
+    """docs/specs/22-marketplace.md slice 2 — same race
+    `test_initiate_payment_rejects_a_hold_that_lapsed_before_the_sweep_ran`
+    (test_initiate_payment.py) proves for the plain Paystack path,
+    exercised here for the wallet-blended one."""
+    client = ClientFactory()
+    with tenant_context(str(client.id)):
+        business = BusinessFactory(client=client)
+    booking, reservation = booking_with_a_held_seat(client, business, amount="200.00")
+    _fund_wallet(
+        client=client, business=business, passenger=booking.passenger, amount=Decimal("300.00")
+    )
+    with tenant_context(str(client.id)):
+        reservation.held_until = timezone.now() - datetime.timedelta(minutes=1)
+        reservation.save(update_fields=["held_until"])
+
+    with tenant_context(str(client.id)):
+        with pytest.raises(BookingNotPayable):
+            initiate_payment_with_wallet(
+                booking=booking, passenger=booking.passenger, idempotency_key="blend-lapsed"
+            )
+        booking.refresh_from_db()
+        reservation.refresh_from_db()
+    assert booking.status == Booking.Status.EXPIRED
+    assert reservation.status == SeatReservation.Status.EXPIRED
 
 
 # --- Blended: Paystack charged for the remainder only ------------------------

@@ -25,12 +25,6 @@ export const routes: Routes = [
         data: { permissions: ['super-admin:access'] },
       },
       {
-        path: 'kyb-queue',
-        loadComponent: () => import('./kyb-queue/kyb-queue').then((m) => m.KybQueue),
-        canActivate: [permissionGuard],
-        data: { permissions: ['super-admin:access'] },
-      },
-      {
         path: 'businesses',
         loadComponent: () =>
           import('./businesses/business-list/business-list').then((m) => m.BusinessList),

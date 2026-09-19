@@ -82,6 +82,30 @@ class StopSerializer(serializers.ModelSerializer[Stop]):
         return update_stop(stop=instance, updated_by=request.user, **validated_data)
 
 
+class StopSuggestQuerySerializer(serializers.Serializer):
+    """Query shape for the passenger-facing GET /stops/suggest/, backing
+    customer-app's origin/destination typeahead — docs/specs/4-fares-
+    seating-booking-frontend.md §3.3 (reworked flow). `q` is optional
+    and blank by default: an empty query returns a plain default list
+    (alphabetical — there's no booking-frequency data to base a real
+    "popular" ranking on, named honestly rather than overstated), which
+    is what the field shows before the passenger has typed anything."""
+
+    q = serializers.CharField(required=False, allow_blank=True, default="", max_length=255)
+    limit = serializers.IntegerField(required=False, default=10, min_value=1, max_value=50)
+
+
+class StopSuggestSerializer(serializers.Serializer):
+    """One suggestion row. `id` is a representative Stop id for the
+    dropdown's own `track by` key — the actual search
+    (`apps.scheduling.views.TripSearchView`) matches by name text, not
+    this id, so which same-named Stop it happens to point at across
+    Businesses does not matter."""
+
+    id = serializers.UUIDField()
+    name = serializers.CharField()
+
+
 class StopCreateSerializer(serializers.Serializer):
     """POST-only shape — `business` is a genuine client choice here (a
     Client can run several Businesses), resolved manually against the

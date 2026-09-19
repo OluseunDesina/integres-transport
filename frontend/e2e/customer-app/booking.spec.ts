@@ -43,40 +43,23 @@ function farFutureISO(): string {
 }
 
 /**
- * Selects the fixture route by value, matched on a label *prefix*.
- *
- * `selectOption({ label })` matches exactly, and `trip-search.ts`
- * appends ` — <operator>` to every option as soon as the browse
- * endpoint spans more than one Business. The tap-and-go fixture alone
- * guarantees that, so the bare-label form here had been failing since
- * that fixture landed — unnoticed, because this project's e2e suite
- * had not been run since.
- *
- * Searches by name first (self-check 2026-09-12-specs19-21): the
- * browse endpoint's picker is capped at 100 results in its default,
- * unfiltered order, and this dev database accumulates stray e2e-
- * created routes faster than `prune_e2e_test_data` can clear all of
- * them (some are `Schedule`/`Trip`/`FareRule`-protected, which that
- * command deliberately never force-cascades) — `open-seating.spec.ts`
- * hit exactly this once its own fixture route crossed the cap. This
- * spec's route hadn't yet, but the fetch was equally bounded; searching
- * narrows the same request server-side instead of relying on
- * unfiltered order staying lucky.
+ * Fills the From/To origin/destination fields directly with fixture
+ * stop names. `trip-search.ts`'s reworked flow (docs/specs/4-fares-
+ * seating-booking-frontend.md §3.3) matches these as free text against
+ * Stop names server-side (`apps.network.services.find_route_stop_matches`)
+ * rather than requiring a Route to be chosen first, so typing the name
+ * is enough — no suggestion needs to be clicked for the search itself to
+ * work.
  */
-async function selectFixtureRoute(page: Page): Promise<void> {
-  await page.getByLabel('Search').fill(ROUTE_NAME);
-  const select = page.getByLabel('Route', { exact: true });
-  const option = select.locator('option').filter({ hasText: ROUTE_NAME }).first();
-  await expect(option).toBeAttached();
-  await select.selectOption((await option.getAttribute('value')) ?? '');
+async function fillOriginDestination(page: Page, from: string, to: string): Promise<void> {
+  await page.getByLabel('From').fill(from);
+  await page.getByLabel('To').fill(to);
 }
 
 /** Runs the search and returns the "Continue with …" buttons. */
 async function runSearch(page: Page, serviceDate: string): Promise<Locator> {
   await page.goto('/search');
-  await selectFixtureRoute(page);
-  await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
-  await page.getByLabel('To').selectOption({ label: '3. CMS' });
+  await fillOriginDestination(page, 'Ikeja', 'CMS');
   await page.getByLabel('Travel date').fill(serviceDate);
   await page.getByRole('button', { name: 'Search' }).click();
   const options = page.getByRole('button', { name: 'Continue with' });
@@ -229,9 +212,7 @@ test.describe('customer-app booking flow', () => {
   test('shows an axe-clean empty state when nothing runs on the chosen date', async ({ page }) => {
     await signIn(page);
     await page.goto('/search');
-    await selectFixtureRoute(page);
-    await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
-    await page.getByLabel('To').selectOption({ label: '3. CMS' });
+    await fillOriginDestination(page, 'Ikeja', 'CMS');
     await page.getByLabel('Travel date').fill(farFutureISO());
     await page.getByRole('button', { name: 'Search' }).click();
 
@@ -240,15 +221,35 @@ test.describe('customer-app booking flow', () => {
     expect(results.violations).toEqual([]);
   });
 
+  test('labels a direct match "Direct" and a multi-stop match with a stop count', async ({
+    page,
+  }) => {
+    // The fixture route's stops are Ikeja(1) → Yaba(2) → CMS(3): adjacent
+    // stops are a direct hop, and skipping over Yaba is one stop between.
+    await signIn(page);
+
+    await page.goto('/search');
+    await fillOriginDestination(page, 'Ikeja', 'Yaba');
+    await page.getByLabel('Travel date').fill(todayISO());
+    await page.getByRole('button', { name: 'Search' }).click();
+    await expect(page.getByRole('button', { name: 'Continue with' }).first()).toBeVisible();
+    await expect(page.getByText('Direct').first()).toBeVisible();
+
+    await page.goto('/search');
+    await fillOriginDestination(page, 'Ikeja', 'CMS');
+    await page.getByLabel('Travel date').fill(todayISO());
+    await page.getByRole('button', { name: 'Search' }).click();
+    await expect(page.getByRole('button', { name: 'Continue with' }).first()).toBeVisible();
+    await expect(page.getByText('1 stop').first()).toBeVisible();
+  });
+
   test('the search-through-confirm flow is completable by keyboard alone', async ({ page }) => {
     await signIn(page);
 
     const bookableIndex = await searchAndOpenSeatPicker(page, todayISO());
 
     await page.goto('/search');
-    await selectFixtureRoute(page);
-    await page.getByLabel('From').selectOption({ label: '1. Ikeja' });
-    await page.getByLabel('To').selectOption({ label: '3. CMS' });
+    await fillOriginDestination(page, 'Ikeja', 'CMS');
     await page.getByLabel('Travel date').fill(todayISO());
     await page.getByRole('button', { name: 'Search' }).focus();
     await page.keyboard.press('Enter');
@@ -389,11 +390,7 @@ test.describe('customer-app booking flow', () => {
     // via trip-search's own "Choose seats" click — for each context.
     for (const page of [pageA, pageB]) {
       await page.goto('/search');
-      await selectFixtureRoute(page);
-      // Stop options are labelled "{sequence}. {name}" (trip-search.ts's
-      // toStopOption()), not the bare stop name.
-      await page.getByLabel('From').selectOption({ label: `${fromStop.sequence}. ${fromStop.name}` });
-      await page.getByLabel('To').selectOption({ label: `${toStop.sequence}. ${toStop.name}` });
+      await fillOriginDestination(page, fromStop.name, toStop.name);
       await page.getByLabel('Travel date').fill(serviceDate.toISOString().slice(0, 10));
       await page.getByRole('button', { name: 'Search' }).click();
       await expect(page.getByRole('button', { name: 'Continue with' }).first()).toBeVisible();

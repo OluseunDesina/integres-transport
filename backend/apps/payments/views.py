@@ -16,6 +16,7 @@ from apps.analytics.filters import apply_to_payment_records, resolve_filters
 from apps.businesses.models import Business
 from apps.core.idempotency import IdempotencyKeyConflict
 from apps.core.permissions import HasPermission, IsPlatformStaff
+from apps.core.rls import platform_staff_bypass
 from apps.identity.models import User
 from apps.ledger.models import SettlementRun
 from apps.ledger.services import SettlementRunAlreadyExists
@@ -239,7 +240,16 @@ class PaymentListCreateView(generics.ListCreateAPIView[PaymentIntent]):
 
 
 class PaymentIntentMineView(generics.ListAPIView[PaymentIntent]):
-    """GET /payments/mine/ — the passenger's own PaymentIntents."""
+    """GET /payments/mine/ — the passenger's own PaymentIntents.
+
+    `all_objects` + `platform_staff_bypass()`, not `.objects` —
+    docs/adr/0009, same reasoning as `apps.booking.views.BookingMineView`:
+    a marketplace-initiated PaymentIntent's `client` is the operator's,
+    not the passenger's own. `super().list()` already does the actual
+    queryset evaluation (pagination/serialization); wrapping it is
+    enough, no custom `list()` body needed here the way `BookingMineView`
+    has one for unrelated reasons.
+    """
 
     permission_classes = [IsAuthenticated]
     serializer_class = PaymentIntentSerializer
@@ -247,13 +257,19 @@ class PaymentIntentMineView(generics.ListAPIView[PaymentIntent]):
     def get_queryset(self) -> QuerySet[PaymentIntent]:
         user = self.request.user
         assert isinstance(user, User)
-        return PaymentIntent.objects.select_related("booking", "business", "passenger").filter(
-            passenger=user
-        )
+        return PaymentIntent.all_objects.select_related(
+            "booking", "business", "passenger"
+        ).filter(passenger=user, deleted_at__isnull=True)
+
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        with platform_staff_bypass():
+            return super().list(request, *args, **kwargs)
 
 
 class PaymentIntentDetailView(generics.RetrieveAPIView[PaymentIntent]):
-    """GET /payments/{id}/ — own PaymentIntent only."""
+    """GET /payments/{id}/ — own PaymentIntent only. See
+    `PaymentIntentMineView`'s own docstring for the `all_objects` +
+    `platform_staff_bypass()` reasoning."""
 
     permission_classes = [IsAuthenticated]
     serializer_class = PaymentIntentSerializer
@@ -261,9 +277,13 @@ class PaymentIntentDetailView(generics.RetrieveAPIView[PaymentIntent]):
     def get_queryset(self) -> QuerySet[PaymentIntent]:
         user = self.request.user
         assert isinstance(user, User)
-        return PaymentIntent.objects.select_related("booking", "business", "passenger").filter(
-            passenger=user
-        )
+        return PaymentIntent.all_objects.select_related(
+            "booking", "business", "passenger"
+        ).filter(passenger=user, deleted_at__isnull=True)
+
+    def retrieve(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        with platform_staff_bypass():
+            return super().retrieve(request, *args, **kwargs)
 
 
 @extend_schema_view(

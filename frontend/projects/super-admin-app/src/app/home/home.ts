@@ -38,7 +38,7 @@ export class Home {
     return name ? `Welcome back, ${name}` : `Welcome, ${user?.email ?? ''}`.trim();
   });
 
-  /** The same four destinations the nav already carries. No new
+  /** The same three destinations the nav already carries. No new
    * endpoint and no new data — a landing page rather than a debug
    * dump. */
   protected readonly destinations: Destination[] = [
@@ -49,15 +49,9 @@ export class Home {
       icon: 'clipboard-document-check',
     },
     {
-      path: '/kyb-queue',
-      label: 'KYB queue',
-      description: 'Review business verification submissions.',
-      icon: 'document-check',
-    },
-    {
       path: '/businesses',
       label: 'Businesses',
-      description: 'Find a business to configure payouts or settlements.',
+      description: 'Find a business to configure payouts, review a KYB submission, or check its settlements.',
       icon: 'building-office',
     },
     {
