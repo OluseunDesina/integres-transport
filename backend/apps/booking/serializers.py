@@ -112,6 +112,19 @@ class BookingCreateSerializer(serializers.Serializer):
     # `seats` is simply ignored by `create_booking` (each seat's own
     # nested `traveler` is what's read instead), not worth a 400 for.
     traveler = TravelerInputSerializer(required=False)
+    # docs/specs/22-marketplace.md slice 3. A third, alternative shape:
+    # `passenger_count` named travelers with **no** seat choice at all,
+    # even on a trip whose Business does let a passenger pick one
+    # (`seat_selection_enabled=True`) — `apps.booking.services.
+    # create_booking` auto-allocates a seat per entry the same way it
+    # already does for quick-book, and the marketplace app's own "Change
+    # seat" link is what lets a passenger move off an auto-assigned seat
+    # afterward instead of picking up front. Optional on the base
+    # serializer (nobody but marketplace sends it today — see
+    # `apps.marketplace.views.MarketplaceBookingCreateSerializer`, which
+    # requires it), so `apps.booking`'s own endpoint and
+    # `StaffBookingCreateSerializer` are unaffected either way.
+    travelers = TravelerInputSerializer(many=True, required=False)
 
     def validate_trip(self, value: Any) -> Trip:
         return _resolve_trip(value)
@@ -148,9 +161,7 @@ class BookingCreateSerializer(serializers.Serializer):
         would give them a booking they did not ask for.
         """
         if attrs.get("seats"):
-            raise serializers.ValidationError(
-                {"seats": seats_message}, code="seats_not_supported"
-            )
+            raise serializers.ValidationError({"seats": seats_message}, code="seats_not_supported")
         missing = [
             field for field in ("passenger_count", "from_stop", "to_stop") if field not in attrs
         ]
@@ -208,9 +219,23 @@ class BookingCreateSerializer(serializers.Serializer):
             return self._validate_seatless(
                 attrs,
                 trip,
-                seats_message=(
-                    "This operator assigns seats. Send passenger_count instead."
-                ),
+                seats_message=("This operator assigns seats. Send passenger_count instead."),
+            )
+
+        # A trip that *does* let a passenger choose (`seat_selection_
+        # enabled=True`, so `is_quick_book` above was False) can still be
+        # booked the seatless way, on purpose — docs/specs/22-marketplace.md
+        # slice 3. `travelers` is the signal: nobody sends it without
+        # also wanting `create_booking` to auto-allocate, so its mere
+        # presence (with no explicit `seats`) opts into the same
+        # `_validate_seatless` shape quick-book already uses, rather than
+        # requiring a passenger to name seats just because the operator
+        # would have allowed it.
+        if attrs.get("travelers") and not attrs.get("seats"):
+            return self._validate_seatless(
+                attrs,
+                trip,
+                seats_message="Send passenger_count and travelers instead of seats.",
             )
 
         if not attrs.get("seats"):
@@ -309,6 +334,25 @@ class StaffBookingCreateSerializer(BookingCreateSerializer):
         return passenger
 
 
+class TravelerOutputSerializer(serializers.Serializer):
+    """Read-only shape for a `Traveler` row — the read-back
+    `docs/specs/22-marketplace.md` slice 2 named as deliberately not
+    built yet ("traveler display-back on my-bookings/tickets") and
+    slice 3 actually needs: the "Passengers" step shows the name behind
+    each auto-assigned seat, and the "Change seat" confirmation needs to
+    say whose seat is moving."""
+
+    id = serializers.UUIDField()
+    title = serializers.CharField(allow_blank=True)
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+    phone = serializers.CharField()
+    email = serializers.CharField()
+    date_of_birth = serializers.DateField(allow_null=True)
+    gender = serializers.CharField(allow_blank=True)
+    nationality = serializers.CharField(allow_blank=True)
+
+
 class BookingSeatReservationSerializer(serializers.Serializer):
     """Nested read-only shape for `BookingSerializer.seats` — queried
     separately (`SeatReservation.objects.filter(booking=...)`), never a
@@ -323,6 +367,18 @@ class BookingSeatReservationSerializer(serializers.Serializer):
     status = serializers.CharField()
     held_until = serializers.DateTimeField()
     amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    # docs/specs/22-marketplace.md slice 3. `traveler` is a plain
+    # in-memory attribute `BookingSerializer.get_seats` stashes onto each
+    # `SeatReservation` before handing the list here, not a real model
+    # field or `source=` lookup — see that method's own docstring for
+    # why (batched to avoid an N+1, the same shape `_reservations`
+    # itself already uses).
+    traveler = serializers.SerializerMethodField()
+
+    @extend_schema_field(TravelerOutputSerializer(allow_null=True))
+    def get_traveler(self, obj: SeatReservation) -> dict[str, Any] | None:
+        traveler = getattr(obj, "_traveler", None)
+        return TravelerOutputSerializer(traveler).data if traveler is not None else None
 
 
 class BookingTripRouteSerializer(serializers.Serializer):
@@ -352,6 +408,12 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
     seats = serializers.SerializerMethodField()
     hold_expires_at = serializers.SerializerMethodField()
     hold_expires_in_seconds = serializers.SerializerMethodField()
+    # docs/specs/22-marketplace.md slice 3. Travelers with no seat of
+    # their own — a places-mode (open-seating, or quick-book without
+    # `apps.marketplace`'s own per-seat auto-allocation) booking's lead
+    # traveler(s). A seats-mode traveler is never in this list; it's
+    # nested on its own row in `seats` instead — see `get_seats`.
+    travelers = serializers.SerializerMethodField()
     # docs/adr/0009 / docs/specs/22-marketplace.md. `business` above is a
     # bare id — every other consumer of this serializer belongs to one
     # Client and needed nothing more, but a marketplace passenger's own
@@ -379,6 +441,7 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
             "currency",
             "cancellation_reason",
             "seats",
+            "travelers",
             # docs/specs/21-passenger-experience.md slice 2. Both derived
             # from the same live `SeatReservation` rows `seats` already
             # reads — see `_reservations`/`_earliest_held_until` below.
@@ -424,15 +487,70 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
         )
         if prefetched is not None:
             return prefetched.get(obj.id, [])
+        # `all_objects`, not `.objects` — docs/adr/0009, same reasoning
+        # as `apps.booking.views._reservations_by_booking`'s own
+        # `all_objects` choice. This fallback runs for single-object
+        # responses like `BookingCancelView`'s, which sit inside
+        # `platform_staff_bypass()` with no matching `as_client()` (a
+        # marketplace passenger's own booking spans a Client that is not
+        # their own ambient one) — `.objects` here silently returned zero
+        # rows for exactly that case until this fix, caught while wiring
+        # up `get_traveler`/`get_travelers` alongside it, which would
+        # otherwise have inherited the identical bug from new code
+        # instead of old.
         return list(
-            SeatReservation.objects.filter(booking=obj).select_related(
+            SeatReservation.all_objects.filter(booking=obj, deleted_at__isnull=True).select_related(
                 "seat", "from_stop", "to_stop"
             )
         )
 
+    def _travelers_by_reservation(self, obj: Booking) -> dict[Any, Traveler]:
+        """One row per `SeatReservation`, keyed by its id — the seats-mode
+        half of this booking's travelers. Batched via context the same
+        way `_reservations`' own docstring explains
+        (`travelers_by_reservation`, populated by the list views below);
+        falls back to a live query for the single-object responses
+        (create/cancel/change-seat)."""
+        prefetched: dict[Any, Traveler] | None = self.context.get("travelers_by_reservation")
+        if prefetched is not None:
+            return prefetched
+        # `all_objects` — same cross-Client reasoning as `_reservations`'
+        # own fallback just above.
+        return {
+            traveler.seat_reservation_id: traveler
+            for traveler in Traveler.all_objects.filter(
+                booking=obj, seat_reservation__isnull=False, deleted_at__isnull=True
+            )
+        }
+
     @extend_schema_field(BookingSeatReservationSerializer(many=True))
     def get_seats(self, obj: Booking) -> Any:
-        return BookingSeatReservationSerializer(self._reservations(obj), many=True).data
+        reservations = self._reservations(obj)
+        travelers = self._travelers_by_reservation(obj)
+        for reservation in reservations:
+            # Transient — never saved, never a real relation (both FKs
+            # are `related_name="+"`, so there is no `.traveler` Django
+            # would recognise). Just how the value gets from this method,
+            # which has both lists, to `BookingSeatReservationSerializer.
+            # get_traveler`, which only ever sees one `SeatReservation` at
+            # a time.
+            reservation._traveler = travelers.get(reservation.id)  # type: ignore[attr-defined]
+        return BookingSeatReservationSerializer(reservations, many=True).data
+
+    @extend_schema_field(TravelerOutputSerializer(many=True))
+    def get_travelers(self, obj: Booking) -> Any:
+        prefetched: dict[Any, list[Traveler]] | None = self.context.get("lead_travelers_by_booking")
+        if prefetched is not None:
+            rows = prefetched.get(obj.id, [])
+        else:
+            # `all_objects` — same cross-Client reasoning as
+            # `_reservations`'s own fallback above.
+            rows = list(
+                Traveler.all_objects.filter(
+                    booking=obj, seat_reservation__isnull=True, deleted_at__isnull=True
+                )
+            )
+        return TravelerOutputSerializer(rows, many=True).data
 
     def _earliest_held_until(self, obj: Booking) -> datetime | None:
         """The earliest `held_until` among this booking's currently-`HELD`
@@ -488,6 +606,45 @@ class BookingSerializer(serializers.ModelSerializer[Booking]):
         if held_until is None:
             return None
         return max(0, int((held_until - timezone.now()).total_seconds()))
+
+
+class BookingChangeSeatSerializer(serializers.Serializer):
+    """POST /bookings/{id}/reservations/{reservation_id}/change-seat/
+    body — docs/specs/22-marketplace.md slice 3. Just the new seat; which
+    reservation is moving comes from the URL, and everything else about
+    it (trip, stops, fare, traveler) is carried over unchanged by
+    `apps.seating.services.change_seat`."""
+
+    seat = serializers.UUIDField()
+
+    def validate_seat(self, value: Any) -> Seat:
+        return _resolve_seat(value)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        reservation: SeatReservation = self.context["reservation"]
+        # The operator's own policy, not a passenger preference —
+        # `seat_selection_enabled=False` (true quick-book) means the
+        # Business has already said passengers do not choose, and this
+        # endpoint must not become a backdoor around that for the one
+        # channel (marketplace) that auto-allocates instead of asking.
+        if not reservation.trip.business.seat_selection_enabled:
+            raise serializers.ValidationError(
+                {"seat": "This operator assigns seats — they can't be changed."},
+                code="seat_selection_disabled",
+            )
+        seat: Seat = attrs["seat"]
+        if seat.id == reservation.seat_id:
+            raise serializers.ValidationError(
+                {"seat": "This is already the seat on this reservation."},
+                code="same_seat",
+            )
+        vehicle = reservation.trip.vehicle
+        if vehicle is None or seat.vehicle_type_id != vehicle.vehicle_type_id:
+            raise serializers.ValidationError(
+                {"seat": "This seat does not belong to this trip's vehicle."},
+                code="seat_vehicle_mismatch",
+            )
+        return attrs
 
 
 class BookingCancelSerializer(serializers.Serializer):

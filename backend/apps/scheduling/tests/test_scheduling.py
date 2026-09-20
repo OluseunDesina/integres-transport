@@ -430,9 +430,7 @@ def test_legal_transitions_succeed_and_audit(
     if needs_reason:
         body["reason"] = "Operational reason"
 
-    response = _auth_client(staff).post(
-        reverse("trip-status", kwargs={"pk": str(trip.id)}), body
-    )
+    response = _auth_client(staff).post(reverse("trip-status", kwargs={"pk": str(trip.id)}), body)
 
     assert response.status_code == status.HTTP_200_OK
     assert response.data["status"] == to_status

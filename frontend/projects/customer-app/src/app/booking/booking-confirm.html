@@ -74,6 +74,58 @@
         </div>
       </ui-alert>
 
+      <!-- Ported from the marketplace app's own booking-confirm (spec 22
+           slice 3): a passenger who changes their mind about a held seat
+           does not have to cancel and restart. Only ever shown for a
+           seats-mode booking — `canChangeSeat()` — and only while the
+           reservation is still `held`, since a confirmed (paid) seat is
+           no longer changeable through this link. -->
+      @if (booking.seats.length > 0) {
+        <div class="flex flex-col gap-3 rounded-xl border border-border bg-surface p-5 shadow-sm">
+          <h3 class="text-sm font-semibold text-strong">Your seats</h3>
+          @for (seat of booking.seats; track seat.id) {
+            <div class="flex flex-col gap-2 border-t border-border pt-3 first:border-t-0 first:pt-0">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-sm text-default">Seat {{ seat.seat }}</span>
+                @if (canChangeSeat() && seat.status === 'held') {
+                  @if (changingSeatFor() === seat.id) {
+                    <ui-button variant="secondary" (pressed)="cancelChangeSeat()">Cancel</ui-button>
+                  } @else {
+                    <ui-button variant="secondary" (pressed)="openChangeSeat(seat.id, seat.seat)">
+                      Change seat
+                    </ui-button>
+                  }
+                }
+              </div>
+
+              @if (changingSeatFor() === seat.id) {
+                @if (changeSeatError(); as message) {
+                  <ui-alert>{{ message }}</ui-alert>
+                }
+                @if (changeSeatLoading()) {
+                  <ui-skeleton variant="block" height="3rem" />
+                } @else if (changeSeatOptions(); as options) {
+                  @if (options.length === 0) {
+                    <p class="text-sm text-muted">No other seats are free on this trip.</p>
+                  } @else {
+                    <div class="flex flex-wrap gap-2">
+                      @for (option of options; track option.seat.id) {
+                        <ui-button
+                          variant="secondary"
+                          (pressed)="chooseNewSeat(seat.id, option.seat.id)"
+                        >
+                          {{ option.seat.seat_number }}
+                        </ui-button>
+                      }
+                    </div>
+                  }
+                }
+              }
+            </div>
+          }
+        </div>
+      }
+
       <div class="flex gap-2">
         <ui-button (pressed)="continueToMyBookings()">Continue to My Bookings</ui-button>
       </div>

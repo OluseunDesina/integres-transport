@@ -39,125 +39,118 @@
         title="This departure is full"
         description="Every place on this journey has been sold. Try another departure."
       />
-    } @else if (buysPlaces()) {
-      <section class="flex flex-col gap-4">
-        <div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
-          <div class="max-w-40">
-            <!-- ui-select, not a hand-rolled <select>. The raw control
-                 here was the last one in the app, and spec 14 names
-                 "properly styled controls in place of raw native
-                 selects" as this app's rebuild. The label/id pairing is
-                 the same, so getByLabel('Passengers') still finds it. -->
-            <ui-select
-              label="Passengers"
-              [options]="placeSelectOptions()"
-              [ngModel]="passengerCount().toString()"
-              [ngModelOptions]="{ standalone: true }"
-              [hint]="placesHint()"
-              (ngModelChange)="setPassengerCount($event)"
-            />
-          </div>
-        </div>
-
-        <div
-          class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-surface p-5 shadow-sm"
-        >
-          <div>
-            @if (fareLabel(); as fare) {
-              <p class="text-sm text-muted">{{ fare }} per passenger</p>
-            }
-            <p class="text-lg font-semibold text-strong">
-              {{ selectionLabel() }}
-              @if (totalLabel(); as total) {
-                — {{ total }}
-              }
-            </p>
-          </div>
-          <div class="flex gap-2">
-            <ui-button variant="secondary" (pressed)="back()">Back</ui-button>
-            <ui-button [disabled]="!canContinue()" (pressed)="continueToConfirm()">
-              Continue
-            </ui-button>
-          </div>
-        </div>
-      </section>
     } @else {
-      <section class="flex flex-col gap-4">
-        <!-- The swatch is not the only signal: each state is named in
-             text beside it, and a seat button carries aria-pressed plus
-             a full aria-label. Colour alone would fail this repo's own
-             "colour is not the only status indicator" bar. -->
-        <div class="flex flex-wrap items-center gap-4 text-sm text-default">
-          <span class="inline-flex items-center gap-2">
-            <span class="h-4 w-4 rounded border border-control bg-surface"></span> Available
-          </span>
-          <span class="inline-flex items-center gap-2">
-            <span class="h-4 w-4 rounded border border-primary bg-primary"></span> Selected
-          </span>
-          <span class="inline-flex items-center gap-2">
-            <span class="h-4 w-4 rounded border border-border bg-surface-sunken"></span> Taken
-          </span>
-        </div>
+      <!-- Two-column shape carried over from the marketplace app (spec
+           22 slice 3): the seat map or passenger-count picker on the
+           left, a sticky trip/booking summary on the right, so the
+           fare total stays in view while a passenger is still choosing.
+           Replaces what used to be a second summary bar duplicated at
+           the bottom of each branch below. -->
+      <div class="grid gap-6 lg:grid-cols-[1fr_20rem] lg:items-start">
+        @if (buysPlaces()) {
+          <section class="flex flex-col gap-4">
+            <div class="rounded-xl border border-border bg-surface p-5 shadow-sm">
+              <div class="max-w-40">
+                <!-- ui-select, not a hand-rolled <select>. The raw control
+                     here was the last one in the app, and spec 14 names
+                     "properly styled controls in place of raw native
+                     selects" as this app's rebuild. The label/id pairing is
+                     the same, so getByLabel('Passengers') still finds it. -->
+                <ui-select
+                  label="Passengers"
+                  [options]="placeSelectOptions()"
+                  [ngModel]="passengerCount().toString()"
+                  [ngModelOptions]="{ standalone: true }"
+                  [hint]="placesHint()"
+                  (ngModelChange)="setPassengerCount($event)"
+                />
+              </div>
+            </div>
+          </section>
+        } @else {
+          <section class="flex flex-col gap-4">
+            <!-- The swatch is not the only signal: each state is named in
+                 text beside it, and a seat button carries aria-pressed plus
+                 a full aria-label. Colour alone would fail this repo's own
+                 "colour is not the only status indicator" bar. -->
+            <div class="flex flex-wrap items-center gap-4 text-sm text-default">
+              <span class="inline-flex items-center gap-2">
+                <span class="h-4 w-4 rounded border border-control bg-surface"></span> Available
+              </span>
+              <span class="inline-flex items-center gap-2">
+                <span class="h-4 w-4 rounded border border-primary bg-primary"></span> Selected
+              </span>
+              <span class="inline-flex items-center gap-2">
+                <span class="h-4 w-4 rounded border border-border bg-surface-sunken"></span> Taken
+              </span>
+            </div>
 
-        <div
-          role="group"
-          aria-label="Seat map"
-          class="flex flex-col gap-2 rounded-xl border border-border bg-surface p-5 shadow-sm"
-        >
-          @for (seatRow of seatRows(); track seatRow.row) {
-            <div class="flex flex-wrap items-center gap-6">
-              @for (segment of seatRow.segments; track $index) {
-                <div class="flex flex-wrap gap-2">
-                  @for (entry of segment; track entry.seat.id) {
-                    <button
-                      type="button"
-                      [disabled]="!entry.is_available || fareError() !== null"
-                      [attr.aria-pressed]="isSelected(entry.seat.id)"
-                      [attr.aria-label]="seatLabel(entry)"
-                      (click)="toggleSeat(entry)"
-                      class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border px-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                      [class.border-primary]="isSelected(entry.seat.id)"
-                      [class.bg-primary]="isSelected(entry.seat.id)"
-                      [class.text-on-primary]="isSelected(entry.seat.id)"
-                      [class.border-control]="entry.is_available && !isSelected(entry.seat.id)"
-                      [class.bg-surface]="entry.is_available && !isSelected(entry.seat.id)"
-                      [class.text-strong]="entry.is_available && !isSelected(entry.seat.id)"
-                      [class.border-border]="!entry.is_available"
-                      [class.bg-surface-sunken]="!entry.is_available"
-                      [class.text-muted]="!entry.is_available"
-                      [class.cursor-not-allowed]="!entry.is_available"
-                    >
-                      {{ entry.seat.seat_number }}
-                    </button>
+            <div
+              role="group"
+              aria-label="Seat map"
+              class="flex flex-col gap-2 rounded-xl border border-border bg-surface p-5 shadow-sm"
+            >
+              @for (seatRow of seatRows(); track seatRow.row) {
+                <div class="flex flex-wrap items-center gap-6">
+                  @for (segment of seatRow.segments; track $index) {
+                    <div class="flex flex-wrap gap-2">
+                      @for (entry of segment; track entry.seat.id) {
+                        <button
+                          type="button"
+                          [disabled]="!entry.is_available || fareError() !== null"
+                          [attr.aria-pressed]="isSelected(entry.seat.id)"
+                          [attr.aria-label]="seatLabel(entry)"
+                          (click)="toggleSeat(entry)"
+                          class="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border px-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                          [class.border-primary]="isSelected(entry.seat.id)"
+                          [class.bg-primary]="isSelected(entry.seat.id)"
+                          [class.text-on-primary]="isSelected(entry.seat.id)"
+                          [class.border-control]="entry.is_available && !isSelected(entry.seat.id)"
+                          [class.bg-surface]="entry.is_available && !isSelected(entry.seat.id)"
+                          [class.text-strong]="entry.is_available && !isSelected(entry.seat.id)"
+                          [class.border-border]="!entry.is_available"
+                          [class.bg-surface-sunken]="!entry.is_available"
+                          [class.text-muted]="!entry.is_available"
+                          [class.cursor-not-allowed]="!entry.is_available"
+                        >
+                          {{ entry.seat.seat_number }}
+                        </button>
+                      }
+                    </div>
                   }
                 </div>
               }
             </div>
-          }
-        </div>
+          </section>
+        }
 
-        <div
-          class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-surface p-5 shadow-sm"
+        <aside
+          class="flex flex-col gap-4 rounded-xl border border-border bg-surface p-5 shadow-sm lg:sticky lg:top-4"
         >
           <div>
-            @if (fareLabel(); as fare) {
-              <p class="text-sm text-muted">{{ fare }} per seat</p>
-            }
-            <p class="text-lg font-semibold text-strong">
-              {{ selectionLabel() }}
-              @if (totalLabel(); as total) {
-                — {{ total }}
-              }
-            </p>
+            <p class="text-sm font-semibold text-strong">{{ journey.routeName }}</p>
+            <p class="text-sm text-muted">{{ journey.fromStop.name }} → {{ journey.toStop.name }}</p>
           </div>
+          <dl class="grid grid-cols-[1fr_auto] gap-x-3 gap-y-2 text-sm">
+            <dt class="text-muted">{{ buysPlaces() ? 'Passengers' : 'Seats' }}</dt>
+            <dd class="text-right text-default">{{ selectionLabel() }}</dd>
+            @if (fareLabel(); as fare) {
+              <dt class="text-muted">{{ buysPlaces() ? 'Per passenger' : 'Per seat' }}</dt>
+              <dd class="text-right text-default">{{ fare }}</dd>
+            }
+            @if (totalLabel(); as total) {
+              <dt class="font-medium text-strong">Total</dt>
+              <dd class="text-right font-semibold text-strong">{{ total }}</dd>
+            }
+          </dl>
           <div class="flex gap-2">
             <ui-button variant="secondary" (pressed)="back()">Back</ui-button>
             <ui-button [disabled]="!canContinue()" (pressed)="continueToConfirm()">
               Continue
             </ui-button>
           </div>
-        </div>
-      </section>
+        </aside>
+      </div>
     }
   </div>
 }

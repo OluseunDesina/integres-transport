@@ -524,7 +524,9 @@ def test_trip_availability_endpoint_returns_seats_with_availability() -> None:
     # — the array could not say *why* it was empty.
     assert response.data["booking_mode"] == "reservation"
     assert response.data["status"] == "open"
-    assert response.data["capacity_remaining"] is None
+    # docs/specs/22-marketplace.md slice 3: a real free-seat count for
+    # seats-mode too, not just open seating — one seat, unbooked.
+    assert response.data["capacity_remaining"] == 1
     assert len(response.data["seats"]) == 1
     assert response.data["seats"][0]["seat"]["seat_number"] == "1A"
     assert response.data["seats"][0]["is_available"] is True

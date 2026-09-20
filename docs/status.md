@@ -713,9 +713,10 @@ than calling `set_rls_session_vars` directly.
 
 ## Marketplace redesign (spec 24) — the reasoning
 
-Full record: `docs/specs/24-marketplace-redesign.md` (slice 1 done,
-slice 2 next). What follows is the *why* that spec's Implementation note
-only points at.
+Full record: `docs/specs/24-marketplace-redesign.md` (slice 1 done; slice
+2's own scope shifted once `docs/specs/22-marketplace.md` slice 3 shipped
+independently — see that spec's own "Slice 2" bullet). What follows is
+the *why* that spec's Implementation note only points at.
 
 **Why a survey, not one site.** Slice 1 was first drafted against
 Wakanow alone, because spec 22 had named it. The product owner widened
@@ -737,13 +738,17 @@ were added. The navy hero survived because the survey splits on it
 brand choice, not a baseline.
 
 **What it could not change, and why.** The patterns *every* aggregator
-shares that we lack — popular routes, seats-left, an operator wall,
-city → stop grouping in suggestions — are all data problems, not UI
-ones: stop suggestions are alphabetical, search results carry no
-availability, and there is no marketplace operator list. Building any of
-them on today's API would mean hard-coding or inventing, which spec 24
-rules out. They are the obvious backend follow-ups; see `docs/traps.md`'s
-known-gaps entry.
+shares that we lack — popular routes, an operator wall, city → stop
+grouping in suggestions — are all data problems, not UI ones: stop
+suggestions are alphabetical, and there is no marketplace operator list.
+Building either on today's API would mean hard-coding or inventing,
+which spec 24 rules out. They are the obvious backend follow-ups; see
+`docs/traps.md`'s known-gaps entry. **Seats-left was in this list too,
+until spec 22 slice 3** (2026-09-19, requested independently of this
+spec) added a real `capacity_remaining` to the search response —
+narrower than a full aggregator-style buildout of the flagged gaps, but
+enough that this one row of spec 24's own baseline table moved from ⛔ to
+✅ without spec 24 itself doing anything.
 
 **Two traps worth the time they cost** (one-liners in `docs/traps.md`):
 the shell's first per-route layout switch put two `<router-outlet>`s
@@ -751,6 +756,22 @@ behind an `@if`, and read `ActivatedRoute.firstChild` during
 construction — both blanked the app with the same router error. One
 outlet with a conditional wrapper class, read from
 `router.routerState.snapshot`, fixed it.
+
+**2026-09-20 — several of these pieces ported to `customer-app`.** Direct
+user request, not a spec 24 slice: seats-left on search results, the
+sticky trip/booking summary sidebar, "Change seat" plus the hold timer,
+and (after a follow-up question asked for a fuller sweep) the "Book now"
+button label and icons on the result-card footer — all reusing spec 22
+slice 3's already-generic backend with zero backend change.
+`customer-app` deliberately keeps its manual seat map. The sweep also
+surfaced one real gap, named but not built: `customer-app` has no
+passenger self-registration screen at all, unlike marketplace — this is
+a genuine product question (which Client would a self-registering
+`customer-app` user belong to?), not a missed UI port, so it was left
+for a real decision rather than guessed at. Full record — including why
+`client-admin-app`, `super-admin-app` and `validator-app` were checked
+and left alone — is spec 22's own "Cross-app note" at the end of its
+Implementation note — Slice 3.
 
 ## Known Phase 0 limitations (deliberate, not oversights)
 

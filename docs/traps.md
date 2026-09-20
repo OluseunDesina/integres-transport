@@ -401,12 +401,17 @@ one-liner here and the full reasoning in `docs/status.md`, same split
   `BusinessOptionsService` remains the one open instance of this class.
 - **`marketplace-app` storefront gaps (spec 24's survey).** Every
   surveyed aggregator (Omio, Busbud, FlixBus, Rome2Rio, BuuPass, Wakanow)
-  shows popular routes; FlixBus shows seats left; Busbud and BuuPass show
-  an operator wall. None is built, because nothing backs them honestly:
-  `/marketplace/stops/suggest/` returns stops alphabetically (no
-  popularity), the search response carries no availability, and there is
-  no marketplace operator-list endpoint or operator logo. Each needs
-  backend work first — see spec 24's baseline table (⛔ rows).
+  shows popular routes; Busbud and BuuPass show an operator wall. Neither
+  is built, because nothing backs them honestly: `/marketplace/stops/
+  suggest/` returns stops alphabetically (no popularity), and there is no
+  marketplace operator-list endpoint or operator logo. Each needs backend
+  work first — see spec 24's baseline table (⛔ rows). **Seats-left (⛔ in
+  that same table) is no longer one of these** — `docs/specs/
+  22-marketplace.md` slice 3 (2026-09-19) added a real
+  `capacity_remaining` to the search response, independently of spec 24;
+  update spec 24's own baseline table row to ✅ when that spec is next
+  touched, rather than trusting this note or that table over the actual
+  `TripSearchResultSerializer` field.
 - **`NotificationBell` has no dark-header variant.** `marketplace-app`'s
   navy `AppShell` recolours its trigger with a descendant selector
   (`[&_app-notification-bell>div>button]`). A second dark header should

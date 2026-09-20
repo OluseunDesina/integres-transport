@@ -75,10 +75,10 @@ describe('Login', () => {
       toStop: { id: 'stop-b', name: 'Ikeja' },
       farePerSeat: '750.00',
       currency: 'NGN',
-      kind: 'seats' as const,
-      seats: [{ id: 'seat-1', seatNumber: '1A' }],
-      travelers: {
-        'seat-1': {
+      passengerCount: 1,
+      seatSelectionEnabled: true,
+      travelers: [
+        {
           title: '',
           firstName: 'Ada',
           lastName: 'Lovelace',
@@ -88,7 +88,7 @@ describe('Login', () => {
           gender: '',
           nationality: '',
         },
-      },
+      ],
     };
     // Simulates the router state a guest's "Book now" wrote before
     // redirecting here — `readPendingBooking()` falls back to

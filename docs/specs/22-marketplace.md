@@ -314,6 +314,81 @@ idempotency-replay short-circuit, not before it, so a legitimate replay
 of an already-paid booking still returns the original `PaymentIntent`
 rather than being wrongly rejected.
 
+## Slice 3 — no seat map, auto-assign and "Change seat", seats-left everywhere
+
+Requested directly against the shipped slice 2 flow as a redesign
+comparison ("suggested flow": Find a trip → Passengers → Pay → QR
+tickets), with two of its four stages explicitly excluded — hold time
+matched to payment method, and post-payment "Change seats" open until a
+cutoff. What remains: (1) search results show a real free-seat count,
+not just for open seating; (2) the "Passengers" step collects names
+first and never asks for a specific seat, on any booking mode; (3) the
+backend auto-allocates a seat per named passenger, the same way
+quick-book already did, generalized to also cover a trip whose operator
+would otherwise let a passenger choose; (4) once seats are held, a
+"Change seat" link lets a passenger move off an auto-assigned one —
+gated on the operator's own `seat_selection_enabled` policy, since a
+true quick-book trip (`False`) means the operator does not want
+passenger seat choice at all, not even after the fact.
+
+**Data model change**: none. `Traveler`/`SeatReservation` both already
+had everything this needed; `SeatReservation.Status.RELEASED` (declared
+in slice 1, never previously reached in practice) is what a "Change
+seat" swap leaves behind on the seat given up.
+
+**API surface changes**:
+- `Bookability.capacity_remaining` (`apps.seating.services.get_bookability`)
+  is now a real free-seat count for a seats-mode trip too, not just open
+  seating — the seat list it already builds was never surfaced under
+  this name for that branch. `TripSearchResultSerializer` gains a
+  `capacity_remaining` field of the same meaning, computed by both
+  search loops (`TripSearchView`, `search_trips_across_clients`) the
+  same way `fare` already is — one `get_bookability()` call per matched
+  result, the same cost class as the existing per-result `get_fare()`
+  call.
+- `BookingCreateSerializer` gains an optional `travelers` (plural) list,
+  alongside the existing singular `traveler`. Given without an explicit
+  `seats` choice, `create_booking` auto-allocates one seat per entry via
+  the same `_allocate_seats` quick-book already used — generalized to
+  run whenever `travelers` is given, not only when the trip's own
+  `is_quick_book()` is true. `MarketplaceBookingCreateSerializer` now
+  requires `travelers` (one per `passenger_count`) unconditionally and
+  rejects `seats` outright — the per-seat `seats[].traveler` shape slice
+  2 introduced for marketplace bookings is gone; every marketplace
+  booking is "how many, and who," never "which seats."
+- `BookingSerializer` gains `travelers` (booking-level, for a places-mode
+  booking's passengers, none tied to a seat) and `BookingSeatReservation`
+  gains a nested `traveler`, both read-back additions closing the gap
+  slice 2's own Implementation note named and left open ("traveler
+  display-back... deliberately NOT built"). Batched via the same
+  `reservations_by_booking`-context shape the existing seats field
+  already uses, so a booking *list* stays one query, not one per row.
+- New `POST /bookings/{id}/reservations/{reservation_id}/change-seat/`
+  (`apps.booking`) and its cross-Client marketplace mirror. Body is just
+  `{seat}`; ownership and the operator's `seat_selection_enabled` policy
+  are both checked before `apps.seating.services.change_seat` runs.
+  `change_seat` creates a fresh `HELD` reservation on the new seat via
+  the existing `create_reservation` (so a losing race against a
+  concurrent booking is the same `SeatUnavailable` path, not a new one),
+  marks the old reservation `RELEASED` rather than deleting it (deleting
+  would cascade away the `Traveler` row tied to it), and repoints that
+  `Traveler`'s FK to the new reservation.
+
+**Edge case, closed**: a `Traveler` row surviving a seat change at all.
+`SeatReservation.seat` is never updated in place — a fresh row is
+created and the old one released — which is exactly the shape that
+would normally cascade-delete the traveler tied to it; `change_seat`
+repoints the FK itself, in the same transaction, rather than relying on
+`create_reservation` to know a `Traveler` exists.
+
+**Non-goal, explicitly excluded by the request**: hold duration varying
+by chosen payment method, and a "Change seats" affordance open *after*
+payment until a cutoff. Both would be real, separable pieces of work —
+the former a moderate change (`hold_minutes` is already threaded through
+per-call, not hardcoded), the latter a genuinely new capability (nothing
+today lets a passenger touch an already-`CONFIRMED`/ticketed
+reservation) — and neither is built here.
+
 ## Implementation note — Slice 1
 
 Shipped in one pass, backend and frontend together, not split into
@@ -467,3 +542,178 @@ machinery than this slice's real requirement justified).
 **Next**: nothing scheduled. If a third slice is asked for, the
 traveler-display-back item above and the real Playwright e2e project
 slice 1 already named are the two most likely starting points.
+
+## Implementation note — Slice 3
+
+Shipped backend-then-frontend in one pass, same discipline as slices 1
+and 2. Closes the traveler-display-back gap slice 2's own note left
+open, as a side effect of needing it for real this time (a "Change
+seat" confirmation has to say whose seat is moving).
+
+**What actually shipped, beyond the original request**, each found by
+reading the code or running the real test suites before writing around
+it:
+
+- Two pre-existing, latent `.objects`-vs-`all_objects` bugs, caught
+  while wiring up the new `traveler` read-back and before they could
+  ship broken. `BookingSerializer._reservations()`'s single-object
+  fallback (used by `BookingCancelView`'s own response, among others)
+  read `SeatReservation.objects`, not `all_objects` — silently correct
+  for any Client-owned booking, silently *empty* for a marketplace
+  passenger's own cross-Client one, since that code path runs inside
+  `platform_staff_bypass()` with no matching `as_client()` to point the
+  Python tenancy contextvar anywhere in particular. Never caught before
+  because nothing asserted on `seats`/`hold_expires_at` in a cancel
+  response for a marketplace booking. Fixed there and in the two new
+  `Traveler` fallback queries that would otherwise have inherited the
+  identical bug from new code instead of old.
+- `capacity_remaining`'s meaning had to be widened, not just wired up. A
+  seats-mode `Bookability` always returned `None` for it — a real
+  per-seat count sat right there in the `seats` list `get_bookability`
+  already built, just never read under this name. Widening it (and
+  updating the one existing test that asserted the old always-`None`
+  behaviour) was cheaper than adding a parallel field, and made the new
+  "N seats left" search-result field a two-line addition in each search
+  loop instead of a new query path.
+- `MarketplaceBookingCreateSerializer.validate()` needed to check its
+  own requirements (`travelers` present, `seats` absent) *before*
+  calling `super().validate()`, not after — the base class's own
+  branching gives a trip-mode-specific error ("seats is required") for
+  a full-seat-choice trip sent with neither field, and marketplace's own
+  "travelers is required" is what should have won instead. Caught by a
+  test asserting the specific error key, not by inspection: the first
+  version silently returned the wrong one.
+- `booking-draft.ts`'s `BookingRequest` collapsed from a discriminated
+  union (`kind: 'seats' | 'places'`, two different shapes) to one flat
+  shape (`passengerCount` + `travelers[]`) — not a refactor for its own
+  sake, but because the union's entire reason to exist (two different
+  request bodies for two different ways of buying) went away once
+  seat-picker stopped producing a `seats`-shaped request at all.
+- `seat-picker.ts` lost its seat-grid rendering entirely (`SeatRow`,
+  `splitAtAisleGaps`, `bySeatNumber`, `toggleSeat`, `selectedSeatIds`)
+  — not hidden behind a flag, deleted, since slice 3's whole point is
+  that this screen never asks for a specific seat any more. The one
+  remaining net-new-component note from that file's old docstring (no
+  seat-grid primitive exists anywhere in `shared-ui`) is now moot for
+  this screen; `booking-confirm`'s own "Change seat" picker renders a
+  flat list of seat numbers, not a grid, since picking one seat to swap
+  to is a much smaller job than picking a whole party's worth up front.
+
+**Verification performed**: full backend suite (1273 passed, fresh
+`--create-db`), `ruff`/`mypy` clean across the whole backend, OpenAPI
+schema regenerated and checked against the committed one with zero
+drift. All ten frontend projects' `test:all` green (1715 tests total,
+up from 1673), all five apps' `ng lint` clean, all five apps' `ng build`
+clean. New backend tests cover: `capacity_remaining` for both booking
+modes and all three `Bookability` statuses; auto-allocation with named
+travelers for a trip that would otherwise require an explicit seat
+choice; open seating with more than one named traveler; the
+change-seat service function directly (happy path, seat-already-taken,
+reservation-no-longer-held) and both its HTTP endpoints (ownership,
+the `seat_selection_enabled` gate, a 404 for a reservation on someone
+else's booking). New frontend tests cover `seat-picker`'s passenger-
+count growing/shrinking without losing entered data, and
+`booking-confirm`'s request-body shape, seat/traveler display, the
+change-seat flow end to end, and the trip-filled-up return path. No
+live browser pass this slice (offered per standing practice; not
+requested).
+
+**Named, not fixed**: everything slice 2's own list already carried,
+minus the traveler-display-back item this slice closes. The two
+explicitly excluded pieces from the originating request — hold duration
+varying by payment method, and a post-payment "Change seats" window
+open until a cutoff — are deliberately not built; see this slice's own
+"Non-goal" note above for why each is a separable piece of work rather
+than a natural extension of what shipped here.
+
+**Next**: nothing scheduled. If a fourth slice is asked for, the two
+excluded pieces above are the most likely starting points, followed by
+the real Playwright e2e project slice 1 originally named.
+
+## Cross-app note — slice 3's patterns ported to `customer-app` (2026-09-20)
+
+Not a slice of this spec — `customer-app` is a separate, white-labeled
+app outside the marketplace, and the user's request was explicitly to
+carry three specific pieces of this app's own UI/UX to the others: the
+"N seats left" search-result count, the sticky trip/booking summary
+sidebar layout, and the "Change seat" link plus hold timer. Recorded
+here because the reused parts — `capacity_remaining`, the
+`change_seat` service, `BookingChangeSeatSerializer`, and
+`apps.booking`'s own (non-marketplace) change-seat endpoint — are all
+slice 3's own work, already generic across both apps with no backend
+change needed.
+
+**What did *not* port, deliberately**: `customer-app` keeps its manual
+seat map. The user explicitly scoped this to the three items above, not
+slice 3's own "no seat map, auto-assign" rework — `seat-picker.ts`
+(customer-app) is unchanged in that respect; a passenger there still
+picks a seat before it is held. `canChangeSeat` is derived from the
+existing `kind: 'seats'` discriminant instead of a new
+`seatSelectionEnabled` field for exactly that reason: in this app's own
+model, `kind === 'seats'` already means the operator's
+`seat_selection_enabled` was on when the passenger chose it, since
+`buysPlaces()` only takes the passenger-count path otherwise.
+
+**What shipped**: `trip-search.html` shows `capacity_remaining` per
+result (`null` omitted, matching marketplace's own `capacityLabel`
+convention exactly); `seat-picker.html`'s two branches (seat map,
+passenger count) now share one sticky `<aside>` summary, replacing two
+near-duplicate bottom bars; `booking-confirm.ts`/`.html` gained the
+same `openChangeSeat`/`chooseNewSeat`/`cancelChangeSeat` methods as
+marketplace's own `booking-confirm`, pointed at `/api/v1/trips/{id}/
+availability/` and `/api/v1/bookings/{id}/reservations/{reservation_pk}/
+change-seat/` (the base-app paths, not marketplace's `/marketplace/`-
+prefixed ones) — the hold timer (`ui-countdown`) was already wired from
+docs/specs/21-passenger-experience.md slice 2 and needed no change.
+
+**Follow-up sweep (same day)**: asked directly whether other marketplace
+UI/UX changes — "buttons etc" — had been missed. A side-by-side of every
+button label across both apps' three booking screens turned up two real
+differences and confirmed `my-bookings`/`booking-tickets` already at
+parity (identical or explainably different — marketplace shows
+`business_name` per booking, `customer-app` doesn't, because only a
+marketplace passenger's bookings can span more than one operator).
+Applied: the result-card button's label ("Continue" → "Book now",
+`trip-search.html`) and an icon footer strip (`calendar-days`/`truck`/
+`users`, matching `search-results.html`'s own) replacing the old plain-
+text date/vehicle/seats-left line. Left alone: `booking-confirm`'s
+submit button (`customer-app` says "Reserve seats"/"Reserve places",
+marketplace says one "Reserve booking" for both) — not a missed label
+update, a consequence of `customer-app` still knowing pre-submit whether
+a trip is seats-mode (it kept the seat map), which marketplace's
+seat-picker no longer does; flattening it to match would remove real
+information the current wording still has.
+
+**Also checked and left alone**: `client-admin-app`'s `counter-booking`
+already shows a seats-left pill (`capacityLabel`, pre-existing); it has
+no intermediate "held, review before paying" step for a hold
+timer or "Change seat" to attach to — it goes straight from the seat/
+passenger-count form to a final outcome panel, by design (a counter
+agent finishes one transaction per passenger, docs/specs/18-manifest-
+and-staff-booking.md). `super-admin-app`'s only seating-adjacent screen
+(`seat-hold`) configures the hold-duration setting, not a live booking
+flow. `validator-app` has no search or booking screen at all. None of
+the three pieces above were forced onto these apps for that reason;
+this is a deliberate scope decision, not an oversight, and is repeated
+here since none of the three has its own spec to record it against.
+
+Also surfaced, and **not** built: `marketplace-app`'s `login`/`register`
+have no `customer-app` equivalent beyond `login` — `customer-app` has no
+self-registration screen or route at all. This is not an oversight
+either; per this spec's own scope section, `POST /api/v1/auth/customer/
+register/` was "the first passenger self-registration path on the whole
+platform" when slice 1 built it — before marketplace, every
+`customer-app` passenger account was provisioned some other way (an
+operator's own onboarding, out of this codebase's scope). Whether a
+`customer-app` passenger should be able to self-register at all, and
+which Client such an account would belong to, is a real product
+decision this session did not have standing to make, so it is named
+here rather than guessed at.
+
+**Verification performed**: `customer-app`'s own suite (281/281,
+up from 272 — 9 new tests covering the seats-left label, the icon
+footer strip, and the change-seat flow end to end), `ng lint
+customer-app` clean, `ng build customer-app` clean, `tsc --noEmit` on
+its spec project clean. No backend change, so no backend suite re-run
+was needed; the endpoints under test were already covered by slice 3's
+own backend test suite.

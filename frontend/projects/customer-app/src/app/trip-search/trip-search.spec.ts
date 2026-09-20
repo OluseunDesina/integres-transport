@@ -33,6 +33,7 @@ function makeTripSearchResult(overrides: Record<string, unknown> = {}) {
     to_stop: { id: 'stop-c', name: 'CMS' },
     stops_between: 0,
     fare: { amount: '750.00', currency: 'NGN' },
+    capacity_remaining: null,
     ...overrides,
   };
 }
@@ -245,6 +246,66 @@ describe('TripSearch', () => {
     const pills = host.querySelectorAll('ui-status-pill');
     const labels = Array.from(pills).map((pill) => pill.textContent?.trim());
     expect(labels).toContain('Direct');
+  });
+
+  it('shows how many seats are left when capacity is tracked', async () => {
+    createComponent();
+    await fillSearchInputs();
+    apiClient.GET.and.resolveTo({
+      data: { count: 1, results: [makeTripSearchResult({ capacity_remaining: 3 })] },
+    });
+
+    await component['search']();
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('3 seats left');
+  });
+
+  it('shows "Book now" with a footer strip of date, vehicle type and seats left', async () => {
+    createComponent();
+    await fillSearchInputs();
+    apiClient.GET.and.resolveTo({
+      data: {
+        count: 1,
+        results: [
+          makeTripSearchResult({
+            capacity_remaining: 5,
+            trip: {
+              ...makeTripSearchResult().trip,
+              vehicle: {
+                id: 'vehicle-1',
+                registration_number: 'LND-123-XY',
+                vehicle_type: { id: 'vt-1', name: 'Coach' },
+              },
+            },
+          }),
+        ],
+      },
+    });
+
+    await component['search']();
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.textContent).toContain('Book now');
+    expect(host.textContent).not.toContain('Continue');
+    expect(host.textContent).toContain('Coach');
+    expect(host.textContent).toContain('LND-123-XY');
+    // calendar-days (date), truck (vehicle type), users (seats left).
+    expect(host.querySelectorAll('ui-icon').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('says nothing about seats left when capacity is not tracked', async () => {
+    createComponent();
+    await fillSearchInputs();
+    apiClient.GET.and.resolveTo({
+      data: { count: 1, results: [makeTripSearchResult({ capacity_remaining: null })] },
+    });
+
+    await component['search']();
+    fixture.detectChanges();
+
+    expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('left');
   });
 
   it('labels a multi-stop result with a stop count, not "Direct"', async () => {

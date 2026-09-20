@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { Alert, Button, EmptyState, PageHeader, Select, Skeleton, StatusPill } from '@shared-ui';
+import { Alert, Button, EmptyState, Icon, PageHeader, Select, Skeleton, StatusPill } from '@shared-ui';
 import type { SelectOption } from '@shared-ui';
 import { plural } from '@shared-ui';
 
@@ -129,6 +129,7 @@ class StopCombobox {
     Alert,
     Button,
     EmptyState,
+    Icon,
     PageHeader,
     Select,
     Skeleton,
@@ -211,6 +212,16 @@ export class TripSearch {
    * count otherwise. */
   protected stopsLabel(stopsBetween: number): string {
     return stopsBetween === 0 ? 'Direct' : plural(stopsBetween, 'stop');
+  }
+
+  /** "N seats left", or nothing at all when capacity isn't tracked
+   * (`capacity_remaining` is `null` for open-seating with no configured
+   * cap) — matching the marketplace app's own reasoning (spec 22 slice
+   * 3): a passenger should see how tight a departure is before they
+   * spend a step choosing seats or a passenger count for it. */
+  protected capacityLabel(result: TripSearchResultRow): string | null {
+    const remaining = result.capacity_remaining;
+    return remaining === null ? null : plural(remaining, 'seat') + ' left';
   }
 
   protected departureCountLabel(): string {

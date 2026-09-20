@@ -43,7 +43,7 @@ behaviour, not today's observation.
 | Sort by earliest / cheapest / fastest; filter by operator, time, stops | Busbud, FlixBus, Omio | ✅ slice 1 |
 | Nearby-dates control on results | Wakanow, FlixBus (‹ › steppers) | ✅ slice 1 (date strip) |
 | Passenger count in the search | Omio, Busbud, FlixBus | ➡️ slice 2 — it only means something once the seat picker honours it |
-| Seats-left on a result | FlixBus | ⛔ needs availability in the search response |
+| Seats-left on a result | FlixBus | ✅ spec 22 slice 3 (2026-09-19, independent of this spec) — `capacity_remaining` on the search response |
 | Popular routes / top destinations | all six | ⛔ needs a popularity endpoint (see non-goals) |
 | Operator logo wall | Busbud, BuuPass | ⛔ needs a marketplace operator-list endpoint and operator logos |
 | City → stops hierarchy in suggestions | Busbud, FlixBus | ⛔ stops carry no city grouping today |
@@ -72,6 +72,21 @@ brand choice rather than a baseline rule.
   the journey. Plus the one baseline pattern that belongs there: a
   passenger count in the search, carried to the seat picker as the number
   of seats to choose, with results showing the total for that many.
+
+  **Stale as of docs/specs/22-marketplace.md's own slice 3 (2026-09-19),
+  requested independently of this spec.** That slice removed seat choice
+  from `seat-picker` entirely — every booking mode now collects a
+  passenger count and one traveler per passenger, with real seats
+  auto-allocated server-side at `booking-confirm`'s submit and changeable
+  afterward via a new "Change seat" link. It also added the passenger
+  count and per-result seats-left this bullet named as slice 2's own
+  baseline pattern, and it was not restyled to this spec's navy/card
+  language — both screens still use spec 21's plain `border-border`/
+  `bg-surface` classes. Whoever picks up slice 2 needs to restyle the
+  *current* auto-assign-plus-change-seat flow, not the seat-map flow this
+  bullet was written against — the passenger-count/seats-left half of
+  this bullet is already done, functionally; only the visual pass and
+  `my-bookings`/`booking-tickets` remain.
 
 ### Non-goals
 
@@ -149,7 +164,10 @@ reference's softer surfaces.
    `/login`. Spec 22 slice 2 already made search public; sending a
    first-time visitor to a sign-in wall contradicted that.
 11. **Result action reads "Select seats"**, since that is what it does —
-   the booking itself is created two steps later.
+   the booking itself is created two steps later. **Reverted to "Book
+   now" by spec 22 slice 3** (2026-09-19): once `seat-picker` stopped
+   offering seat choice at all, "Select seats" became a false claim
+   about what the button does.
 
 ## Edge cases
 

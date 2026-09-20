@@ -12,6 +12,7 @@ from apps.core.permissions import HasPermission
 from apps.fares.services import FareNotConfigured, get_fare
 from apps.identity.models import User
 from apps.network.services import find_route_stop_matches
+from apps.seating.services import get_bookability
 
 from .models import Schedule, Trip
 from .serializers import (
@@ -321,6 +322,9 @@ class TripSearchView(generics.GenericAPIView[Trip]):
                     # booking, applied here at the list level since
                     # there is no booking step yet to block).
                     continue
+                bookability = get_bookability(
+                    trip=trip, from_stop=match.from_stop, to_stop=match.to_stop
+                )
                 results.append(
                     {
                         "trip": trip,
@@ -328,6 +332,7 @@ class TripSearchView(generics.GenericAPIView[Trip]):
                         "to_stop": match.to_stop,
                         "stops_between": match.stops_between,
                         "fare": {"amount": quote.amount, "currency": quote.currency},
+                        "capacity_remaining": bookability.capacity_remaining,
                     }
                 )
 

@@ -32,17 +32,29 @@ workspace. `validator-app` is an installable PWA standing in for the
 still-out-of-scope Flutter validator app.
 
 **Status: phases 0–12 and specs 13–21 are all complete — the Transit OS
-adoption roadmap is done.** Specs 22 (a cross-operator marketplace, two
+adoption roadmap is done.** Specs 22 (a cross-operator marketplace, three
 slices) and 23 (a super-admin Business/KYB list merge) are a separate,
 later arc, also complete; spec 24 (marketplace redesign, baselined on a
-travel/mobility aggregator survey) is one slice in. 1261/1261 backend tests, 1673 frontend unit
-tests, four Playwright projects (none yet for `marketplace-app` — see
-that spec's own "Named, not fixed"). See `docs/status.md` and the
-roadmap.
+travel/mobility aggregator survey) is one slice in. 2026-09-20: several
+of `marketplace-app`'s own UI/UX pieces (seats-left, sticky summary
+sidebar, Change seat + hold timer, the "Book now" label, icons on
+result-card footers) ported to `customer-app` on direct request — no
+backend change; see spec 22's own "Cross-app note", which also records
+one real gap surfaced along the way (`customer-app` has no passenger
+self-registration at all — a product decision to make, not a UI port).
+1273/1273 backend tests, 1724 frontend unit tests, four Playwright
+projects (none yet for `marketplace-app` — see that spec's own "Named,
+not fixed"). See `docs/status.md` and the roadmap.
 
 **Next: spec 24 slice 2** — the marketplace redesign's booking-flow screens
 (`docs/specs/24-marketplace-redesign.md`); slice 1, the storefront, is done.
-Before spec 24, the Transit OS adoption roadmap
+**Its scope shifted under it**: spec 22 slice 3 (2026-09-19, requested
+independently) removed seat choice from `seat-picker` entirely — auto-
+assigned seats plus a "Change seat" link replace it — and already added
+the passenger-count/seats-left pattern slice 2 was going to add itself.
+Slice 2 is now a visual restyle of that flow (and `my-bookings`/
+`booking-tickets`), not the flow-plus-restyle it was scoped as; see spec
+24's own "Slice 2" bullet for the reconciliation note. Before spec 24, the Transit OS adoption roadmap
 ([`docs/specs/README-transit-os-adoption.md`](docs/specs/README-transit-os-adoption.md))
 has no further spec, and specs 22–23 are both closed too — see each
 spec's own Implementation note for what shipped and what's

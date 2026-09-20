@@ -326,7 +326,7 @@
                           <p class="text-xl font-bold text-strong" data-numeric>{{ fareLabel(result) }}</p>
                           <p class="text-xs text-muted">per seat</p>
                         </div>
-                        <ui-button [ariaLabel]="chooseLabel(result)" (pressed)="selectTrip(result)">Select seats</ui-button>
+                        <ui-button [ariaLabel]="chooseLabel(result)" (pressed)="selectTrip(result)">Book now</ui-button>
                       </div>
                     </div>
                     <div class="flex flex-wrap gap-x-4 gap-y-1 border-t border-border bg-surface-muted px-5 py-2.5 text-xs text-default">
@@ -342,6 +342,12 @@
                       }
                       @if (result.trip.vehicle) {
                         <span>{{ result.trip.vehicle.registration_number }}</span>
+                      }
+                      @if (capacityLabel(result); as capacity) {
+                        <span class="ml-auto inline-flex items-center gap-1.5 font-medium text-strong">
+                          <ui-icon name="users" [size]="14" />
+                          {{ capacity }}
+                        </span>
                       }
                     </div>
                   </li>

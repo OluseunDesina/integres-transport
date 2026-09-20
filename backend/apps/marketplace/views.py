@@ -34,7 +34,12 @@ from rest_framework.response import Response
 from rest_framework.serializers import Serializer, UUIDField, ValidationError
 from rest_framework.views import APIView
 
-from apps.booking.serializers import BookingCreateSerializer, BookingSerializer
+from apps.booking.models import Booking
+from apps.booking.serializers import (
+    BookingChangeSeatSerializer,
+    BookingCreateSerializer,
+    BookingSerializer,
+)
 from apps.booking.services import create_booking
 from apps.core.idempotency import IdempotencyKeyConflict
 from apps.core.rls import platform_staff_bypass
@@ -52,8 +57,14 @@ from apps.payments.services import (
 )
 from apps.scheduling.serializers import TripSearchQuerySerializer, TripSearchResultSerializer
 from apps.scheduling.services import TripNotBookable, resolve_bookable_trip_across_clients
+from apps.seating.models import SeatReservation
 from apps.seating.serializers import TripAvailabilityQuerySerializer, TripBookabilitySerializer
-from apps.seating.services import SeatUnavailable, get_bookability
+from apps.seating.services import (
+    ReservationNotChangeable,
+    SeatUnavailable,
+    change_seat,
+    get_bookability,
+)
 from apps.ticketing.capacity import TripNotConfigured, TripSoldOut
 
 from .services import (
@@ -90,28 +101,49 @@ class BookingIdSerializer(Serializer):
 
 class MarketplaceBookingCreateSerializer(BookingCreateSerializer):
     """POST /marketplace/bookings/ body — docs/specs/22-marketplace.md
-    slice 2. Same rules as the base `BookingCreateSerializer` (both
-    exist unchanged, per this module's own docstring), plus one more:
-    a marketplace booking is the one place this platform actually
-    captures who is travelling, so `traveler` is required here where
-    the base serializer leaves it optional for `apps.booking`'s own
-    endpoint. A seats-mode booking needs one per seat; a places-mode
-    (open-seating/quick-book) booking needs the single top-level one —
-    see `TravelerInputSerializer`'s own docstring for that split."""
+    slices 2-3. Same rules as the base `BookingCreateSerializer` (both
+    exist unchanged, per this module's own docstring), narrowed to one
+    shape: `passenger_count` named `travelers`, one per passenger, and
+    never an explicit `seats` choice — even on a trip whose Business
+    would otherwise let a passenger pick a seat. Slice 2 originally also
+    accepted per-seat `seats[].traveler` (a passenger-chosen seat map);
+    slice 3 replaced that with server-side auto-allocation everywhere,
+    seat choice moved to a follow-up "Change seat" call
+    (`apps.booking.views.BookingChangeSeatView`) instead of happening
+    before the booking even exists — see that spec's own Implementation
+    note for why. `apps.booking.services.create_booking` handles the
+    actual allocation; this class only enforces that the request is
+    always shaped that way."""
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        attrs = super().validate(attrs)
+        # Checked *before* delegating to the base class, deliberately —
+        # these are unconditional marketplace requirements, true
+        # regardless of the trip's own booking mode, whereas
+        # `BookingCreateSerializer.validate()`'s own errors depend on
+        # that mode (open-seating/quick-book want `passenger_count`, a
+        # true seat-choice trip normally wants `seats`). Calling `super()`
+        # first would let its mode-specific "seats is required" fire on
+        # a seat-choice trip before this class ever got to say the more
+        # relevant "travelers is required" — the base class has no way
+        # to know a caller who omitted `seats` meant to send `travelers`
+        # instead, since only this subclass makes that field required.
         if attrs.get("seats"):
-            if any("traveler" not in seat_request for seat_request in attrs["seats"]):
-                raise ValidationError(
-                    {"seats": "Traveler details are required for every seat."},
-                    code="traveler_required",
-                )
-        elif "traveler" not in attrs:
             raise ValidationError(
-                {"traveler": "Traveler details are required."}, code="traveler_required"
+                {"seats": "Marketplace bookings use passenger_count and travelers, not seats."},
+                code="seats_not_supported",
             )
-        return attrs
+        travelers = attrs.get("travelers")
+        if not travelers:
+            raise ValidationError(
+                {"travelers": "Traveler details are required."}, code="traveler_required"
+            )
+        passenger_count = attrs.get("passenger_count")
+        if passenger_count is not None and len(travelers) != passenger_count:
+            raise ValidationError(
+                {"travelers": "travelers must include exactly one entry per passenger."},
+                code="traveler_count_mismatch",
+            )
+        return super().validate(attrs)
 
 
 @extend_schema(
@@ -295,6 +327,7 @@ class MarketplaceBookingCreateView(APIView):
                     from_stop=data.get("from_stop"),
                     to_stop=data.get("to_stop"),
                     traveler=data.get("traveler"),
+                    travelers=data.get("travelers"),
                     idempotency_key=idempotency_key,
                 )
             except FareNotConfigured as exc:
@@ -314,6 +347,56 @@ class MarketplaceBookingCreateView(APIView):
                 return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
             response_body = BookingSerializer(booking).data
         return Response(response_body, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(request=BookingChangeSeatSerializer, responses=BookingSerializer)
+class MarketplaceBookingChangeSeatView(APIView):
+    """POST /marketplace/bookings/{id}/reservations/{reservation_id}/
+    change-seat/ — the cross-Client variant of
+    `apps.booking.views.BookingChangeSeatView`, docs/specs/22-marketplace.md
+    slice 3. Same resolve-via-`resolve_own_booking_across_clients` shape
+    as `MarketplacePaymentIntentCreateView`: the Booking's own `client`
+    is the operator's, not the marketplace passenger's."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request: Request, pk: str, reservation_pk: str) -> Response:
+        user = request.user
+        assert isinstance(user, User)
+        booking = resolve_own_booking_across_clients(booking_id=str(pk), passenger=user)
+        if booking is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        with platform_staff_bypass(), as_client(booking.client_id):
+            reservation = (
+                SeatReservation.all_objects.select_related(
+                    "trip__vehicle__vehicle_type", "trip__business", "seat"
+                )
+                .filter(booking=booking)
+                .filter(pk=reservation_pk)
+                .first()
+            )
+            if reservation is None:
+                return Response(status=status.HTTP_404_NOT_FOUND)
+
+            serializer = BookingChangeSeatSerializer(
+                data=request.data, context={"reservation": reservation}
+            )
+            serializer.is_valid(raise_exception=True)
+            try:
+                change_seat(
+                    reservation=reservation,
+                    new_seat=serializer.validated_data["seat"],
+                    hold_minutes=reservation.trip.business.seat_hold_minutes,
+                    actor=user,
+                )
+            except ReservationNotChangeable as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+            except SeatUnavailable as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+            updated = Booking.all_objects.get(pk=booking.pk)
+            response_body = BookingSerializer(updated).data
+        return Response(response_body)
 
 
 @extend_schema(

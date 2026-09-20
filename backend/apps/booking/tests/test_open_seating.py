@@ -452,13 +452,17 @@ class TestValidation:
         url = reverse("ticket-validate", kwargs={"trip_id": str(trip.id)})
 
         first = api.post(
-            url, {"payload": tickets[0].signed_payload}, format="json",
+            url,
+            {"payload": tickets[0].signed_payload},
+            format="json",
             HTTP_IDEMPOTENCY_KEY="complete-1",
         )
         assert first.data["booking_status"] == Booking.Status.PAID
 
         second = api.post(
-            url, {"payload": tickets[1].signed_payload}, format="json",
+            url,
+            {"payload": tickets[1].signed_payload},
+            format="json",
             HTTP_IDEMPOTENCY_KEY="complete-2",
         )
         assert second.data["booking_status"] == Booking.Status.COMPLETED

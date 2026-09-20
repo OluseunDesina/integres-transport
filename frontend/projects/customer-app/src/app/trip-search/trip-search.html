@@ -171,48 +171,75 @@
             <!-- A card per departure rather than a bordered row: on a
                  phone this is the list a passenger actually chooses
                  from, and the departure time is the thing they scan
-                 for. It leads, in the largest type on the card. -->
+                 for. It leads, in the largest type on the card.
+                 Matches the marketplace app's own card shape (spec 22
+                 slice 3's "N seats left" plus icons on a footer strip)
+                 now that both show the same kind of result. -->
             <li
-              class="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-surface p-4 shadow-xs"
+              class="overflow-hidden rounded-xl border border-border bg-surface shadow-xs transition hover:border-primary/40 hover:shadow-md"
             >
-              <div class="min-w-0">
-                <p class="text-lg font-semibold text-strong">
-                  {{ result.trip.scheduled_departure_at | date: 'shortTime' }}
-                </p>
-                <p class="flex flex-wrap items-center gap-2 text-default">
-                  <span class="truncate">{{ result.from_stop.name }} → {{ result.to_stop.name }}</span>
-                  <!-- Neutral tone, label only (spec 15 slice 2's
-                       ruling): ui-status-pill's other tones are
-                       semantic, and a Mini is not negative. Colour
-                       carries no meaning here, which is also why the
-                       label alone satisfies the a11y bar. Same
-                       reasoning applies to the stop-count pill: "2
-                       stops" is not a warning. -->
-                  @if (classLabel(result.trip.trip_class); as serviceClass) {
-                    <ui-status-pill tone="neutral" [label]="serviceClass" />
-                  }
-                  <ui-status-pill tone="neutral" [label]="stopsLabel(result.stops_between)" />
-                </p>
-                <p class="text-sm text-muted">
-                  {{ result.trip.scheduled_departure_at | date: 'EEE d MMM' }}
-                  @if (result.trip.vehicle) {
-                    · {{ result.trip.vehicle.registration_number }}
-                  }
-                </p>
+              <div class="flex flex-wrap items-center justify-between gap-4 p-4">
+                <div class="min-w-0">
+                  <p class="text-lg font-semibold text-strong">
+                    {{ result.trip.scheduled_departure_at | date: 'shortTime' }}
+                  </p>
+                  <p class="flex flex-wrap items-center gap-2 text-default">
+                    <span class="truncate">{{ result.from_stop.name }} → {{ result.to_stop.name }}</span>
+                    <!-- Neutral tone, label only (spec 15 slice 2's
+                         ruling): ui-status-pill's other tones are
+                         semantic, and a Mini is not negative. Colour
+                         carries no meaning here, which is also why the
+                         label alone satisfies the a11y bar. Same
+                         reasoning applies to the stop-count pill: "2
+                         stops" is not a warning. -->
+                    @if (classLabel(result.trip.trip_class); as serviceClass) {
+                      <ui-status-pill tone="neutral" [label]="serviceClass" />
+                    }
+                    <ui-status-pill tone="neutral" [label]="stopsLabel(result.stops_between)" />
+                  </p>
+                </div>
+                <div class="flex items-center gap-4">
+                  <p class="text-lg font-semibold text-strong">{{ fareLabel(result) }}</p>
+                  <!-- "Book now", not "Choose seats". This screen cannot
+                       know whether the next one will ask for seats or for
+                       a number of passengers: open seating always buys
+                       places, and a reservation-mode trip does too when
+                       its Business has seat_selection_enabled off (quick
+                       book, docs/specs/10-booking-modes.md) — which is
+                       decided by the availability envelope on the next
+                       screen, not by anything on Trip. -->
+                  <ui-button [ariaLabel]="chooseLabel(result)" (pressed)="selectTrip(result)">
+                    Book now
+                  </ui-button>
+                </div>
               </div>
-              <div class="flex items-center gap-4">
-                <p class="text-lg font-semibold text-strong">{{ fareLabel(result) }}</p>
-                <!-- "Continue", not "Choose seats". This screen cannot
-                     know whether the next one will ask for seats or for
-                     a number of passengers: open seating always buys
-                     places, and a reservation-mode trip does too when
-                     its Business has seat_selection_enabled off (quick
-                     book, docs/specs/10-booking-modes.md) — which is
-                     decided by the availability envelope on the next
-                     screen, not by anything on Trip. -->
-                <ui-button [ariaLabel]="chooseLabel(result)" (pressed)="selectTrip(result)">
-                  Continue
-                </ui-button>
+              <div
+                class="flex flex-wrap gap-x-4 gap-y-1 border-t border-border bg-surface-muted px-4 py-2.5 text-xs text-default"
+              >
+                <span class="inline-flex items-center gap-1.5">
+                  <ui-icon name="calendar-days" [size]="14" />
+                  {{ result.trip.scheduled_departure_at | date: 'EEE d MMM' }}
+                </span>
+                @if (result.trip.vehicle?.vehicle_type) {
+                  <span class="inline-flex items-center gap-1.5">
+                    <ui-icon name="truck" [size]="14" />
+                    {{ result.trip.vehicle!.vehicle_type.name }}
+                  </span>
+                }
+                @if (result.trip.vehicle) {
+                  <span>{{ result.trip.vehicle.registration_number }}</span>
+                }
+                <!-- Not a warning tone: "3 seats left" is useful, not
+                     alarming, and only reads as urgent once a passenger
+                     is comparing it against how many they need — this
+                     repo's own "colour is not the only status indicator"
+                     bar, applied by not colouring it at all. -->
+                @if (capacityLabel(result); as capacity) {
+                  <span class="ml-auto inline-flex items-center gap-1.5 font-medium text-strong">
+                    <ui-icon name="users" [size]="14" />
+                    {{ capacity }}
+                  </span>
+                }
               </div>
             </li>
           }

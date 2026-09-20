@@ -93,9 +93,7 @@ def _seat_body(trip, passenger, seat, stop_a, stop_b, **extra):  # type: ignore[
     return {
         "trip": str(trip.id),
         "passenger": str(passenger.id),
-        "seats": [
-            {"seat": str(seat.id), "from_stop": str(stop_a.id), "to_stop": str(stop_b.id)}
-        ],
+        "seats": [{"seat": str(seat.id), "from_stop": str(stop_a.id), "to_stop": str(stop_b.id)}],
         **extra,
     }
 
@@ -269,9 +267,7 @@ def test_a_funded_wallet_settles_the_booking_immediately() -> None:
     trip, stop_a, stop_b, seat = _reservation_trip(client, fare="500.00")
     _fund_wallet(client, trip.business, passenger, "5000.00")
 
-    response = _post(
-        agent, _seat_body(trip, passenger, seat, stop_a, stop_b, pay_from_wallet=True)
-    )
+    response = _post(agent, _seat_body(trip, passenger, seat, stop_a, stop_b, pay_from_wallet=True))
 
     assert response.status_code == status.HTTP_201_CREATED
     assert response.data["payment"]["status"] == "succeeded"
@@ -290,9 +286,7 @@ def test_an_empty_wallet_reports_failure_and_keeps_the_seats() -> None:
     agent, passenger, _ = _counter(client)
     trip, stop_a, stop_b, seat = _reservation_trip(client, fare="500.00")
 
-    response = _post(
-        agent, _seat_body(trip, passenger, seat, stop_a, stop_b, pay_from_wallet=True)
-    )
+    response = _post(agent, _seat_body(trip, passenger, seat, stop_a, stop_b, pay_from_wallet=True))
 
     assert response.status_code == status.HTTP_201_CREATED
     assert response.data["payment"]["status"] == "failed"

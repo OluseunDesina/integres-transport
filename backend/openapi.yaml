@@ -633,6 +633,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/Booking'
           description: ''
+  /api/v1/bookings/{id}/reservations/{reservation_pk}/change-seat/:
+    post:
+      operationId: bookings_reservations_change_seat_create
+      description: |-
+        POST /bookings/{id}/reservations/{reservation_id}/change-seat/ —
+        docs/specs/22-marketplace.md slice 3's "Change seat" link, offered
+        while a booking still sits `pending_payment` with an auto-assigned
+        seat. Passenger, own booking only — same ownership check as
+        `BookingCancelView`, and the same `all_objects` +
+        `platform_staff_bypass()` reasoning: a marketplace booking's
+        `client` is the operator's, not the passenger's own.
+
+        A reservation not belonging to this booking, or not currently
+        `HELD`, is indistinguishable from "not found" / "can't be changed
+        any more" to the passenger either way — mapped to 404 and 409
+        respectively rather than leaking which specific mismatch occurred.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: reservation_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - bookings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingChangeSeat'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BookingChangeSeat'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BookingChangeSeat'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+          description: ''
   /api/v1/bookings/mine/:
     get:
       operationId: bookings_mine_list
@@ -2102,6 +2154,52 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/MarketplaceBookingCreate'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+          description: ''
+  /api/v1/marketplace/bookings/{id}/reservations/{reservation_pk}/change-seat/:
+    post:
+      operationId: marketplace_bookings_reservations_change_seat_create
+      description: |-
+        POST /marketplace/bookings/{id}/reservations/{reservation_id}/
+        change-seat/ — the cross-Client variant of
+        `apps.booking.views.BookingChangeSeatView`, docs/specs/22-marketplace.md
+        slice 3. Same resolve-via-`resolve_own_booking_across_clients` shape
+        as `MarketplacePaymentIntentCreateView`: the Booking's own `client`
+        is the operator's, not the marketplace passenger's.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - in: path
+        name: reservation_pk
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - marketplace
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookingChangeSeat'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BookingChangeSeat'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BookingChangeSeat'
         required: true
       security:
       - jwtAuth: []
@@ -5164,6 +5262,11 @@ components:
           items:
             $ref: '#/components/schemas/BookingSeatReservation'
           readOnly: true
+        travelers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TravelerOutput'
+          readOnly: true
         hold_expires_at:
           type: string
           format: date-time
@@ -5191,6 +5294,7 @@ components:
       - seats
       - status
       - total_amount
+      - travelers
       - trip
     BookingCancel:
       type: object
@@ -5203,6 +5307,20 @@ components:
         reason:
           type: string
           default: ''
+    BookingChangeSeat:
+      type: object
+      description: |-
+        POST /bookings/{id}/reservations/{reservation_id}/change-seat/
+        body — docs/specs/22-marketplace.md slice 3. Just the new seat; which
+        reservation is moving comes from the URL, and everything else about
+        it (trip, stops, fare, traveler) is carried over unchanged by
+        `apps.seating.services.change_seat`.
+      properties:
+        seat:
+          type: string
+          format: uuid
+      required:
+      - seat
     BookingCounts:
       type: object
       properties:
@@ -5249,6 +5367,10 @@ components:
           format: uuid
         traveler:
           $ref: '#/components/schemas/TravelerInput'
+        travelers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TravelerInput'
       required:
       - trip
     BookingId:
@@ -5320,6 +5442,11 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        traveler:
+          allOf:
+          - $ref: '#/components/schemas/TravelerOutput'
+          nullable: true
+          readOnly: true
       required:
       - amount
       - from_stop
@@ -5328,6 +5455,7 @@ components:
       - seat
       - status
       - to_stop
+      - traveler
     BookingStatusEnum:
       enum:
       - pending_payment
@@ -7607,14 +7735,19 @@ components:
       type: object
       description: |-
         POST /marketplace/bookings/ body — docs/specs/22-marketplace.md
-        slice 2. Same rules as the base `BookingCreateSerializer` (both
-        exist unchanged, per this module's own docstring), plus one more:
-        a marketplace booking is the one place this platform actually
-        captures who is travelling, so `traveler` is required here where
-        the base serializer leaves it optional for `apps.booking`'s own
-        endpoint. A seats-mode booking needs one per seat; a places-mode
-        (open-seating/quick-book) booking needs the single top-level one —
-        see `TravelerInputSerializer`'s own docstring for that split.
+        slices 2-3. Same rules as the base `BookingCreateSerializer` (both
+        exist unchanged, per this module's own docstring), narrowed to one
+        shape: `passenger_count` named `travelers`, one per passenger, and
+        never an explicit `seats` choice — even on a trip whose Business
+        would otherwise let a passenger pick a seat. Slice 2 originally also
+        accepted per-seat `seats[].traveler` (a passenger-chosen seat map);
+        slice 3 replaced that with server-side auto-allocation everywhere,
+        seat choice moved to a follow-up "Change seat" call
+        (`apps.booking.views.BookingChangeSeatView`) instead of happening
+        before the booking even exists — see that spec's own Implementation
+        note for why. `apps.booking.services.create_booking` handles the
+        actual allocation; this class only enforces that the request is
+        always shaped that way.
       properties:
         trip:
           type: string
@@ -7634,6 +7767,10 @@ components:
           format: uuid
         traveler:
           $ref: '#/components/schemas/TravelerInput'
+        travelers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TravelerInput'
       required:
       - trip
     Me:
@@ -10251,6 +10388,10 @@ components:
           format: uuid
         traveler:
           $ref: '#/components/schemas/TravelerInput'
+        travelers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TravelerInput'
         passenger:
           type: string
           format: uuid
@@ -10927,6 +11068,47 @@ components:
       - first_name
       - last_name
       - phone
+    TravelerOutput:
+      type: object
+      description: |-
+        Read-only shape for a `Traveler` row — the read-back
+        `docs/specs/22-marketplace.md` slice 2 named as deliberately not
+        built yet ("traveler display-back on my-bookings/tickets") and
+        slice 3 actually needs: the "Passengers" step shows the name behind
+        each auto-assigned seat, and the "Change seat" confirmation needs to
+        say whose seat is moving.
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        date_of_birth:
+          type: string
+          format: date
+          nullable: true
+        gender:
+          type: string
+        nationality:
+          type: string
+      required:
+      - date_of_birth
+      - email
+      - first_name
+      - gender
+      - id
+      - last_name
+      - nationality
+      - phone
+      - title
     Trip:
       type: object
       description: |-
@@ -11424,8 +11606,12 @@ components:
           format: date-time
           nullable: true
           readOnly: true
+        capacity_remaining:
+          type: integer
+          nullable: true
       required:
       - business_name
+      - capacity_remaining
       - duration_minutes
       - fare
       - from_stop

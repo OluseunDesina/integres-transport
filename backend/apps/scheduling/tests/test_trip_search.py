@@ -7,9 +7,11 @@ import datetime
 
 import pytest
 from django.urls import reverse
+from psycopg.types.range import Range
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from apps.booking.tests.factories import BookingFactory
 from apps.businesses.models import Business
 from apps.clients.tests.factories import ClientFactory
 from apps.core.tests.tenancy import tenant_context
@@ -20,6 +22,10 @@ from apps.identity.serializers import ClientAdminTokenObtainSerializer
 from apps.identity.tests.factories import PassengerUserFactory
 from apps.network.models import Route
 from apps.network.tests.factories import RouteFactory, RouteStopFactory, StopFactory
+from apps.seating.models import SeatReservation
+from apps.seating.services import segment_sequence_range
+from apps.seating.tests.factories import SeatFactory
+from apps.seating.tests.helpers import fare_pricing_for
 
 from ..models import Trip
 from .factories import TripFactory
@@ -102,6 +108,48 @@ def test_search_result_omits_vehicle_type_duration_and_arrival_when_not_yet_set(
     assert row["trip"]["vehicle"] is None
     assert row["duration_minutes"] is None
     assert row["scheduled_arrival_at"] is None
+    # docs/specs/22-marketplace.md slice 3: unknowable, not zero — no
+    # vehicle means `Bookability.status` is `not_configured`, the same
+    # distinction that keeps "not open for booking yet" from being
+    # rendered as "sold out" on seat-picker.
+    assert row["capacity_remaining"] is None
+
+
+def test_search_result_reports_the_free_seat_count_for_a_reservation_trip() -> None:
+    """docs/specs/22-marketplace.md slice 3: "N seats left" on the
+    results page — a real number for seats-mode too, not just open
+    seating (`Bookability.capacity_remaining`'s own widened meaning)."""
+    client = ClientFactory()
+    passenger = PassengerUserFactory(client=client)
+    route, from_stop, to_stop, trip = _priced_trip(client, service_date=SERVICE_DATE)
+    with tenant_context(str(client.id)):
+        vehicle = VehicleFactory(client=client, business=route.business)
+        trip.vehicle = vehicle
+        trip.save(update_fields=["vehicle"])
+        SeatFactory(client=client, vehicle_type=vehicle.vehicle_type, seat_number="1A")
+        held_seat = SeatFactory(client=client, vehicle_type=vehicle.vehicle_type, seat_number="1B")
+        from_sequence, to_sequence = segment_sequence_range(
+            route_id=route.id, from_stop=from_stop, to_stop=to_stop
+        )
+        SeatReservation.objects.create(
+            client=client,
+            trip=trip,
+            seat=held_seat,
+            booking=BookingFactory(client=client, trip=trip, business=route.business),
+            from_stop=from_stop,
+            to_stop=to_stop,
+            segment_range=Range(from_sequence, to_sequence),
+            status=SeatReservation.Status.HELD,
+            **fare_pricing_for(client=client, route=route, business=route.business),
+        )
+
+    response = _auth_client(passenger).get(
+        reverse("trip-search"),
+        {"origin": "yaba", "destination": "ikeja", "service_date": "2026-08-10"},
+    )
+
+    row = response.data["results"][0]
+    assert row["capacity_remaining"] == 1
 
 
 def test_search_result_includes_vehicle_type_when_a_vehicle_is_assigned() -> None:
@@ -153,9 +201,7 @@ def test_search_result_computes_duration_and_arrival_from_the_routes_estimate() 
     assert row["duration_minutes"] == 90
     # Same raw-Python-object caveat as the vehicle_type assertion above —
     # `scheduled_arrival_at` is a `SerializerMethodField` too.
-    assert row["scheduled_arrival_at"] == datetime.datetime(
-        2026, 8, 10, 9, 30, tzinfo=datetime.UTC
-    )
+    assert row["scheduled_arrival_at"] == datetime.datetime(2026, 8, 10, 9, 30, tzinfo=datetime.UTC)
 
 
 def test_direct_connection_has_zero_stops_between() -> None:

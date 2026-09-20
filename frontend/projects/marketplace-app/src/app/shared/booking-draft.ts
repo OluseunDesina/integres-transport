@@ -25,22 +25,18 @@ export interface StopRef {
   name: string;
 }
 
-export interface SeatRef {
-  id: string;
-  seatNumber: string;
-}
-
 /**
- * Who is actually travelling — docs/specs/22-marketplace.md slice 2.
- * Collected on `seat-picker`, one per seat for a seats-mode booking or
- * a single lead traveler for a places-mode one (the same split
- * `apps.booking.services.create_booking`'s own docstring documents on
- * the backend), and sent as-is in `booking-confirm`'s POST body. Every
- * field is a plain string — including `dateOfBirth` (an ISO date from
- * a native `<input type="date">`) — so an incomplete entry is simply
- * an empty string rather than `undefined`, which is what lets
- * `seat-picker`'s own completeness check compare against `''` rather
- * than threading optionality through every field.
+ * Who is actually travelling — docs/specs/22-marketplace.md slices 2-3.
+ * Collected on `seat-picker`, one per passenger regardless of booking
+ * mode, and sent as-is in `booking-confirm`'s POST body — the backend
+ * (`apps.booking.services.create_booking`'s own `travelers` param)
+ * auto-allocates a seat per entry rather than the passenger picking one
+ * up front (see that function's own docstring). Every field is a plain
+ * string — including `dateOfBirth` (an ISO date from a native
+ * `<input type="date">`) — so an incomplete entry is simply an empty
+ * string rather than `undefined`, which is what lets `seat-picker`'s
+ * own completeness check compare against `''` rather than threading
+ * optionality through every field.
  */
 export interface TravelerDetail {
   title: string;
@@ -78,30 +74,34 @@ export interface SeatPickerRequest {
    */
   tripClass?: string;
   /** Set only when `booking-confirm` bounces the passenger back here
-   * after a seat conflict, so the seat map can say why their previous
-   * selection is gone. */
+   * after the trip filled up while they were filling in traveler
+   * details, so the passenger-count screen can say why. */
   notice?: string;
 }
 
 /**
- * What `seat-picker` hands to `booking-confirm`.
- *
- * A discriminated union rather than one shape with optional halves —
- * docs/specs/10-booking-modes.md. There are two genuinely different
- * things a passenger can buy: named seats they chose, or a number of
- * places (open seating, or reservation mode with seat choice turned
- * off). Modelling that as `seats?` plus `passengerCount?` would make
- * "both" and "neither" representable, and `booking-confirm` sends a
- * *different request body* for each — the one place where getting it
- * wrong books the wrong thing.
+ * What `seat-picker` hands to `booking-confirm` — one shape now,
+ * docs/specs/22-marketplace.md slice 3. Before slice 3 this was a
+ * discriminated union (`kind: 'seats' | 'places'`): a passenger either
+ * named seats or gave a passenger count, and `booking-confirm` sent a
+ * different request body for each. Slice 3 removed the seat map from
+ * this flow entirely — every booking is now "how many, and who" — so
+ * every marketplace booking sends the same shape: `passengerCount`
+ * named `travelers`, with the seat(s) auto-allocated server-side and
+ * changeable afterward via "Change seat" on `booking-confirm`.
  */
 export type BookingRequest = SeatPickerRequest & {
   farePerSeat: string;
   currency: string;
-} & (
-    | { kind: 'seats'; seats: SeatRef[]; travelers: Record<string, TravelerDetail> }
-    | { kind: 'places'; passengerCount: number; traveler: TravelerDetail }
-  );
+  passengerCount: number;
+  travelers: TravelerDetail[];
+  /** From the availability envelope's own field of this name — governs
+   * whether `booking-confirm` offers "Change seat" at all. `false` for
+   * both open seating (no seats to change) and true quick-book (the
+   * operator's own policy against passenger seat choice, which a
+   * "Change seat" link would otherwise quietly override). */
+  seatSelectionEnabled: boolean;
+};
 
 export function readSeatPickerRequest(router: Router): SeatPickerRequest | null {
   const state = readNavigationState(router);
@@ -146,10 +146,6 @@ function isStopRef(value: unknown): value is StopRef {
   return isRecord(value) && isString(value['id']) && isString(value['name']);
 }
 
-function isSeatRef(value: unknown): value is SeatRef {
-  return isRecord(value) && isString(value['id']) && isString(value['seatNumber']);
-}
-
 function isTravelerDetail(value: unknown): value is TravelerDetail {
   return (
     isRecord(value) &&
@@ -189,21 +185,17 @@ function isBookingRequest(value: unknown): value is BookingRequest {
   if (!isString(value['farePerSeat']) || !isString(value['currency'])) {
     return false;
   }
-  if (value['kind'] === 'places') {
-    const count = value['passengerCount'];
-    return (
-      typeof count === 'number' &&
-      Number.isInteger(count) &&
-      count > 0 &&
-      isTravelerDetail(value['traveler'])
-    );
+  if (typeof value['seatSelectionEnabled'] !== 'boolean') {
+    return false;
   }
-  const seats = value['seats'];
-  if (value['kind'] !== 'seats' || !Array.isArray(seats) || seats.length === 0 || !seats.every(isSeatRef)) {
+  const count = value['passengerCount'];
+  if (typeof count !== 'number' || !Number.isInteger(count) || count <= 0) {
     return false;
   }
   const travelers = value['travelers'];
-  return isRecord(travelers) && seats.every((seat) => isTravelerDetail(travelers[seat.id]));
+  return (
+    Array.isArray(travelers) && travelers.length === count && travelers.every(isTravelerDetail)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

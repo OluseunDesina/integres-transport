@@ -2,7 +2,8 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
-import { Alert, Button, Countdown, PageHeader } from '@shared-ui';
+import type { components } from '@api-client';
+import { Alert, Button, Countdown, PageHeader, Skeleton } from '@shared-ui';
 
 import { BookingSteps } from '../shared/booking-steps';
 import type { BookingRequest, SeatPickerRequest } from '../shared/booking-draft';
@@ -10,6 +11,8 @@ import { readBookingRequest } from '../shared/booking-draft';
 import { BookingStore, type Booking } from '../shared/data/store/booking.store';
 import { formatMoney, multiplyDecimal } from '../shared/money';
 import { tripClassLabel } from '../shared/trip-class';
+
+type SeatAvailability = components['schemas']['SeatAvailability'];
 
 const SEAT_CONFLICT_NOTICE =
   'One of the seats you picked was taken while you were booking. Choose another.';
@@ -69,7 +72,7 @@ function toErrorMessage(error: unknown, fallback: string): string {
 @Component({
   selector: 'app-booking-confirm',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, BookingSteps, Alert, Button, Countdown, PageHeader],
+  imports: [DatePipe, BookingSteps, Alert, Button, Countdown, PageHeader, Skeleton],
   templateUrl: './booking-confirm.html',
 })
 export class BookingConfirm implements OnInit {
@@ -87,6 +90,18 @@ export class BookingConfirm implements OnInit {
   /** Set on a successful submit; from then on the template shows the
    * held/confirmed panel instead of the review form. */
   protected readonly createdBooking = signal<Booking | null>(null);
+
+  /** Which reservation's "Change seat" picker is open, if any — null
+   * closes it. Only one at a time: a passenger changing seat 2 has no
+   * reason to also be mid-change on seat 1. Ported from the marketplace
+   * app's own booking-confirm (spec 22 slice 3) onto this app's own
+   * `apps.booking` endpoints, which already carry the same
+   * `change_seat` service and `BookingChangeSeatSerializer` policy
+   * check — nothing backend-side is marketplace-specific. */
+  protected readonly changingSeatFor = signal<string | null>(null);
+  protected readonly changeSeatOptions = signal<SeatAvailability[] | null>(null);
+  protected readonly changeSeatLoading = signal(false);
+  protected readonly changeSeatError = signal<string | null>(null);
 
   /** Null when the passenger bought places rather than seats — the
    * screen shows a passenger count instead. Not an empty string: a
@@ -128,6 +143,14 @@ export class BookingConfirm implements OnInit {
    * The row is omitted entirely in that case, the same way `Seats` is
    * on a service that does not assign them. */
   protected readonly serviceClass = computed(() => tripClassLabel(this.request()?.tripClass));
+
+  /** Whether "Change seat" should appear at all on the held panel.
+   * `kind === 'seats'` is exactly the case where the operator allows
+   * seat choice — `seat-picker`'s own `buysPlaces` computed only takes
+   * the seat map path when `seat_selection_enabled` is true, so a
+   * `'places'` booking here always means either open seating or a true
+   * quick-book trip, neither of which this link belongs on. */
+  protected readonly canChangeSeat = computed(() => this.request()?.kind === 'seats');
 
   async ngOnInit(): Promise<void> {
     if (!this.request()) {
@@ -212,6 +235,73 @@ export class BookingConfirm implements OnInit {
     if (fresh) {
       this.createdBooking.set(fresh);
     }
+  }
+
+  /** Opens the "Change seat" picker for one reservation — fetches the
+   * trip's current availability fresh (never carried forward: it is the
+   * most volatile thing in this flow, same reasoning `seat-picker`'s own
+   * `load()` already documents), and excludes the reservation's current
+   * seat since it is already this passenger's own. */
+  protected async openChangeSeat(reservationId: string, currentSeatNumber: string): Promise<void> {
+    const request = this.request();
+    if (!request) {
+      return;
+    }
+    this.changingSeatFor.set(reservationId);
+    this.changeSeatError.set(null);
+    this.changeSeatOptions.set(null);
+    this.changeSeatLoading.set(true);
+
+    const { data, error } = await this.api.GET('/api/v1/trips/{id}/availability/', {
+      params: {
+        path: { id: request.tripId },
+        query: { from_stop: request.fromStop.id, to_stop: request.toStop.id },
+      },
+    });
+
+    this.changeSeatLoading.set(false);
+
+    if (!data) {
+      this.changeSeatError.set(toErrorMessage(error, 'Could not load available seats.'));
+      return;
+    }
+    this.changeSeatOptions.set(
+      data.seats.filter(
+        (entry) => entry.is_available && entry.seat.seat_number !== currentSeatNumber
+      )
+    );
+  }
+
+  protected cancelChangeSeat(): void {
+    this.changingSeatFor.set(null);
+    this.changeSeatOptions.set(null);
+    this.changeSeatError.set(null);
+  }
+
+  protected async chooseNewSeat(reservationId: string, seatId: string): Promise<void> {
+    const booking = this.createdBooking();
+    if (!booking) {
+      return;
+    }
+    this.changeSeatLoading.set(true);
+    this.changeSeatError.set(null);
+
+    const { data, error } = await this.api.POST(
+      '/api/v1/bookings/{id}/reservations/{reservation_pk}/change-seat/',
+      {
+        params: { path: { id: booking.id, reservation_pk: reservationId } },
+        body: { seat: seatId },
+      }
+    );
+
+    this.changeSeatLoading.set(false);
+
+    if (data) {
+      this.createdBooking.set(data);
+      this.cancelChangeSeat();
+      return;
+    }
+    this.changeSeatError.set(toErrorMessage(error, 'Could not change seat. Try again.'));
   }
 
   /** `notice` is deliberately not defaulted: plain "Back" must not

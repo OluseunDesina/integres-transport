@@ -10,6 +10,11 @@ urlpatterns = [
     # collection-level POSTs sit together.
     path("bookings/staff/", views.StaffBookingCreateView.as_view(), name="booking-staff-create"),
     path("bookings/<uuid:pk>/cancel/", views.BookingCancelView.as_view(), name="booking-cancel"),
+    path(
+        "bookings/<uuid:pk>/reservations/<uuid:reservation_pk>/change-seat/",
+        views.BookingChangeSeatView.as_view(),
+        name="booking-change-seat",
+    ),
     # Under trips/, but owned here: the app that owns the data owns the
     # endpoint, the same way apps.fares owns trips/{id}/fare/.
     path("trips/<uuid:pk>/manifest/", views.TripManifestView.as_view(), name="trip-manifest"),

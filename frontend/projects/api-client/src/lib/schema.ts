@@ -325,6 +325,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/reservations/{reservation_pk}/change-seat/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description POST /bookings/{id}/reservations/{reservation_id}/change-seat/ —
+         *     docs/specs/22-marketplace.md slice 3's "Change seat" link, offered
+         *     while a booking still sits `pending_payment` with an auto-assigned
+         *     seat. Passenger, own booking only — same ownership check as
+         *     `BookingCancelView`, and the same `all_objects` +
+         *     `platform_staff_bypass()` reasoning: a marketplace booking's
+         *     `client` is the operator's, not the passenger's own.
+         *
+         *     A reservation not belonging to this booking, or not currently
+         *     `HELD`, is indistinguishable from "not found" / "can't be changed
+         *     any more" to the passenger either way — mapped to 404 and 409
+         *     respectively rather than leaking which specific mismatch occurred.
+         */
+        post: operations["bookings_reservations_change_seat_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings/mine/": {
         parameters: {
             query?: never;
@@ -1004,6 +1034,30 @@ export interface paths {
          *     the passenger's own (Marketplace) one.
          */
         post: operations["marketplace_bookings_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/marketplace/bookings/{id}/reservations/{reservation_pk}/change-seat/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * @description POST /marketplace/bookings/{id}/reservations/{reservation_id}/
+         *     change-seat/ — the cross-Client variant of
+         *     `apps.booking.views.BookingChangeSeatView`, docs/specs/22-marketplace.md
+         *     slice 3. Same resolve-via-`resolve_own_booking_across_clients` shape
+         *     as `MarketplacePaymentIntentCreateView`: the Booking's own `client`
+         *     is the operator's, not the marketplace passenger's.
+         */
+        post: operations["marketplace_bookings_reservations_change_seat_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2629,6 +2683,7 @@ export interface components {
             readonly currency: string;
             readonly cancellation_reason: string;
             readonly seats: components["schemas"]["BookingSeatReservation"][];
+            readonly travelers: components["schemas"]["TravelerOutput"][];
             /** Format: date-time */
             readonly hold_expires_at: string | null;
             readonly hold_expires_in_seconds: number | null;
@@ -2644,6 +2699,17 @@ export interface components {
         BookingCancel: {
             /** @default  */
             reason: string;
+        };
+        /**
+         * @description POST /bookings/{id}/reservations/{reservation_id}/change-seat/
+         *     body — docs/specs/22-marketplace.md slice 3. Just the new seat; which
+         *     reservation is moving comes from the URL, and everything else about
+         *     it (trip, stops, fare, traveler) is carried over unchanged by
+         *     `apps.seating.services.change_seat`.
+         */
+        BookingChangeSeat: {
+            /** Format: uuid */
+            seat: string;
         };
         BookingCounts: {
             total: number;
@@ -2671,6 +2737,7 @@ export interface components {
             /** Format: uuid */
             to_stop?: string;
             traveler?: components["schemas"]["TravelerInput"];
+            travelers?: components["schemas"]["TravelerInput"][];
         };
         BookingId: {
             /** Format: uuid */
@@ -2715,6 +2782,7 @@ export interface components {
             held_until: string;
             /** Format: decimal */
             amount: string;
+            readonly traveler: components["schemas"]["TravelerOutput"] | null;
         };
         /**
          * @description * `pending_payment` - Pending payment
@@ -3727,14 +3795,19 @@ export interface components {
         };
         /**
          * @description POST /marketplace/bookings/ body — docs/specs/22-marketplace.md
-         *     slice 2. Same rules as the base `BookingCreateSerializer` (both
-         *     exist unchanged, per this module's own docstring), plus one more:
-         *     a marketplace booking is the one place this platform actually
-         *     captures who is travelling, so `traveler` is required here where
-         *     the base serializer leaves it optional for `apps.booking`'s own
-         *     endpoint. A seats-mode booking needs one per seat; a places-mode
-         *     (open-seating/quick-book) booking needs the single top-level one —
-         *     see `TravelerInputSerializer`'s own docstring for that split.
+         *     slices 2-3. Same rules as the base `BookingCreateSerializer` (both
+         *     exist unchanged, per this module's own docstring), narrowed to one
+         *     shape: `passenger_count` named `travelers`, one per passenger, and
+         *     never an explicit `seats` choice — even on a trip whose Business
+         *     would otherwise let a passenger pick a seat. Slice 2 originally also
+         *     accepted per-seat `seats[].traveler` (a passenger-chosen seat map);
+         *     slice 3 replaced that with server-side auto-allocation everywhere,
+         *     seat choice moved to a follow-up "Change seat" call
+         *     (`apps.booking.views.BookingChangeSeatView`) instead of happening
+         *     before the booking even exists — see that spec's own Implementation
+         *     note for why. `apps.booking.services.create_booking` handles the
+         *     actual allocation; this class only enforces that the request is
+         *     always shaped that way.
          */
         MarketplaceBookingCreate: {
             /** Format: uuid */
@@ -3746,6 +3819,7 @@ export interface components {
             /** Format: uuid */
             to_stop?: string;
             traveler?: components["schemas"]["TravelerInput"];
+            travelers?: components["schemas"]["TravelerInput"][];
         };
         /**
          * @description `permissions` is additive to the Phase 0 contract (§4) — passengers
@@ -5126,6 +5200,7 @@ export interface components {
             /** Format: uuid */
             to_stop?: string;
             traveler?: components["schemas"]["TravelerInput"];
+            travelers?: components["schemas"]["TravelerInput"][];
             /**
              * Format: uuid
              * @description The passenger's id, from `GET /passengers/lookup/`.
@@ -5485,6 +5560,27 @@ export interface components {
             nationality?: string;
         };
         /**
+         * @description Read-only shape for a `Traveler` row — the read-back
+         *     `docs/specs/22-marketplace.md` slice 2 named as deliberately not
+         *     built yet ("traveler display-back on my-bookings/tickets") and
+         *     slice 3 actually needs: the "Passengers" step shows the name behind
+         *     each auto-assigned seat, and the "Change seat" confirmation needs to
+         *     say whose seat is moving.
+         */
+        TravelerOutput: {
+            /** Format: uuid */
+            id: string;
+            title: string;
+            first_name: string;
+            last_name: string;
+            phone: string;
+            email: string;
+            /** Format: date */
+            date_of_birth: string | null;
+            gender: string;
+            nationality: string;
+        };
+        /**
          * @description Read-only shape — Trip has no plain field-level PATCH; writes go
          *     through TripAssignmentSerializer (vehicle/driver) or
          *     TripStatusSerializer (status) instead.
@@ -5710,6 +5806,7 @@ export interface components {
             readonly duration_minutes: number | null;
             /** Format: date-time */
             readonly scheduled_arrival_at: string | null;
+            capacity_remaining: number | null;
         };
         /**
          * @description Schema-only shape for the `from_stop`/`to_stop` pair on a
@@ -6296,6 +6393,34 @@ export interface operations {
                 "application/json": components["schemas"]["BookingCancel"];
                 "application/x-www-form-urlencoded": components["schemas"]["BookingCancel"];
                 "multipart/form-data": components["schemas"]["BookingCancel"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Booking"];
+                };
+            };
+        };
+    };
+    bookings_reservations_change_seat_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                reservation_pk: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingChangeSeat"];
+                "application/x-www-form-urlencoded": components["schemas"]["BookingChangeSeat"];
+                "multipart/form-data": components["schemas"]["BookingChangeSeat"];
             };
         };
         responses: {
@@ -7369,6 +7494,34 @@ export interface operations {
                 "application/json": components["schemas"]["MarketplaceBookingCreate"];
                 "application/x-www-form-urlencoded": components["schemas"]["MarketplaceBookingCreate"];
                 "multipart/form-data": components["schemas"]["MarketplaceBookingCreate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Booking"];
+                };
+            };
+        };
+    };
+    marketplace_bookings_reservations_change_seat_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                reservation_pk: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingChangeSeat"];
+                "application/x-www-form-urlencoded": components["schemas"]["BookingChangeSeat"];
+                "multipart/form-data": components["schemas"]["BookingChangeSeat"];
             };
         };
         responses: {

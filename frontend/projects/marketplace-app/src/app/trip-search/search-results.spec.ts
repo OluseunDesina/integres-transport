@@ -34,6 +34,7 @@ function makeTripSearchResult(overrides: Record<string, unknown> = {}) {
     business_name: 'GUO Transport',
     duration_minutes: null,
     scheduled_arrival_at: null,
+    capacity_remaining: null,
     ...overrides,
   };
 }
@@ -242,7 +243,7 @@ describe('SearchResults', () => {
     expect(host.querySelector('ui-alert')?.textContent).toContain('Service unavailable.');
   });
 
-  it('names the operator, departure and stop pair in a Select seats button’s accessible label', () => {
+  it('names the operator, departure and stop pair in a Book now button’s accessible label', () => {
     apiClient.GET.and.resolveTo({ data: { count: 0, results: [] } });
     createComponent();
 
@@ -255,9 +256,27 @@ describe('SearchResults', () => {
 
     expect(label).toContain('GUO Transport');
     expect(label).toContain('Exclusive');
-    expect(label).toContain('Select seats');
+    expect(label).toContain('Book');
     expect(label).toContain('Ikeja');
     expect(label).toContain('CMS');
+  });
+
+  it('shows the free-seat count on a result card, but not when capacity is unknown', async () => {
+    apiClient.GET.and.resolveTo({
+      data: {
+        count: 2,
+        results: [
+          makeTripSearchResult({ trip: { ...makeTripSearchResult().trip, id: 'trip-1' }, capacity_remaining: 3 }),
+          makeTripSearchResult({ trip: { ...makeTripSearchResult().trip, id: 'trip-2' }, capacity_remaining: null }),
+        ],
+      },
+    });
+    createComponent();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('3 seats left');
   });
 
   it('passes the matched trip and stop pair to the seat picker, with the operator name folded into routeName', async () => {

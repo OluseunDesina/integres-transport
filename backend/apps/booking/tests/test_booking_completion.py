@@ -127,6 +127,5 @@ def test_is_a_no_op_replayed_against_an_already_completed_booking() -> None:
     assert did_transition is False
     assert result.status == Booking.Status.COMPLETED
     assert (
-        AuditLog.objects.filter(action="booking.completed", target_id=str(booking.id)).count()
-        == 1
+        AuditLog.objects.filter(action="booking.completed", target_id=str(booking.id)).count() == 1
     )

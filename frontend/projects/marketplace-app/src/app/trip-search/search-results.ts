@@ -476,6 +476,14 @@ export class SearchResults implements OnInit {
     return result.duration_minutes === null ? null : formatDuration(result.duration_minutes);
   }
 
+  /** "3 seats left" — docs/specs/22-marketplace.md slice 3. `null` means
+   * unlimited-or-unknowable (`Bookability.capacity_remaining`'s own
+   * widened meaning), so nothing is shown rather than a misleading
+   * "0 seats left" or an invented cap. */
+  protected capacityLabel(result: TripSearchResultRow): string | null {
+    return result.capacity_remaining === null ? null : `${plural(result.capacity_remaining, 'seat')} left`;
+  }
+
   protected departureCountLabel(): string {
     const total = this.results()?.length ?? 0;
     const shown = this.filteredResults()?.length ?? 0;
@@ -491,7 +499,7 @@ export class SearchResults implements OnInit {
     });
     const serviceClass = tripClassLabel(result.trip.trip_class);
     const service = serviceClass ? `${serviceClass} ` : '';
-    return `Select seats on ${result.business_name}'s ${time} ${service}departure from ${result.from_stop.name} to ${result.to_stop.name}`;
+    return `Book ${result.business_name}'s ${time} ${service}departure from ${result.from_stop.name} to ${result.to_stop.name}`;
   }
 
   private async search(

@@ -13,11 +13,6 @@ import { readSeatPickerRequest } from '../shared/booking-draft';
 import { formatMoney, multiplyDecimal } from '../shared/money';
 import { tripClassLabel } from '../shared/trip-class';
 
-/** The one traveler form for a places-mode booking lives under this
- * fixed key in the same `travelers` map a seats-mode booking keys by
- * seat id — one map, one set of read/write helpers, for both shapes. */
-const LEAD_TRAVELER_KEY = '__lead__';
-
 const EMPTY_TRAVELER: TravelerDetail = {
   title: '',
   firstName: '',
@@ -62,7 +57,6 @@ const GENDER_OPTIONS: SelectOption[] = [
   { value: 'other', label: 'Other' },
 ];
 
-type SeatAvailability = components['schemas']['SeatAvailability'];
 type Bookability = components['schemas']['TripBookability'];
 
 /** The most places one booking may buy when capacity is unlimited
@@ -71,50 +65,6 @@ type Bookability = components['schemas']['TripBookability'];
  * an invitation to a typo that books forty seats. Operators who need
  * more than this take group bookings off-app. */
 const UNLIMITED_PLACES_CAP = 10;
-
-interface SeatRow {
-  row: number | null;
-  segments: SeatAvailability[][];
-}
-
-/**
- * Splits a row's seats (already sorted by column) into segments
- * wherever the stored `column` integer jumps by more than 1 — the
- * signal `apps.seating.services.generate_seat_layout`'s physical-layout
- * aisle model leaves behind (docs/specs/8-seat-map-generation.md's Edge
- * case §5). A row with no aisle is just one segment.
- */
-function splitAtAisleGaps(seats: SeatAvailability[]): SeatAvailability[][] {
-  const segments: SeatAvailability[][] = [];
-  let current: SeatAvailability[] = [];
-  let previousColumn: number | null = null;
-  for (const entry of seats) {
-    const column = entry.seat.column;
-    if (previousColumn !== null && column !== null && column - previousColumn > 1) {
-      segments.push(current);
-      current = [];
-    }
-    current.push(entry);
-    previousColumn = column;
-  }
-  if (current.length > 0) {
-    segments.push(current);
-  }
-  return segments;
-}
-
-/**
- * Orders seat numbers the way a person reads them: 1A, 1B, 2A … 10A.
- *
- * `numeric: true` is the whole point — a plain string compare puts 10A
- * before 2A, which is the second-most-common way to render a seat map
- * wrongly after not sorting it at all.
- */
-const SEAT_NUMBER_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-
-function bySeatNumber(a: SeatAvailability, b: SeatAvailability): number {
-  return SEAT_NUMBER_COLLATOR.compare(a.seat.seat_number, b.seat.seat_number);
-}
 
 function toErrorMessage(error: unknown, fallback: string): string {
   if (error && typeof error === 'object' && 'detail' in error) {
@@ -127,35 +77,32 @@ function toErrorMessage(error: unknown, fallback: string): string {
 }
 
 /**
- * Seat map for one Trip segment —
- * docs/specs/4-fares-seating-booking-frontend.md §4.3. Net-new
- * component: no seat-grid primitive exists anywhere in `shared-ui` or
- * any app, and per §4.4 this deliberately stays customer-app-local
- * rather than being promoted, since client-admin's own seat management
- * is a bulk-replace form with no map view.
+ * "How many passengers, and who" — docs/specs/22-marketplace.md slice 3.
+ * Every booking mode goes through this one screen the same way: no seat
+ * map, no per-seat picking. `apps.booking.services.create_booking`
+ * auto-allocates whichever real seats a reservation-mode trip needs
+ * (server-side, at the point `booking-confirm` submits), and a passenger
+ * who wants a *specific* seat instead gets that from `booking-confirm`'s
+ * own "Change seat" link, once the booking — and the hold — already
+ * exist. Before slice 3 this screen carried a full seat grid (picked
+ * seats, per-seat traveler forms); that grid and every reason for it are
+ * gone along with the manual-pick step, not just hidden.
  *
  * Availability is always fetched here, never carried forward from the
  * search screen — it is the most volatile thing in the flow, and a
  * segment-aware availability query (`?from_stop=&to_stop=`) is the only
- * thing that knows whether seat 4A is free for *this* leg range.
- *
- * **Two ways to buy, one screen** (docs/specs/10-booking-modes.md).
- * Either the passenger picks named seats, or they say how many places
- * they want — the latter covering both open seating and reservation
- * mode with seat choice turned off. Which one applies is answered by
- * the availability envelope (`booking_mode`, `seat_selection_enabled`),
- * never guessed from the seat list being empty.
+ * thing that knows how many places are actually left on *this* leg
+ * range.
  *
  * Three states are load-bearing rather than incidental:
  * - `not_configured` — nobody has assigned a vehicle yet. An operator
  *   fixes this; the passenger cannot.
- * - `sold_out` — genuinely full for this segment. Until slice 4 these
- *   two were rendered identically, because both arrived as an empty
- *   seat array; telling a passenger "sold out" about a departure with
- *   no bus assigned is the defect the envelope exists to fix.
+ * - `sold_out` — genuinely full for this segment. Told apart from
+ *   `not_configured` by the availability envelope itself, never guessed
+ *   from an empty/zero count.
  * - an unpriced segment 404s on the fare endpoint — shown as a blocking
- *   alert *before* anything is selectable, so a passenger never picks
- *   seats for a trip that cannot be priced.
+ *   alert *before* anything is selectable, so a passenger never fills in
+ *   traveler details for a trip that cannot be priced.
  */
 @Component({
   selector: 'app-seat-picker',
@@ -188,62 +135,49 @@ export class SeatPicker implements OnInit {
   private readonly farePerSeat = signal<string | null>(null);
   protected readonly currency = signal('');
 
-  protected readonly selectedSeatIds = signal<ReadonlySet<string>>(new Set());
   protected readonly passengerCount = signal(1);
 
-  /** Keyed by seat id for a seats-mode booking, or `LEAD_TRAVELER_KEY`
-   * for a places-mode one's single lead traveler — see this file's own
-   * module-level docstring on why one map serves both shapes. */
-  protected readonly travelers = signal<Record<string, TravelerDetail>>({});
+  /** One entry per passenger, index-aligned with `passengerCount` — see
+   * `travelerFor`/`setTravelerField`. Resized (not rebuilt) whenever the
+   * count changes, so a passenger who bumps the count up and back down
+   * does not lose what they already typed for the others. */
+  protected readonly travelers = signal<TravelerDetail[]>([{ ...EMPTY_TRAVELER }]);
   protected readonly titleOptions = TITLE_OPTIONS;
   protected readonly genderOptions = GENDER_OPTIONS;
-  protected readonly leadTravelerKey = LEAD_TRAVELER_KEY;
-
-  private readonly availability = computed<SeatAvailability[]>(
-    () => this.bookability()?.seats ?? []
-  );
 
   protected readonly status = computed(() => this.bookability()?.status ?? null);
   protected readonly notConfigured = computed(() => this.status() === 'not_configured');
   protected readonly soldOut = computed(() => this.status() === 'sold_out');
 
-  /** Why no seat is being chosen, which is **not** the same sentence
-   * in the two cases that get here. Open seating assigns nobody a seat;
-   * quick book assigns one, the passenger just does not pick it. Saying
-   * "sit anywhere that's free" to a quick-book passenger who is holding
-   * seat 3B would be plainly wrong. */
-  protected readonly placesHint = computed(() =>
-    this.bookability()?.booking_mode === 'open_seating'
-      ? "Seats aren't assigned on this service — sit anywhere that's free."
-      : 'This operator assigns seats for you — you just tell us how many.'
-  );
+  /** Why a specific seat is never asked for on this screen — not the
+   * same sentence for every booking mode. Open seating assigns nobody a
+   * seat at all; a reservation-mode trip always gets one auto-assigned,
+   * whether or not the operator would otherwise let a passenger choose —
+   * only the second sentence's own trips get a "Change seat" link
+   * afterward, per `bookability.seat_selection_enabled`. */
+  protected readonly placesHint = computed(() => {
+    const bookability = this.bookability();
+    if (bookability?.booking_mode === 'open_seating') {
+      return "Seats aren't assigned on this service — sit anywhere that's free.";
+    }
+    return bookability?.seat_selection_enabled
+      ? "We'll assign your seats — you can change them after booking."
+      : 'This operator assigns seats for you — you just tell us how many.';
+  });
 
   /** Asking "How many passengers?" above "Not open for booking yet"
    * reads as a broken screen — the question is only worth asking when
    * there is something to answer it about. */
-  protected readonly heading = computed(() => {
-    if (this.status() !== 'open') {
-      return 'Your journey';
-    }
-    return this.buysPlaces() ? 'How many passengers?' : 'Choose your seats';
-  });
-
-  /** True when the passenger buys places rather than picking seats.
-   * Read off the envelope, not inferred from an empty seat list — that
-   * inference is exactly what conflated "sold out" with "no bus yet". */
-  protected readonly buysPlaces = computed(() => {
-    const bookability = this.bookability();
-    return bookability !== null && !bookability.seat_selection_enabled;
-  });
+  protected readonly heading = computed(() =>
+    this.status() === 'open' ? 'How many passengers?' : 'Your journey'
+  );
 
   /** Options for the "how many" control, capped by what is actually
    * left. Constrained rather than free text, matching this workspace's
    * standing preference for inputs that cannot express a wrong value. */
   protected readonly placeOptions = computed<number[]>(() => {
     const remaining = this.bookability()?.capacity_remaining;
-    const seatsFree = this.availability().filter((entry) => entry.is_available).length;
-    const cap =
-      remaining ?? (this.bookability()?.booking_mode === 'open_seating' ? UNLIMITED_PLACES_CAP : seatsFree);
+    const cap = remaining ?? UNLIMITED_PLACES_CAP;
     return Array.from({ length: Math.max(Math.min(cap, UNLIMITED_PLACES_CAP), 1) }, (_, i) => i + 1);
   });
 
@@ -254,10 +188,6 @@ export class SeatPicker implements OnInit {
     this.placeOptions().map((count) => ({ value: String(count), label: String(count) }))
   );
 
-  /** The journey itself, under the heading. Was three stacked lines of
-   * muted text above the old hand-written `<h1>`; `ui-page-header` takes
-   * one description, and the departure time belongs with the route
-   * rather than on a line of its own. */
   /** The class this trip actually runs as, from the availability
    * envelope's own `trip_class` — never from `request().tripClass`.
    * This file's whole contract is that carried router state is not
@@ -292,68 +222,14 @@ export class SeatPicker implements OnInit {
     return parts.join(' · ');
   });
 
-  /** "2 seats selected" / "3 passengers" — the count in words rather
-   * than the old "seat(s)", which no one writes on purpose. */
-  protected readonly selectionLabel = computed(() =>
-    this.buysPlaces()
-      ? plural(this.selectedCount(), 'passenger')
-      : `${plural(this.selectedCount(), 'seat')} selected`
-  );
-
-  /**
-   * Groups seats into rows when the VehicleType defines `row`/`column`
-   * geometry, and falls back to a single wrapped row of seat numbers
-   * when it doesn't — both are valid per the backend's own seat-map
-   * non-goal, so neither can be treated as the broken case.
-   */
-  protected readonly seatRows = computed<SeatRow[]>(() => {
-    const seats = this.availability();
-    if (seats.every((entry) => entry.seat.row === null)) {
-      // Sorted, because the response is not.
-      // `apps.seating.services.get_availability` reads
-      // `Seat.objects.filter(...)` with no `order_by`, so it inherits
-      // `Seat.Meta.ordering = ["-created_at"]` and hands back the seats
-      // **newest first** — a bus rendered 3B, 3A, 2B, 2A, 1B, 1A, which
-      // is what iteration-15 photographed.
-      //
-      // The row/column path below is unaffected: it sorts rows and then
-      // columns itself. Only this no-geometry fallback trusted the
-      // order it was given.
-      //
-      // The root cause is that missing `order_by` — the same
-      // `-created_at` trap spec 10 already recorded for quick-book seat
-      // *allocation* and fixed there, without anyone checking the seat
-      // map a passenger actually looks at. Fixed here rather than in
-      // `get_availability` only because this slice makes no backend
-      // change; the backend ordering is still worth correcting.
-      return [{ row: null, segments: [[...seats].sort(bySeatNumber)] }];
-    }
-    const byRow = new Map<number | null, SeatAvailability[]>();
-    for (const entry of seats) {
-      const key = entry.seat.row;
-      byRow.set(key, [...(byRow.get(key) ?? []), entry]);
-    }
-    return [...byRow.entries()]
-      .sort((a, b) => (a[0] ?? Number.MAX_SAFE_INTEGER) - (b[0] ?? Number.MAX_SAFE_INTEGER))
-      .map(([row, rowSeats]) => {
-        const sorted = [...rowSeats].sort((a, b) => (a.seat.column ?? 0) - (b.seat.column ?? 0));
-        return { row, segments: splitAtAisleGaps(sorted) };
-      });
-  });
-
-  /** How many places this booking is for, in whichever way the
-   * passenger expressed it — the one number the total is priced from,
-   * so both modes share the money maths rather than duplicating it. */
-  protected readonly selectedCount = computed(() =>
-    this.buysPlaces() ? this.passengerCount() : this.selectedSeatIds().size
-  );
+  protected readonly selectionLabel = computed(() => plural(this.passengerCount(), 'passenger'));
 
   protected readonly totalLabel = computed(() => {
     const fare = this.farePerSeat();
     if (fare === null) {
       return null;
     }
-    return formatMoney(multiplyDecimal(fare, this.selectedCount()), this.currency());
+    return formatMoney(multiplyDecimal(fare, this.passengerCount()), this.currency());
   });
 
   protected readonly fareLabel = computed(() => {
@@ -361,29 +237,17 @@ export class SeatPicker implements OnInit {
     return fare === null ? null : formatMoney(fare, this.currency());
   });
 
-  /** The selected seats themselves, for the per-seat traveler forms —
-   * same filter `continueToConfirm()` already applies when building the
-   * seats-mode request, kept as one computed rather than duplicated. */
-  protected readonly selectedSeats = computed(() =>
-    this.availability().filter((entry) => this.selectedSeatIds().has(entry.seat.id))
-  );
-
   protected readonly canContinue = computed(() => {
-    if (this.selectedCount() === 0 || this.farePerSeat() === null) {
+    if (this.passengerCount() === 0 || this.farePerSeat() === null) {
       return false;
     }
-    if (this.buysPlaces()) {
-      return travelerIsComplete(this.travelerFor(LEAD_TRAVELER_KEY));
-    }
-    return [...this.selectedSeatIds()].every((seatId) =>
-      travelerIsComplete(this.travelerFor(seatId))
-    );
+    return this.travelers().slice(0, this.passengerCount()).every(travelerIsComplete);
   });
 
   async ngOnInit(): Promise<void> {
     // A passenger who deep-links or refreshes into a lost navigation
-    // state has no segment to price or seat — start the flow over
-    // rather than render a half-populated screen.
+    // state has no segment to price — start the flow over rather than
+    // render a half-populated screen.
     if (!this.request()) {
       await this.router.navigate(['/search']);
       return;
@@ -399,8 +263,8 @@ export class SeatPicker implements OnInit {
     this.loading.set(true);
     this.loadError.set(null);
     this.fareError.set(null);
-    this.selectedSeatIds.set(new Set());
     this.passengerCount.set(1);
+    this.travelers.set([{ ...EMPTY_TRAVELER }]);
 
     const path = { path: { id: request.tripId } };
     const query = { from_stop: request.fromStop.id, to_stop: request.toStop.id };
@@ -414,14 +278,14 @@ export class SeatPicker implements OnInit {
 
     if (!availability.data) {
       this.loadError.set(
-        toErrorMessage(availability.error, 'Could not load seats for this trip. Try again.')
+        toErrorMessage(availability.error, 'Could not load this trip. Try again.')
       );
       return;
     }
     this.bookability.set(availability.data);
 
     if (!fare.data) {
-      // Not a load failure — the seats are real, there is just no fare
+      // Not a load failure — the trip is real, there is just no fare
       // configured for this segment, which blocks booking rather than
       // blocking display.
       this.farePerSeat.set(null);
@@ -437,96 +301,59 @@ export class SeatPicker implements OnInit {
     this.currency.set(fare.data.currency);
   }
 
-  protected isSelected(seatId: string): boolean {
-    return this.selectedSeatIds().has(seatId);
+  /** Current value of one passenger's form. Never absent from the
+   * caller's point of view: an unfilled field is `EMPTY_TRAVELER`'s
+   * `''`, not `undefined`. */
+  protected travelerFor(index: number): TravelerDetail {
+    return this.travelers()[index] ?? EMPTY_TRAVELER;
   }
 
-  protected toggleSeat(entry: SeatAvailability): void {
-    if (!entry.is_available || this.farePerSeat() === null) {
-      return;
-    }
-    const seatId = entry.seat.id;
-    let nowSelected = false;
-    this.selectedSeatIds.update((current) => {
-      const next = new Set(current);
-      nowSelected = !next.delete(seatId);
-      if (nowSelected) {
-        next.add(seatId);
-      }
-      return next;
-    });
-    // A freshly-selected seat gets a blank traveler form; a deselected
-    // one drops whatever was entered — there is no seat left to attach
-    // it to.
+  protected setTravelerField(index: number, field: keyof TravelerDetail, value: string): void {
     this.travelers.update((current) => {
-      if (nowSelected) {
-        return seatId in current ? current : { ...current, [seatId]: { ...EMPTY_TRAVELER } };
-      }
-      const next = { ...current };
-      delete next[seatId];
+      const next = [...current];
+      next[index] = { ...(next[index] ?? EMPTY_TRAVELER), [field]: value };
       return next;
     });
-  }
-
-  /** Current value of one traveler form — the lead traveler's, or one
-   * selected seat's. Never absent from the caller's point of view: an
-   * unfilled field is `EMPTY_TRAVELER`'s `''`, not `undefined`. */
-  protected travelerFor(key: string): TravelerDetail {
-    return this.travelers()[key] ?? EMPTY_TRAVELER;
-  }
-
-  protected setTravelerField(key: string, field: keyof TravelerDetail, value: string): void {
-    this.travelers.update((current) => ({
-      ...current,
-      [key]: { ...(current[key] ?? EMPTY_TRAVELER), [field]: value },
-    }));
-  }
-
-  protected seatLabel(entry: SeatAvailability): string {
-    return entry.is_available
-      ? `Seat ${entry.seat.seat_number}`
-      : `Seat ${entry.seat.seat_number}, unavailable`;
   }
 
   protected async back(): Promise<void> {
     await this.router.navigate(['/search']);
   }
 
+  /** Grows or shrinks `travelers` to match — growing appends blank
+   * forms, shrinking drops from the end, so a passenger who dials the
+   * count down and back up sees their earlier entries again rather than
+   * blank ones. */
   protected setPassengerCount(value: string): void {
-    this.passengerCount.set(Number(value));
+    const count = Number(value);
+    this.passengerCount.set(count);
+    this.travelers.update((current) => {
+      if (current.length >= count) {
+        return current;
+      }
+      return [...current, ...Array.from({ length: count - current.length }, () => ({ ...EMPTY_TRAVELER }))];
+    });
   }
 
   protected async continueToConfirm(): Promise<void> {
     const carried = this.request();
     const fare = this.farePerSeat();
-    if (!carried || fare === null || !this.canContinue()) {
+    const bookability = this.bookability();
+    if (!carried || fare === null || !bookability || !this.canContinue()) {
       return;
     }
-    const money = { farePerSeat: fare, currency: this.currency() };
-    const selected = this.selectedSeatIds();
     // Overwrites whatever the search screen carried in: the envelope is
     // the fresher of the two, and the confirm screen is the last thing
     // the passenger reads before committing.
-    const request = { ...carried, tripClass: this.bookability()?.trip_class ?? carried.tripClass };
-    const state: BookingRequest = this.buysPlaces()
-      ? {
-          ...request,
-          ...money,
-          kind: 'places',
-          passengerCount: this.passengerCount(),
-          traveler: this.travelerFor(LEAD_TRAVELER_KEY),
-        }
-      : {
-          ...request,
-          ...money,
-          kind: 'seats',
-          seats: this.availability()
-            .filter((entry) => selected.has(entry.seat.id))
-            .map((entry) => ({ id: entry.seat.id, seatNumber: entry.seat.seat_number })),
-          travelers: Object.fromEntries(
-            [...selected].map((seatId) => [seatId, this.travelerFor(seatId)])
-          ),
-        };
+    const state: BookingRequest = {
+      ...carried,
+      tripClass: bookability.trip_class ?? carried.tripClass,
+      farePerSeat: fare,
+      currency: this.currency(),
+      passengerCount: this.passengerCount(),
+      travelers: this.travelers().slice(0, this.passengerCount()),
+      seatSelectionEnabled: bookability.seat_selection_enabled,
+    };
     // The one point a guest is asked to log in — see this app's own
     // `app.routes.ts` and `booking-draft.ts`'s `readPendingBooking()`
     // for the rest of the handoff. Carrying `state` as `pendingBooking`

@@ -86,10 +86,10 @@ describe('Register', () => {
       toStop: { id: 'stop-b', name: 'Ikeja' },
       farePerSeat: '750.00',
       currency: 'NGN',
-      kind: 'seats' as const,
-      seats: [{ id: 'seat-1', seatNumber: '1A' }],
-      travelers: {
-        'seat-1': {
+      passengerCount: 1,
+      seatSelectionEnabled: true,
+      travelers: [
+        {
           title: '',
           firstName: 'Ada',
           lastName: 'Lovelace',
@@ -99,7 +99,7 @@ describe('Register', () => {
           gender: '',
           nationality: '',
         },
-      },
+      ],
     };
     // `replaceState`, not `pushState`/`back()` — see login.spec.ts's
     // identical test for why.

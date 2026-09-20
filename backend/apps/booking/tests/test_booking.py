@@ -723,6 +723,119 @@ def test_cancel_booking_403s_for_another_clients_booking() -> None:
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
+# --- POST /bookings/{id}/reservations/{reservation_id}/change-seat/ --------
+# docs/specs/22-marketplace.md slice 3.
+
+
+def _held_booking_with_two_seats(client: object, *, idempotency_key: str = "change-seat-endpoint"):  # type: ignore[no-untyped-def]
+    trip, stop_a, stop_b, vehicle_type = _trip_with_two_stops_and_vehicle(client)
+    passenger = PassengerUserFactory(client=client)
+    with tenant_context(str(client.id)):
+        FareRuleFactory(client=client, route=trip.route, business=trip.business, amount="50.00")
+        seat_a = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number="1A")
+        seat_b = SeatFactory(client=client, vehicle_type=vehicle_type, seat_number="1B")
+        booking = create_booking(
+            trip=trip,
+            passenger=passenger,
+            seats=[{"seat": seat_a, "from_stop": stop_a, "to_stop": stop_b}],
+            idempotency_key=idempotency_key,
+        )
+        reservation = SeatReservation.objects.get(booking=booking)
+    return passenger, booking, reservation, seat_b
+
+
+def test_passenger_can_change_their_own_seat() -> None:
+    client = ClientFactory()
+    passenger, booking, reservation, seat_b = _held_booking_with_two_seats(client)
+
+    response = _auth_client(passenger).post(
+        reverse(
+            "booking-change-seat",
+            kwargs={"pk": str(booking.id), "reservation_pk": str(reservation.id)},
+        ),
+        {"seat": str(seat_b.id)},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["seats"][0]["seat"] == "1B"
+
+
+def test_changing_someone_elses_seat_is_forbidden() -> None:
+    client = ClientFactory()
+    passenger, booking, reservation, seat_b = _held_booking_with_two_seats(client)
+    other = PassengerUserFactory(client=client)
+
+    response = _auth_client(other).post(
+        reverse(
+            "booking-change-seat",
+            kwargs={"pk": str(booking.id), "reservation_pk": str(reservation.id)},
+        ),
+        {"seat": str(seat_b.id)},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_change_seat_400s_when_the_operator_does_not_allow_choosing() -> None:
+    client = ClientFactory()
+    passenger, booking, reservation, seat_b = _held_booking_with_two_seats(client)
+    with tenant_context(str(client.id)):
+        booking.business.seat_selection_enabled = False
+        booking.business.save(update_fields=["seat_selection_enabled"])
+
+    response = _auth_client(passenger).post(
+        reverse(
+            "booking-change-seat",
+            kwargs={"pk": str(booking.id), "reservation_pk": str(reservation.id)},
+        ),
+        {"seat": str(seat_b.id)},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "seat" in response.data
+
+
+def test_change_seat_409s_once_the_reservation_is_confirmed() -> None:
+    client = ClientFactory()
+    passenger, booking, reservation, seat_b = _held_booking_with_two_seats(client)
+    with tenant_context(str(client.id)):
+        reservation.status = SeatReservation.Status.CONFIRMED
+        reservation.save(update_fields=["status"])
+
+    response = _auth_client(passenger).post(
+        reverse(
+            "booking-change-seat",
+            kwargs={"pk": str(booking.id), "reservation_pk": str(reservation.id)},
+        ),
+        {"seat": str(seat_b.id)},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_409_CONFLICT
+
+
+def test_change_seat_404s_for_a_reservation_not_on_this_booking() -> None:
+    client = ClientFactory()
+    passenger, booking, reservation, _seat_b = _held_booking_with_two_seats(client)
+    _other_passenger, other_booking, other_reservation, _ = _held_booking_with_two_seats(
+        client, idempotency_key="change-seat-endpoint-other"
+    )
+
+    response = _auth_client(passenger).post(
+        reverse(
+            "booking-change-seat",
+            kwargs={"pk": str(booking.id), "reservation_pk": str(other_reservation.id)},
+        ),
+        {"seat": str(_seat_b.id)},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
 # --- BookingSerializer.trip nesting -------------------------------------
 # docs/specs/4-fares-seating-booking-frontend.md §3.4 — my-bookings and the
 # client-admin bookings list both render a route name and departure time,
@@ -812,7 +925,11 @@ def test_bookings_mine_query_count_does_not_scale_with_booking_count(
                 idempotency_key=f"mine-count-{index}",
             )
 
-    with django_assert_max_num_queries(12):
+    # +1 over the pre-slice-3 baseline: one batched `Traveler` query
+    # (`_travelers_context`), fixed regardless of how many bookings are
+    # on the page — the exact "does not scale" property this test
+    # itself is asserting, just at a new fixed baseline.
+    with django_assert_max_num_queries(13):
         response = _auth_client(passenger).get(reverse("booking-mine"))
 
     assert response.status_code == status.HTTP_200_OK
@@ -1037,9 +1154,7 @@ def _booking_for(client: object, *, route_name: str, passenger_email: str) -> Bo
         trip.route.name = route_name
         trip.route.save(update_fields=["name"])
         passenger = PassengerUserFactory(client=client, email=passenger_email)
-        return BookingFactory(
-            client=client, trip=trip, business=trip.business, passenger=passenger
-        )
+        return BookingFactory(client=client, trip=trip, business=trip.business, passenger=passenger)
 
 
 def test_booking_list_filters_by_business_query_param() -> None:

@@ -471,12 +471,14 @@ describe('SeatPicker', () => {
       respondWith([], undefined, openSeatingEnvelope());
       await createComponent();
 
-      expect((fixture.nativeElement as HTMLElement).textContent).toContain('1 passenger ');
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain('1 passenger');
+      expect(text).not.toContain('1 passengers');
 
       component['setPassengerCount']('2');
       fixture.detectChanges();
 
-      expect((fixture.nativeElement as HTMLElement).textContent).toContain('2 passengers ');
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('2 passengers');
     });
 
     it('explains open seating and quick book differently', async () => {

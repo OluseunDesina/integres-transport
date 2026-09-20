@@ -22,7 +22,7 @@ from apps.fares.services import FareNotConfigured
 from apps.identity.models import User
 from apps.scheduling.models import Trip
 from apps.seating.models import SeatReservation
-from apps.seating.services import SeatUnavailable
+from apps.seating.services import ReservationNotChangeable, SeatUnavailable, change_seat
 from apps.ticketing.capacity import TripNotConfigured, TripSoldOut
 
 from .manifest import (
@@ -34,9 +34,10 @@ from .manifest import (
     trip_summary,
 )
 from .manifest import totals as manifest_totals
-from .models import Booking
+from .models import Booking, Traveler
 from .serializers import (
     BookingCancelSerializer,
+    BookingChangeSeatSerializer,
     BookingCreateSerializer,
     BookingListQuerySerializer,
     BookingSerializer,
@@ -62,8 +63,7 @@ _SEARCH_QUERY_PARAM = OpenApiParameter(
     str,
     OpenApiParameter.QUERY,
     required=False,
-    description="Case-insensitive substring match on the route name or the "
-    "passenger's email.",
+    description="Case-insensitive substring match on the route name or the passenger's email.",
 )
 _TRIP_QUERY_PARAM = OpenApiParameter(
     "trip", str, OpenApiParameter.QUERY, required=False, description="Filter to a single Trip."
@@ -129,6 +129,38 @@ def _reservations_by_booking(bookings: Sequence[Booking]) -> dict[Any, list[Seat
     for reservation in reservations:
         grouped[reservation.booking_id].append(reservation)
     return grouped
+
+
+def _travelers_context(bookings: Sequence[Booking]) -> dict[str, Any]:
+    """One batched query for every `Traveler` belonging to `bookings`,
+    split the same way `BookingSerializer` itself splits them (by seat
+    vs. none) — docs/specs/22-marketplace.md slice 3. Mirrors
+    `_reservations_by_booking`'s own reasoning exactly: `Traveler.booking`
+    and `Traveler.seat_reservation` are both `related_name="+"`, so
+    there is no reverse manager to `Prefetch()`, and without this a list
+    of N bookings would run one extra query per row via
+    `BookingSerializer`'s own per-object fallback.
+
+    `all_objects`, not `.objects` — same reasoning as
+    `_reservations_by_booking` just above: `BookingMineView`'s own call
+    site spans bookings across more than one Client at once, and
+    `.objects` would apply the caller's single ambient Client on top of
+    `booking_id__in=`, silently emptying every Traveler for a Booking
+    under any other Client."""
+    travelers = Traveler.all_objects.filter(
+        booking_id__in=[booking.id for booking in bookings], deleted_at__isnull=True
+    )
+    travelers_by_reservation: dict[Any, Traveler] = {}
+    lead_travelers_by_booking: dict[Any, list[Traveler]] = defaultdict(list)
+    for traveler in travelers:
+        if traveler.seat_reservation_id is not None:
+            travelers_by_reservation[traveler.seat_reservation_id] = traveler
+        else:
+            lead_travelers_by_booking[traveler.booking_id].append(traveler)
+    return {
+        "travelers_by_reservation": travelers_by_reservation,
+        "lead_travelers_by_booking": lead_travelers_by_booking,
+    }
 
 
 @extend_schema_view(
@@ -224,6 +256,7 @@ class BookingListCreateView(generics.ListCreateAPIView[Booking]):
         context = {
             **self.get_serializer_context(),
             "reservations_by_booking": _reservations_by_booking(bookings),
+            **_travelers_context(bookings),
         }
         serializer = BookingSerializer(bookings, many=True, context=context)
         if page is not None:
@@ -251,6 +284,7 @@ class BookingListCreateView(generics.ListCreateAPIView[Booking]):
                 from_stop=data.get("from_stop"),
                 to_stop=data.get("to_stop"),
                 traveler=data.get("traveler"),
+                travelers=data.get("travelers"),
                 idempotency_key=idempotency_key,
             )
         except FareNotConfigured as exc:
@@ -305,6 +339,7 @@ class BookingMineView(generics.ListAPIView[Booking]):
             context = {
                 **self.get_serializer_context(),
                 "reservations_by_booking": _reservations_by_booking(bookings),
+                **_travelers_context(bookings),
             }
             serializer = BookingSerializer(bookings, many=True, context=context)
             if page is not None:
@@ -350,6 +385,68 @@ class BookingCancelView(generics.GenericAPIView[Booking]):
                 cancelled_by=user,
                 reason=serializer.validated_data.get("reason", ""),
             )
+            return Response(BookingSerializer(updated).data)
+
+
+@extend_schema(request=BookingChangeSeatSerializer, responses=BookingSerializer)
+class BookingChangeSeatView(generics.GenericAPIView[Booking]):
+    """POST /bookings/{id}/reservations/{reservation_id}/change-seat/ —
+    docs/specs/22-marketplace.md slice 3's "Change seat" link, offered
+    while a booking still sits `pending_payment` with an auto-assigned
+    seat. Passenger, own booking only — same ownership check as
+    `BookingCancelView`, and the same `all_objects` +
+    `platform_staff_bypass()` reasoning: a marketplace booking's
+    `client` is the operator's, not the passenger's own.
+
+    A reservation not belonging to this booking, or not currently
+    `HELD`, is indistinguishable from "not found" / "can't be changed
+    any more" to the passenger either way — mapped to 404 and 409
+    respectively rather than leaking which specific mismatch occurred.
+    """
+
+    permission_classes = [IsAuthenticated]
+    serializer_class = BookingChangeSeatSerializer
+
+    def get_queryset(self) -> QuerySet[Booking]:
+        return Booking.all_objects.filter(deleted_at__isnull=True)
+
+    def post(self, request: Request, pk: str, reservation_pk: str) -> Response:
+        with platform_staff_bypass():
+            booking = get_object_or_404(self.get_queryset(), pk=pk)
+            user = request.user
+            assert isinstance(user, User)
+            if booking.passenger_id != user.id:
+                return Response(
+                    {"detail": "You cannot change another passenger's booking."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            reservation = (
+                SeatReservation.all_objects.select_related(
+                    "trip__vehicle__vehicle_type", "trip__business", "seat"
+                )
+                .filter(booking=booking)
+                .filter(pk=reservation_pk)
+                .first()
+            )
+            if reservation is None:
+                return Response(status=status.HTTP_404_NOT_FOUND)
+
+            serializer = BookingChangeSeatSerializer(
+                data=request.data, context={"reservation": reservation}
+            )
+            serializer.is_valid(raise_exception=True)
+            try:
+                change_seat(
+                    reservation=reservation,
+                    new_seat=serializer.validated_data["seat"],
+                    hold_minutes=reservation.trip.business.seat_hold_minutes,
+                    actor=user,
+                )
+            except ReservationNotChangeable as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+            except SeatUnavailable as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+            updated = Booking.all_objects.get(pk=booking.pk)
             return Response(BookingSerializer(updated).data)
 
 
@@ -399,9 +496,10 @@ class TripManifestView(generics.GenericAPIView[Trip]):
 
     def get(self, request: Request, pk: str) -> Response:
         trip = get_object_or_404(self.get_queryset(), pk=pk)
-        include_cancelled = str(
-            request.query_params.get("include_cancelled", "")
-        ).lower() in ("true", "1")
+        include_cancelled = str(request.query_params.get("include_cancelled", "")).lower() in (
+            "true",
+            "1",
+        )
         kind = manifest_kind(trip)
 
         # Its own paginator rather than `self.paginate_queryset`. That
@@ -448,9 +546,7 @@ class TripManifestView(generics.GenericAPIView[Trip]):
             # Counted over the whole trip, never over the page. A
             # manifest whose totals changed as you paged would be
             # useless for the one question it answers.
-            "totals": manifest_totals(
-                trip=trip, kind=kind, include_cancelled=include_cancelled
-            ),
+            "totals": manifest_totals(trip=trip, kind=kind, include_cancelled=include_cancelled),
             "results": rows,
         }
         if paginated:
@@ -509,9 +605,7 @@ class StaffBookingCreateView(generics.GenericAPIView[Booking]):
                 {"detail": "Idempotency-Key header is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        serializer = StaffBookingCreateSerializer(
-            data=request.data, context={"request": request}
-        )
+        serializer = StaffBookingCreateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         actor = request.user
         assert isinstance(actor, User)

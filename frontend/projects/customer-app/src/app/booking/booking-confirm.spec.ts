@@ -35,7 +35,11 @@ const PLACES_REQUEST: BookingRequest = {
 };
 
 function makeBooking(
-  overrides: { hold_expires_at?: string | null; hold_expires_in_seconds?: number | null } = {}
+  overrides: {
+    hold_expires_at?: string | null;
+    hold_expires_in_seconds?: number | null;
+    seats?: unknown[];
+  } = {}
 ) {
   return {
     id: 'booking-1',
@@ -52,12 +56,30 @@ function makeBooking(
     currency: 'NGN',
     cancellation_reason: '',
     seats: [],
+    travelers: [],
     // Reservation-mode default — a real hold, the ordinary case for
     // REQUEST (kind: 'seats'). Tests for the places/open-seating case
     // override both to null explicitly.
     hold_expires_at: '2026-08-10T00:15:00Z',
     hold_expires_in_seconds: 900,
     created_at: '2026-08-10T00:00:00Z',
+    ...overrides,
+  };
+}
+
+/** One held reservation, in the shape `BookingSeatReservationSerializer`
+ * returns — as opposed to `REQUEST.seats`, which is only the id/number
+ * pair `seat-picker` carried forward. */
+function makeReservation(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'res-1',
+    seat: '1A',
+    from_stop: 'Ikeja',
+    to_stop: 'CMS',
+    status: 'held',
+    held_until: '2026-08-10T00:15:00Z',
+    amount: '750.00',
+    traveler: null,
     ...overrides,
   };
 }
@@ -234,6 +256,149 @@ describe('BookingConfirm', () => {
 
     expect(apiClient.GET).toHaveBeenCalled();
     expect(component['createdBooking']()?.hold_expires_in_seconds).toBeNull();
+  });
+
+  // --- "Change seat", ported from the marketplace app onto this app's
+  // own `apps.booking` endpoints (spec 22 slice 3) --------------------
+
+  describe('changing seat on a held reservation', () => {
+    it('offers Change seat for a held reservation on a seats-mode booking', async () => {
+      apiClient.POST.and.resolveTo({
+        data: makeBooking({ seats: [makeReservation()] }),
+        response: { status: 201 },
+      });
+      await createComponent();
+
+      await component['submit']();
+      fixture.detectChanges();
+
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain('Seat 1A');
+      expect(text).toContain('Change seat');
+    });
+
+    it('never offers Change seat on a places (open-seating/quick-book) booking', async () => {
+      apiClient.POST.and.resolveTo({
+        data: makeBooking({ hold_expires_at: null, hold_expires_in_seconds: null }),
+        response: { status: 201 },
+      });
+      await createComponent(PLACES_REQUEST);
+
+      await component['submit']();
+      fixture.detectChanges();
+
+      expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Change seat');
+    });
+
+    it('never offers Change seat once the reservation is no longer held', async () => {
+      apiClient.POST.and.resolveTo({
+        data: makeBooking({ seats: [makeReservation({ status: 'confirmed' })] }),
+        response: { status: 201 },
+      });
+      await createComponent();
+
+      await component['submit']();
+      fixture.detectChanges();
+
+      expect((fixture.nativeElement as HTMLElement).textContent).not.toContain('Change seat');
+    });
+
+    it('loads free seats on this trip, excluding the one already held', async () => {
+      apiClient.POST.and.resolveTo({
+        data: makeBooking({ seats: [makeReservation()] }),
+        response: { status: 201 },
+      });
+      await createComponent();
+      await component['submit']();
+      fixture.detectChanges();
+
+      function makeSeat(id: string, seatNumber: string, isAvailable: boolean) {
+        return {
+          seat: {
+            id,
+            vehicle_type: 'vt-1',
+            seat_number: seatNumber,
+            row: null,
+            column: null,
+            is_active: true,
+            created_at: '2026-08-01T00:00:00Z',
+          },
+          is_available: isAvailable,
+        };
+      }
+
+      apiClient.GET.and.resolveTo({
+        data: {
+          status: 'open',
+          seats: [
+            makeSeat('seat-1', '1A', false),
+            makeSeat('seat-9', '2A', true),
+            makeSeat('seat-8', '2B', false),
+          ],
+        },
+      });
+
+      await component['openChangeSeat']('res-1', '1A');
+      fixture.detectChanges();
+
+      expect(apiClient.GET).toHaveBeenCalledWith(
+        '/api/v1/trips/{id}/availability/',
+        jasmine.objectContaining({
+          params: {
+            path: { id: 'trip-1' },
+            query: { from_stop: 'stop-a', to_stop: 'stop-c' },
+          },
+        })
+      );
+      expect(component['changeSeatOptions']()).toEqual([makeSeat('seat-9', '2A', true)]);
+    });
+
+    it('moves the reservation to a new seat and refreshes the booking', async () => {
+      apiClient.POST.and.resolveTo({
+        data: makeBooking({ seats: [makeReservation()] }),
+        response: { status: 201 },
+      });
+      await createComponent();
+      await component['submit']();
+      fixture.detectChanges();
+
+      apiClient.POST.and.resolveTo({
+        data: makeBooking({ seats: [makeReservation({ seat: '2A' })] }),
+        response: { status: 200 },
+      });
+
+      await component['chooseNewSeat']('res-1', 'seat-9');
+      fixture.detectChanges();
+
+      expect(apiClient.POST).toHaveBeenCalledWith(
+        '/api/v1/bookings/{id}/reservations/{reservation_pk}/change-seat/',
+        {
+          params: { path: { id: 'booking-1', reservation_pk: 'res-1' } },
+          body: { seat: 'seat-9' },
+        }
+      );
+      expect(component['changingSeatFor']()).toBeNull();
+      expect((fixture.nativeElement as HTMLElement).textContent).toContain('Seat 2A');
+    });
+
+    it('surfaces an error inline rather than losing the current seat', async () => {
+      apiClient.POST.and.resolveTo({
+        data: makeBooking({ seats: [makeReservation()] }),
+        response: { status: 201 },
+      });
+      await createComponent();
+      await component['submit']();
+      fixture.detectChanges();
+
+      apiClient.POST.and.resolveTo({
+        error: { seat: ["This seat does not belong to this trip's vehicle."] },
+        response: { status: 400 },
+      });
+
+      await component['chooseNewSeat']('res-1', 'seat-9');
+
+      expect(component['changeSeatError']()).toBe("This seat does not belong to this trip's vehicle.");
+    });
   });
 
   describe('when the created booking holds nothing (open seating)', () => {

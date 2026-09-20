@@ -12,7 +12,7 @@ from django.db.models.deletion import ProtectedError
 from django.utils import timezone
 from psycopg.types.range import Range
 
-from apps.booking.models import Booking
+from apps.booking.models import Booking, Traveler
 from apps.core.audit import record_audit_event
 from apps.fares.models import FareRule, FareSegmentRule
 from apps.fleet.models import VehicleType
@@ -162,9 +162,7 @@ def segment_sequence_range(
     manager = RouteStop.objects if tenant_scoped else RouteStop.all_objects
     sequence_by_stop_id = {
         route_stop.stop_id: route_stop.sequence
-        for route_stop in manager.filter(
-            route_id=route_id, stop_id__in=[from_stop.id, to_stop.id]
-        )
+        for route_stop in manager.filter(route_id=route_id, stop_id__in=[from_stop.id, to_stop.id])
     }
     if from_stop.id not in sequence_by_stop_id or to_stop.id not in sequence_by_stop_id:
         raise ValueError("Both stops must be on the route.")
@@ -219,10 +217,13 @@ class Bookability:
     assigning a bus, the other a passenger fixes by picking another
     departure. `status` is what separates them.
 
-    `capacity_remaining` is open-seating only, and `None` means
-    unlimited — either the Business does not enforce capacity, or
-    capacity is unknowable because no vehicle is assigned (in which case
-    `status` is already `not_configured`, so it is never read as
+    `capacity_remaining` is a real count for both booking modes as of
+    docs/specs/22-marketplace.md slice 3 (originally open-seating only —
+    a seats-mode trip's own free-seat count sat right there in `seats`
+    the whole time, just never surfaced under this name). `None` means
+    unlimited-or-unknowable: either the Business does not enforce
+    open-seating capacity, or nothing is configured yet (`status` is
+    already `not_configured` in that case, so it is never read as
     "unlimited" by mistake).
 
     `seat_selection_enabled` answers "may a passenger pick their own
@@ -266,9 +267,7 @@ def get_bookability(*, trip: Trip, from_stop: Stop, to_stop: Stop) -> Bookabilit
         from_sequence, to_sequence = segment_sequence_range(
             route_id=trip.route_id, from_stop=from_stop, to_stop=to_stop
         )
-        capacity = get_capacity(
-            trip=trip, from_sequence=from_sequence, to_sequence=to_sequence
-        )
+        capacity = get_capacity(trip=trip, from_sequence=from_sequence, to_sequence=to_sequence)
         sold_out = capacity.remaining is not None and capacity.remaining <= 0
         return Bookability(
             booking_mode=trip.booking_mode,
@@ -294,7 +293,9 @@ def get_bookability(*, trip: Trip, from_stop: Stop, to_stop: Stop) -> Bookabilit
         booking_mode=trip.booking_mode,
         status=status,
         seats=seats,
-        capacity_remaining=None,
+        # `seats` is already the whole answer — a free-seat count over a
+        # list this function already built, not a second query.
+        capacity_remaining=sum(1 for seat in seats if seat["is_available"]) if seats else None,
         seat_selection_enabled=trip.business.seat_selection_enabled,
     )
 
@@ -456,3 +457,76 @@ def expire_stale_holds_for_booking(*, booking: Booking) -> bool:
     with transaction.atomic():
         locked_booking = Booking.all_objects.select_for_update().get(pk=booking.pk)
         return expire_stale_holds_for_locked_booking(locked_booking)
+
+
+class ReservationNotChangeable(Exception):
+    """Raised when a reservation is no longer `HELD` — already paid,
+    expired, or released. Mapped to a 409 by the view layer, same
+    posture as `SeatUnavailable`. Deliberately not folded into that
+    exception: a caller needs to tell "the seat you're switching to just
+    got taken, try another" (retryable, pick a different seat) apart
+    from "this hold itself is gone" (not retryable, the whole booking
+    needs to move on to payment or start over)."""
+
+
+def change_seat(
+    *, reservation: SeatReservation, new_seat: Seat, hold_minutes: int, actor: User
+) -> SeatReservation:
+    """Swaps one still-`HELD` reservation onto a different seat —
+    docs/specs/22-marketplace.md slice 3's "Change seat" link, offered
+    only while a booking sits `pending_payment` and only on a trip whose
+    Business actually lets a passenger choose (never on true quick-book,
+    where the operator's own `seat_selection_enabled=False` already says
+    a passenger should not be picking at all — that check lives in the
+    caller, since this function only knows about one reservation, not
+    the Business policy behind it).
+
+    **Never an in-place `UPDATE` of `reservation.seat`.** Doing that
+    would ask the GiST exclusion constraint to validate a row it already
+    considers valid against itself mid-change, and — more importantly —
+    would leave no trace of the original seat if the new one turns out
+    to be taken. Instead: create a fresh `HELD` reservation on `new_seat`
+    through the exact same `create_reservation` the original booking
+    used (so a losing race against a concurrent booking for `new_seat`
+    is handled by the identical `SeatUnavailable` path, not a second
+    one), then release the old row. `Traveler.seat_reservation` — CASCADE
+    on delete — is why the old row is marked `RELEASED` rather than
+    deleted: deleting it would cascade away the traveler's own name,
+    phone and email that were captured for this seat. Repointing that FK
+    to the new reservation is this function's own job, not
+    `create_reservation`'s, since only one of its callers has a
+    `Traveler` to move.
+
+    `select_for_update()` on the old reservation first, inside the same
+    transaction as the new insert and the status flip — the same
+    "lock, then act" shape `cancel_booking`/`expire_stale_holds_for_booking`
+    already use, closing the identical race against the once-a-minute
+    expiry sweep picking this exact row between the caller's own status
+    check and this call actually running.
+    """
+    with transaction.atomic():
+        locked = SeatReservation.all_objects.select_for_update().get(pk=reservation.pk)
+        if locked.status != SeatReservation.Status.HELD:
+            raise ReservationNotChangeable("This seat can no longer be changed.")
+        new_reservation = create_reservation(
+            trip=locked.trip,
+            seat=new_seat,
+            from_stop=locked.from_stop,
+            to_stop=locked.to_stop,
+            booking=locked.booking,
+            hold_minutes=hold_minutes,
+            amount=locked.amount,
+            fare_rule=locked.fare_rule,
+            fare_segment_rule=locked.fare_segment_rule,
+        )
+        locked.status = SeatReservation.Status.RELEASED
+        locked.save(update_fields=["status"])
+        Traveler.objects.filter(seat_reservation=locked).update(seat_reservation=new_reservation)
+    record_audit_event(
+        actor=actor,
+        action="seat_reservation.changed",
+        target=new_reservation,
+        from_seat=reservation.seat.seat_number,
+        to_seat=new_seat.seat_number,
+    )
+    return new_reservation

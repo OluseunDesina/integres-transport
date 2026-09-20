@@ -320,6 +320,22 @@ class TripSearchResultSerializer(serializers.Serializer):
     # always exist.
     duration_minutes = serializers.SerializerMethodField()
     scheduled_arrival_at = serializers.SerializerMethodField()
+    # docs/specs/22-marketplace.md slice 3. A plain field, not a method
+    # field: unlike `duration_minutes` (a bare attribute read off the
+    # already-fetched `trip.route`), this is a real query
+    # (`apps.seating.services.get_bookability`) that needs the right
+    # tenancy context to run — for a marketplace result that's the
+    # matched Trip's own operator Client, live only inside the result-
+    # building loop's own `as_client()`, long gone by the time a
+    # serializer method field would run. Both search loops
+    # (`apps.scheduling.views.TripSearchView`,
+    # `apps.marketplace.services.search_trips_across_clients`) compute it
+    # there and hand it in on the same plain dict `fare` already comes
+    # in on. `None` means unlimited-or-unknowable, same as `Bookability`'s
+    # own field of this name — an unpriced or not-yet-configured Trip
+    # never reaches this serializer at all, so `not_configured` is not a
+    # case this needs to represent.
+    capacity_remaining = serializers.IntegerField(allow_null=True)
 
     def get_business_name(self, obj: dict[str, Any]) -> str:
         return obj["trip"].business.name

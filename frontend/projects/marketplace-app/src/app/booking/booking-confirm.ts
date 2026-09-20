@@ -3,9 +3,11 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { Router } from '@angular/router';
 import { API_CLIENT } from '@api-client';
 import type { components } from '@api-client';
-import { Alert, Button, Countdown, PageHeader } from '@shared-ui';
+import { Alert, Button, Countdown, PageHeader, Skeleton } from '@shared-ui';
 
 type TravelerInput = components['schemas']['TravelerInput'];
+type TravelerOutput = components['schemas']['TravelerOutput'];
+type SeatAvailability = components['schemas']['SeatAvailability'];
 
 import { BookingSteps } from '../shared/booking-steps';
 import type { BookingRequest, SeatPickerRequest, TravelerDetail } from '../shared/booking-draft';
@@ -14,8 +16,8 @@ import { BookingStore, type Booking } from '../shared/data/store/booking.store';
 import { formatMoney, multiplyDecimal } from '../shared/money';
 import { tripClassLabel } from '../shared/trip-class';
 
-const SEAT_CONFLICT_NOTICE =
-  'One of the seats you picked was taken while you were booking. Choose another.';
+const TRIP_FULL_NOTICE =
+  'This departure filled up while you were entering traveler details. Try again.';
 
 /** camelCase → the API's snake_case `TravelerInputSerializer` shape,
  * omitting title/date_of_birth/gender/nationality entirely when blank
@@ -65,42 +67,45 @@ function toErrorMessage(error: unknown, fallback: string): string {
 
 /**
  * Final review and submit —
- * docs/specs/4-fares-seating-booking-frontend.md §4.3. Creates the
- * Booking and stops: a Booking reaches `pending_payment` and no
- * further, since Phase 5 owns payment. There is deliberately no "pay
- * now" affordance anywhere on this screen (§1) — that stays on
- * `my-bookings`, which is also where this screen sends the passenger
- * on to.
+ * docs/specs/4-fares-seating-booking-frontend.md §4.3, reworked by
+ * docs/specs/22-marketplace.md slice 3. Creates the Booking and stops: a
+ * Booking reaches `pending_payment` and no further, since Phase 5 owns
+ * payment. There is deliberately no "pay now" affordance anywhere on
+ * this screen (§1) — that stays on `my-bookings`, which is also where
+ * this screen sends the passenger on to.
  *
  * The `Idempotency-Key` is generated once per visit rather than per
  * click, which is what makes the submit button safe to press again
  * after a timeout: the backend returns the *original* Booking for a
- * repeat of the same key and body instead of double-booking the seats
- * (§6). A genuine seat conflict is the opposite case and must not be
- * retried blindly — it sends the passenger back to the seat map, since
- * a stale selection needs a fresh availability check, not a resubmit.
+ * repeat of the same key and body instead of double-booking. A genuine
+ * "this departure just filled up" 409 is the opposite case and must not
+ * be retried blindly — it sends the passenger back to the passenger-
+ * count screen, since the fresh availability check happens there.
  *
- * **docs/specs/21-passenger-experience.md slice 2.** Submitting no
- * longer navigates away immediately — `createdBooking` holds the
- * response and the template swaps the submit form for a held/confirmed
- * panel with a `ui-countdown`, fed from the same response's
- * `hold_expires_in_seconds` with no second request (the spec's own
- * stated reason for returning both hold fields on the create response).
- * "Continue to My Bookings" is now the passenger's own action rather
- * than an automatic redirect, so they see what they just bought before
- * leaving. This also resolves a limitation the pre-submit copy below
- * already names: this screen cannot tell an open-seating "places"
- * booking from a quick-book one before submitting (both arrive
- * identically, as a passenger count with no seat choice) — the created
- * `Booking`'s `hold_expires_in_seconds` can, because only one of the
- * two actually holds a seat (`docs/specs/10-booking-modes.md`), and the
- * post-submit copy uses that real fact instead of a form that is true
- * of both.
+ * **docs/specs/21-passenger-experience.md slice 2.** Submitting does not
+ * navigate away immediately — `createdBooking` holds the response and
+ * the template swaps the submit form for a held/confirmed panel with a
+ * `ui-countdown`, fed from the same response's `hold_expires_in_seconds`
+ * with no second request. "Continue to My Bookings" is the passenger's
+ * own action rather than an automatic redirect, so they see what they
+ * just bought before leaving.
+ *
+ * **docs/specs/22-marketplace.md slice 3.** The request no longer names
+ * seats at all — `seat-picker` collects a passenger count and one
+ * traveler per passenger, and `create_booking` auto-allocates whichever
+ * real seats a reservation-mode trip needs. This screen is where the
+ * result of that allocation is actually shown: each assigned seat,
+ * alongside its traveler's name, with a "Change seat" link when
+ * `request().seatSelectionEnabled` says the operator allows it — a
+ * quick-book trip (the operator's own choice to disallow passenger seat
+ * choice) never shows the link at all, matching the same policy
+ * `apps.booking.serializers.BookingChangeSeatSerializer` enforces
+ * server-side.
  */
 @Component({
   selector: 'app-booking-confirm',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, BookingSteps, Alert, Button, Countdown, PageHeader],
+  imports: [DatePipe, BookingSteps, Alert, Button, Countdown, PageHeader, Skeleton],
   templateUrl: './booking-confirm.html',
 })
 export class BookingConfirm implements OnInit {
@@ -119,23 +124,23 @@ export class BookingConfirm implements OnInit {
    * held/confirmed panel instead of the review form. */
   protected readonly createdBooking = signal<Booking | null>(null);
 
-  /** Null when the passenger bought places rather than seats — the
-   * screen shows a passenger count instead. Not an empty string: a
-   * blank "Seats:" row reads as a rendering bug rather than as a
-   * service that does not assign seats. */
-  protected readonly seatNumbers = computed(() => {
-    const request = this.request();
-    return request?.kind === 'seats'
-      ? request.seats.map((seat) => seat.seatNumber).join(', ')
-      : null;
-  });
+  /** Which reservation's "Change seat" picker is open, if any — null
+   * closes it. Only one at a time: a passenger changing seat 2 has no
+   * reason to also be mid-change on seat 1. */
+  protected readonly changingSeatFor = signal<string | null>(null);
+  protected readonly changeSeatOptions = signal<SeatAvailability[] | null>(null);
+  protected readonly changeSeatLoading = signal(false);
+  protected readonly changeSeatError = signal<string | null>(null);
 
-  protected readonly passengerCount = computed(() => {
+  protected readonly travelerNames = computed(() => {
     const request = this.request();
     if (!request) {
-      return 0;
+      return '';
     }
-    return request.kind === 'seats' ? request.seats.length : request.passengerCount;
+    return request.travelers
+      .map((traveler) => `${traveler.firstName} ${traveler.lastName}`.trim())
+      .filter((name) => name !== '')
+      .join(', ');
   });
 
   protected readonly totalLabel = computed(() => {
@@ -144,7 +149,7 @@ export class BookingConfirm implements OnInit {
       return '';
     }
     return formatMoney(
-      multiplyDecimal(request.farePerSeat, this.passengerCount()),
+      multiplyDecimal(request.farePerSeat, request.passengerCount),
       request.currency
     );
   });
@@ -159,6 +164,12 @@ export class BookingConfirm implements OnInit {
    * The row is omitted entirely in that case, the same way `Seats` is
    * on a service that does not assign them. */
   protected readonly serviceClass = computed(() => tripClassLabel(this.request()?.tripClass));
+
+  /** Whether "Change seat" should appear at all on the held panel —
+   * never on open seating (nothing to change) and never on a true
+   * quick-book trip (the operator's own choice), regardless of what the
+   * created Booking's own `seats` list happens to contain. */
+  protected readonly canChangeSeat = computed(() => this.request()?.seatSelectionEnabled === true);
 
   async ngOnInit(): Promise<void> {
     if (!this.request()) {
@@ -180,28 +191,17 @@ export class BookingConfirm implements OnInit {
       // Authorization, which `@auth`'s middleware attaches centrally
       // (docs/specs/13-session-resilience.md).
       params: { header: { 'Idempotency-Key': this.idempotencyKey } },
-      // Two genuinely different bodies, and the backend refuses the
-      // wrong one rather than ignoring the parts that do not apply
-      // (docs/specs/10-booking-modes.md) — so this branch is what
-      // decides whether the passenger gets what they asked for.
-      body:
-        request.kind === 'seats'
-          ? {
-              trip: request.tripId,
-              seats: request.seats.map((seat) => ({
-                seat: seat.id,
-                from_stop: request.fromStop.id,
-                to_stop: request.toStop.id,
-                traveler: toTravelerBody(request.travelers[seat.id]),
-              })),
-            }
-          : {
-              trip: request.tripId,
-              passenger_count: request.passengerCount,
-              from_stop: request.fromStop.id,
-              to_stop: request.toStop.id,
-              traveler: toTravelerBody(request.traveler),
-            },
+      // One shape, for every booking mode — docs/specs/22-marketplace.md
+      // slice 3. The backend auto-allocates a seat per traveler for a
+      // reservation-mode trip; an open-seating trip just holds no seats
+      // at all. Neither case names one here.
+      body: {
+        trip: request.tripId,
+        passenger_count: request.passengerCount,
+        from_stop: request.fromStop.id,
+        to_stop: request.toStop.id,
+        travelers: request.travelers.map(toTravelerBody),
+      },
     });
 
     this.submitting.set(false);
@@ -212,7 +212,7 @@ export class BookingConfirm implements OnInit {
     }
 
     if (response?.status === 409) {
-      await this.returnToSeatPicker(request, SEAT_CONFLICT_NOTICE);
+      await this.returnToSeatPicker(request, TRIP_FULL_NOTICE);
       return;
     }
 
@@ -245,6 +245,81 @@ export class BookingConfirm implements OnInit {
     if (fresh) {
       this.createdBooking.set(fresh);
     }
+  }
+
+  /** Opens the "Change seat" picker for one reservation — fetches the
+   * trip's current availability fresh (never carried forward: it is the
+   * most volatile thing in this flow, same reasoning `seat-picker`'s own
+   * `load()` already documents), and excludes the reservation's current
+   * seat since it is already this passenger's own. */
+  protected async openChangeSeat(reservationId: string, currentSeatNumber: string): Promise<void> {
+    const request = this.request();
+    if (!request) {
+      return;
+    }
+    this.changingSeatFor.set(reservationId);
+    this.changeSeatError.set(null);
+    this.changeSeatOptions.set(null);
+    this.changeSeatLoading.set(true);
+
+    const { data, error } = await this.api.GET('/api/v1/marketplace/trips/{id}/availability/', {
+      params: {
+        path: { id: request.tripId },
+        query: { from_stop: request.fromStop.id, to_stop: request.toStop.id },
+      },
+    });
+
+    this.changeSeatLoading.set(false);
+
+    if (!data) {
+      this.changeSeatError.set(toErrorMessage(error, 'Could not load available seats.'));
+      return;
+    }
+    this.changeSeatOptions.set(
+      data.seats.filter(
+        (entry) => entry.is_available && entry.seat.seat_number !== currentSeatNumber
+      )
+    );
+  }
+
+  /** "Ada Lovelace, Grace Hopper" — a plain method rather than a
+   * template expression, since Angular's template parser has no arrow
+   * functions and `booking.travelers` is only known once `createdBooking`
+   * is set, not something a `computed()` can read ahead of time. */
+  protected travelerListLabel(travelers: TravelerOutput[]): string {
+    return travelers.map((traveler) => `${traveler.first_name} ${traveler.last_name}`).join(', ');
+  }
+
+  protected cancelChangeSeat(): void {
+    this.changingSeatFor.set(null);
+    this.changeSeatOptions.set(null);
+    this.changeSeatError.set(null);
+  }
+
+  protected async chooseNewSeat(reservationId: string, seatId: string): Promise<void> {
+    const booking = this.createdBooking();
+    if (!booking) {
+      return;
+    }
+    this.changeSeatLoading.set(true);
+    this.changeSeatError.set(null);
+
+    const { data, error } = await this.api.POST(
+      '/api/v1/marketplace/bookings/{id}/reservations/{reservation_pk}/change-seat/',
+      {
+        params: { path: { id: booking.id, reservation_pk: reservationId } },
+        body: { seat: seatId },
+      }
+    );
+
+    this.changeSeatLoading.set(false);
+
+    if (data) {
+      this.createdBooking.set(data);
+      this.cancelChangeSeat();
+      return;
+    }
+    this.changeSeatError.set(toErrorMessage(error, 'Could not change seat. Try again.'));
   }
 
   /** `notice` is deliberately not defaulted: plain "Back" must not

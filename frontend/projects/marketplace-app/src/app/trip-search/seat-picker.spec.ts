@@ -21,19 +21,17 @@ function makeAvailability(overrides: Record<string, unknown> = {}) {
     booking_mode: 'reservation',
     seat_selection_enabled: true,
     trip_class: 'standard',
-    capacity_remaining: null,
-    seats: [
-      {
-        seat: { id: 'seat-1', seat_number: '1A', row: null, column: null },
-        is_available: true,
-      },
-      {
-        seat: { id: 'seat-2', seat_number: '1B', row: null, column: null },
-        is_available: true,
-      },
-    ],
+    capacity_remaining: 4,
+    seats: [],
     ...overrides,
   };
+}
+
+function fillTraveler(component: SeatPicker, index: number, first: string): void {
+  component['setTravelerField'](index, 'firstName', first);
+  component['setTravelerField'](index, 'lastName', 'Lovelace');
+  component['setTravelerField'](index, 'phone', '+2348000000000');
+  component['setTravelerField'](index, 'email', 'ada@example.com');
 }
 
 describe('SeatPicker', () => {
@@ -46,6 +44,14 @@ describe('SeatPicker', () => {
     history.replaceState(SEAT_PICKER_REQUEST, '');
   }
 
+  function mockAvailability(overrides: Record<string, unknown> = {}): void {
+    apiClient.GET.and.callFake((path: string) =>
+      path.includes('/availability/')
+        ? Promise.resolve({ data: makeAvailability(overrides) })
+        : Promise.resolve({ data: { amount: '750.00', currency: 'NGN' } })
+    );
+  }
+
   async function createComponent(): Promise<void> {
     fixture = TestBed.createComponent(SeatPicker);
     component = fixture.componentInstance;
@@ -56,11 +62,7 @@ describe('SeatPicker', () => {
 
   beforeEach(() => {
     apiClient = { GET: jasmine.createSpy('GET') };
-    apiClient.GET.and.callFake((path: string) =>
-      path.includes('/availability/')
-        ? Promise.resolve({ data: makeAvailability() })
-        : Promise.resolve({ data: { amount: '750.00', currency: 'NGN' } })
-    );
+    mockAvailability();
 
     TestBed.configureTestingModule({
       imports: [SeatPicker],
@@ -70,13 +72,12 @@ describe('SeatPicker', () => {
     authStore = TestBed.inject(AuthStore);
   });
 
-  it('adds a blank traveler form when a seat is selected, and drops it on deselection', async () => {
+  it('starts with one passenger and one blank traveler form', async () => {
     setUpState();
     await createComponent();
-    const seat = component['availability']()[0];
 
-    component['toggleSeat'](seat);
-    expect(component['travelerFor']('seat-1')).toEqual({
+    expect(component['passengerCount']()).toBe(1);
+    expect(component['travelerFor'](0)).toEqual({
       title: '',
       firstName: '',
       lastName: '',
@@ -86,26 +87,42 @@ describe('SeatPicker', () => {
       gender: '',
       nationality: '',
     });
-
-    component['toggleSeat'](seat);
-    expect(component['travelerFor']('seat-1').firstName).toBe('');
-    expect(component['selectedSeatIds']().has('seat-1')).toBeFalse();
   });
 
-  it('cannot continue until every selected seat has a complete traveler', async () => {
+  it('growing the passenger count adds blank forms without touching existing ones', async () => {
     setUpState();
     await createComponent();
-    const seat = component['availability']()[0];
-    component['toggleSeat'](seat);
+    fillTraveler(component, 0, 'Ada');
+
+    component['setPassengerCount']('2');
+
+    expect(component['travelerFor'](0).firstName).toBe('Ada');
+    expect(component['travelerFor'](1).firstName).toBe('');
+  });
+
+  it('shrinking and regrowing the count keeps what was already typed', async () => {
+    setUpState();
+    await createComponent();
+    component['setPassengerCount']('2');
+    fillTraveler(component, 0, 'Ada');
+    fillTraveler(component, 1, 'Grace');
+
+    component['setPassengerCount']('1');
+    component['setPassengerCount']('2');
+
+    expect(component['travelerFor'](0).firstName).toBe('Ada');
+    expect(component['travelerFor'](1).firstName).toBe('Grace');
+  });
+
+  it('cannot continue until every passenger up to the count has a complete traveler', async () => {
+    setUpState();
+    await createComponent();
+    component['setPassengerCount']('2');
+    fillTraveler(component, 0, 'Ada');
 
     expect(component['canContinue']()).toBeFalse();
 
-    component['setTravelerField']('seat-1', 'firstName', 'Ada');
-    component['setTravelerField']('seat-1', 'lastName', 'Lovelace');
-    component['setTravelerField']('seat-1', 'phone', '+2348000000000');
-    expect(component['canContinue']()).toBeFalse();
-
-    component['setTravelerField']('seat-1', 'email', 'ada@example.com');
+    fillTraveler(component, 1, 'Grace');
     expect(component['canContinue']()).toBeTrue();
   });
 
@@ -114,49 +131,68 @@ describe('SeatPicker', () => {
     await createComponent();
     spyOn(authStore, 'isAuthenticated').and.returnValue(false);
     const navigateSpy = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
-    const seat = component['availability']()[0];
-    component['toggleSeat'](seat);
-    component['setTravelerField']('seat-1', 'firstName', 'Ada');
-    component['setTravelerField']('seat-1', 'lastName', 'Lovelace');
-    component['setTravelerField']('seat-1', 'phone', '+2348000000000');
-    component['setTravelerField']('seat-1', 'email', 'ada@example.com');
+    fillTraveler(component, 0, 'Ada');
 
     await component['continueToConfirm']();
 
     expect(navigateSpy).toHaveBeenCalledWith(['/login'], {
       state: jasmine.objectContaining({
         pendingBooking: jasmine.objectContaining({
-          kind: 'seats',
-          seats: [{ id: 'seat-1', seatNumber: '1A' }],
-          travelers: {
-            'seat-1': jasmine.objectContaining({ firstName: 'Ada', lastName: 'Lovelace' }),
-          },
+          passengerCount: 1,
+          seatSelectionEnabled: true,
+          travelers: [jasmine.objectContaining({ firstName: 'Ada', lastName: 'Lovelace' })],
         }),
       }),
     });
   });
 
-  it('navigates straight to /book with the traveler attached when already signed in', async () => {
+  it('navigates straight to /book with the travelers attached when already signed in', async () => {
     setUpState();
     await createComponent();
     spyOn(authStore, 'isAuthenticated').and.returnValue(true);
     const navigateSpy = spyOn(TestBed.inject(Router), 'navigate').and.resolveTo(true);
-    const seat = component['availability']()[0];
-    component['toggleSeat'](seat);
-    component['setTravelerField']('seat-1', 'firstName', 'Ada');
-    component['setTravelerField']('seat-1', 'lastName', 'Lovelace');
-    component['setTravelerField']('seat-1', 'phone', '+2348000000000');
-    component['setTravelerField']('seat-1', 'email', 'ada@example.com');
+    fillTraveler(component, 0, 'Ada');
 
     await component['continueToConfirm']();
 
     expect(navigateSpy).toHaveBeenCalledWith(['/book'], {
       state: jasmine.objectContaining({
-        kind: 'seats',
-        travelers: {
-          'seat-1': jasmine.objectContaining({ firstName: 'Ada' }),
-        },
+        passengerCount: 1,
+        travelers: [jasmine.objectContaining({ firstName: 'Ada' })],
       }),
     });
+  });
+
+  it('never asks for a specific seat, even when the operator allows choosing one', async () => {
+    setUpState();
+    mockAvailability({ seat_selection_enabled: true });
+    await createComponent();
+
+    expect(fixture.nativeElement.textContent).toContain('How many passengers?');
+    expect(fixture.nativeElement.querySelector('[aria-label="Seat map"]')).toBeNull();
+  });
+
+  it('hints that seats are unassigned on an open-seating trip', async () => {
+    setUpState();
+    mockAvailability({ booking_mode: 'open_seating', seat_selection_enabled: false });
+    await createComponent();
+
+    expect(fixture.nativeElement.textContent).toContain("sit anywhere that's free");
+  });
+
+  it('hints that a chosen seat can be changed later when the operator allows it', async () => {
+    setUpState();
+    mockAvailability({ seat_selection_enabled: true });
+    await createComponent();
+
+    expect(fixture.nativeElement.textContent).toContain('you can change them after booking');
+  });
+
+  it('hints that the operator assigns seats with no changing on true quick-book', async () => {
+    setUpState();
+    mockAvailability({ seat_selection_enabled: false });
+    await createComponent();
+
+    expect(fixture.nativeElement.textContent).toContain('This operator assigns seats for you');
   });
 });

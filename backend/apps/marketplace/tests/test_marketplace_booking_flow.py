@@ -101,6 +101,9 @@ def test_full_cross_client_search_to_booking_loop() -> None:
     # assumed to always exist.
     assert result["duration_minutes"] is None
     assert result["scheduled_arrival_at"] is None
+    # docs/specs/22-marketplace.md slice 3: "N seats left" on the results
+    # page — the fixture's one Seat, still free.
+    assert result["capacity_remaining"] == 1
 
     availability = api.get(
         reverse("marketplace-trip-availability", args=[trip.id]),
@@ -120,20 +123,19 @@ def test_full_cross_client_search_to_booking_loop() -> None:
         reverse("marketplace-booking-create"),
         {
             "trip": str(trip.id),
-            "seats": [
+            "passenger_count": 1,
+            "from_stop": str(stop_a.id),
+            "to_stop": str(stop_b.id),
+            # docs/specs/22-marketplace.md slice 3: `travelers`, not a
+            # per-seat pick — the marketplace endpoint auto-allocates a
+            # seat per entry (this fixture's own only free one, "1A")
+            # rather than taking an explicit `seats` choice.
+            "travelers": [
                 {
-                    "seat": str(seat.id),
-                    "from_stop": str(stop_a.id),
-                    "to_stop": str(stop_b.id),
-                    # Required on the marketplace endpoint, unlike
-                    # apps.booking's own — docs/specs/22-marketplace.md
-                    # slice 2, MarketplaceBookingCreateSerializer.
-                    "traveler": {
-                        "first_name": "Ada",
-                        "last_name": "Lovelace",
-                        "phone": "+2348000000000",
-                        "email": "ada@example.com",
-                    },
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "phone": "+2348000000000",
+                    "email": "ada@example.com",
                 }
             ],
         },
@@ -142,6 +144,8 @@ def test_full_cross_client_search_to_booking_loop() -> None:
     )
     assert booking_response.status_code == status.HTTP_201_CREATED
     assert booking_response.data["total_amount"] == "750.00"
+    assert booking_response.data["seats"][0]["seat"] == "1A"
+    assert booking_response.data["seats"][0]["traveler"]["first_name"] == "Ada"
 
     with tenant_context(str(operator_client.id)):
         booking = Booking.objects.get(id=booking_response.data["id"])
@@ -156,6 +160,7 @@ def test_full_cross_client_search_to_booking_loop() -> None:
     assert mine.status_code == status.HTTP_200_OK
     assert [row["id"] for row in mine.data["results"]] == [booking_response.data["id"]]
     assert mine.data["results"][0]["seats"][0]["seat"] == "1A"
+    assert mine.data["results"][0]["seats"][0]["traveler"]["first_name"] == "Ada"
     # The same operator-name gap the search results already fixed,
     # applied here: a marketplace passenger's own booking list can span
     # several different operators, so a bare business id names none of
@@ -180,35 +185,40 @@ def test_full_cross_client_search_to_booking_loop() -> None:
     assert cancel.data["status"] == "cancelled"
 
 
-# --- Traveler details (docs/specs/22-marketplace.md slice 2) ---------------
+# --- Traveler details (docs/specs/22-marketplace.md slices 2-3) ------------
 # Required here, unlike apps.booking's own endpoint (test_booking.py's
 # existing passing suite already proves that one still works with no
 # traveler at all — MarketplaceBookingCreateSerializer is the only
-# thing that adds the requirement).
+# thing that adds the requirement). Slice 3 dropped the per-seat `seats`
+# shape entirely in favour of `passenger_count` + `travelers`, with the
+# seat itself auto-allocated — see that serializer's own docstring.
 
 
-def test_booking_create_400s_without_traveler_details_for_a_seats_mode_trip() -> None:
+def test_booking_create_400s_without_traveler_details_for_a_seat_choice_trip() -> None:
     operator_client = ClientFactory()
-    trip, stop_a, stop_b, seat = _operator_trip_with_seat(operator_client)
+    trip, stop_a, stop_b, _seat = _operator_trip_with_seat(operator_client)
     passenger = _marketplace_passenger()
 
     response = _auth_client(passenger).post(
         reverse("marketplace-booking-create"),
         {
             "trip": str(trip.id),
-            "seats": [
-                {"seat": str(seat.id), "from_stop": str(stop_a.id), "to_stop": str(stop_b.id)}
-            ],
+            "passenger_count": 1,
+            "from_stop": str(stop_a.id),
+            "to_stop": str(stop_b.id),
         },
         format="json",
         HTTP_IDEMPOTENCY_KEY="marketplace-no-traveler",
     )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
-    assert "seats" in response.data
+    assert "travelers" in response.data
 
 
-def test_booking_persists_a_traveler_tied_to_its_seat_reservation() -> None:
+def test_booking_create_400s_when_an_explicit_seat_is_sent() -> None:
+    """docs/specs/22-marketplace.md slice 3: the marketplace endpoint no
+    longer accepts a passenger-chosen seat at all — auto-allocation plus
+    the "Change seat" follow-up replaced it."""
     operator_client = ClientFactory()
     trip, stop_a, stop_b, seat = _operator_trip_with_seat(operator_client)
     passenger = _marketplace_passenger()
@@ -223,15 +233,44 @@ def test_booking_persists_a_traveler_tied_to_its_seat_reservation() -> None:
                     "from_stop": str(stop_a.id),
                     "to_stop": str(stop_b.id),
                     "traveler": {
-                        "title": "ms",
                         "first_name": "Ada",
                         "last_name": "Lovelace",
                         "phone": "+2348000000000",
                         "email": "ada@example.com",
-                        "date_of_birth": "1990-01-01",
-                        "gender": "female",
-                        "nationality": "Nigerian",
                     },
+                }
+            ],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="marketplace-explicit-seat",
+    )
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "seats" in response.data
+
+
+def test_booking_persists_a_traveler_tied_to_its_auto_allocated_seat() -> None:
+    operator_client = ClientFactory()
+    trip, stop_a, stop_b, _seat = _operator_trip_with_seat(operator_client)
+    passenger = _marketplace_passenger()
+
+    response = _auth_client(passenger).post(
+        reverse("marketplace-booking-create"),
+        {
+            "trip": str(trip.id),
+            "passenger_count": 1,
+            "from_stop": str(stop_a.id),
+            "to_stop": str(stop_b.id),
+            "travelers": [
+                {
+                    "title": "ms",
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "phone": "+2348000000000",
+                    "email": "ada@example.com",
+                    "date_of_birth": "1990-01-01",
+                    "gender": "female",
+                    "nationality": "Nigerian",
                 }
             ],
         },
@@ -240,6 +279,7 @@ def test_booking_persists_a_traveler_tied_to_its_seat_reservation() -> None:
     )
 
     assert response.status_code == status.HTTP_201_CREATED
+    assert response.data["seats"][0]["seat"] == "1A"
     with tenant_context(str(operator_client.id)):
         traveler = Traveler.objects.get(booking_id=response.data["id"])
         assert traveler.first_name == "Ada"
@@ -248,7 +288,7 @@ def test_booking_persists_a_traveler_tied_to_its_seat_reservation() -> None:
         assert traveler.seat_reservation_id is not None
 
 
-def test_places_mode_booking_requires_and_persists_one_lead_traveler() -> None:
+def test_open_seating_booking_requires_and_persists_one_traveler_per_passenger() -> None:
     operator_client = ClientFactory()
     with tenant_context(str(operator_client.id)):
         business = BusinessFactory(
@@ -289,28 +329,46 @@ def test_places_mode_booking_requires_and_persists_one_lead_traveler() -> None:
     )
     assert without_traveler.status_code == status.HTTP_400_BAD_REQUEST
 
-    with_traveler = api.post(
+    with_travelers = api.post(
         reverse("marketplace-booking-create"),
         {
             "trip": str(trip.id),
             "passenger_count": 2,
             "from_stop": str(stop_a.id),
             "to_stop": str(stop_b.id),
-            "traveler": {
-                "first_name": "Grace",
-                "last_name": "Hopper",
-                "phone": "+2348111111111",
-                "email": "grace@example.com",
-            },
+            # docs/specs/22-marketplace.md slice 3: open seating gets one
+            # named traveler per passenger too, not a single lead — none
+            # of them own a seat (there is none to hold), but each is
+            # still a real name on the party.
+            "travelers": [
+                {
+                    "first_name": "Grace",
+                    "last_name": "Hopper",
+                    "phone": "+2348111111111",
+                    "email": "grace@example.com",
+                },
+                {
+                    "first_name": "Katherine",
+                    "last_name": "Johnson",
+                    "phone": "+2348222222222",
+                    "email": "katherine@example.com",
+                },
+            ],
         },
         format="json",
-        HTTP_IDEMPOTENCY_KEY="marketplace-places-with-traveler",
+        HTTP_IDEMPOTENCY_KEY="marketplace-places-with-travelers",
     )
-    assert with_traveler.status_code == status.HTTP_201_CREATED
+    assert with_travelers.status_code == status.HTTP_201_CREATED
     with tenant_context(str(operator_client.id)):
-        traveler = Traveler.objects.get(booking_id=with_traveler.data["id"])
-        assert traveler.first_name == "Grace"
-        assert traveler.seat_reservation_id is None
+        travelers = list(
+            Traveler.objects.filter(booking_id=with_travelers.data["id"]).order_by("first_name")
+        )
+        assert [traveler.first_name for traveler in travelers] == ["Grace", "Katherine"]
+        assert all(traveler.seat_reservation_id is None for traveler in travelers)
+    assert {row["first_name"] for row in with_travelers.data["travelers"]} == {
+        "Grace",
+        "Katherine",
+    }
 
 
 def test_search_excludes_a_trip_whose_business_kyb_is_not_approved() -> None:
@@ -400,6 +458,101 @@ def test_marketplace_read_endpoints_allow_an_unauthenticated_request() -> None:
 
     suggest = anon.get(reverse("marketplace-stop-suggest"), {"q": "yaba"})
     assert suggest.status_code == status.HTTP_200_OK
+
+
+# --- Change seat (docs/specs/22-marketplace.md slice 3) --------------------
+
+
+def test_marketplace_passenger_can_change_their_own_seat() -> None:
+    operator_client = ClientFactory()
+    trip, stop_a, stop_b, seat = _operator_trip_with_seat(operator_client)
+    with tenant_context(str(operator_client.id)):
+        second_seat = SeatFactory(
+            client=operator_client, vehicle_type=trip.vehicle.vehicle_type, seat_number="1B"
+        )
+    passenger = _marketplace_passenger()
+    api = _auth_client(passenger)
+
+    booking_response = api.post(
+        reverse("marketplace-booking-create"),
+        {
+            "trip": str(trip.id),
+            "passenger_count": 1,
+            "from_stop": str(stop_a.id),
+            "to_stop": str(stop_b.id),
+            "travelers": [
+                {
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "phone": "+2348000000000",
+                    "email": "ada@example.com",
+                }
+            ],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="marketplace-change-seat-create",
+    )
+    assert booking_response.status_code == status.HTTP_201_CREATED
+    booking_id = booking_response.data["id"]
+    reservation_id = booking_response.data["seats"][0]["id"]
+
+    response = api.post(
+        reverse(
+            "marketplace-booking-change-seat",
+            kwargs={"pk": booking_id, "reservation_pk": reservation_id},
+        ),
+        {"seat": str(second_seat.id)},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data["seats"][0]["seat"] == "1B"
+    # The traveler followed the seat, not left orphaned on the old one.
+    assert response.data["seats"][0]["traveler"]["first_name"] == "Ada"
+
+
+def test_marketplace_passenger_cannot_change_another_passengers_seat() -> None:
+    operator_client = ClientFactory()
+    trip, stop_a, stop_b, seat = _operator_trip_with_seat(operator_client)
+    with tenant_context(str(operator_client.id)):
+        second_seat = SeatFactory(
+            client=operator_client, vehicle_type=trip.vehicle.vehicle_type, seat_number="1B"
+        )
+    passenger = _marketplace_passenger()
+    other_passenger = _marketplace_passenger()
+
+    booking_response = _auth_client(passenger).post(
+        reverse("marketplace-booking-create"),
+        {
+            "trip": str(trip.id),
+            "passenger_count": 1,
+            "from_stop": str(stop_a.id),
+            "to_stop": str(stop_b.id),
+            "travelers": [
+                {
+                    "first_name": "Ada",
+                    "last_name": "Lovelace",
+                    "phone": "+2348000000000",
+                    "email": "ada@example.com",
+                }
+            ],
+        },
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="marketplace-change-seat-other",
+    )
+    booking_id = booking_response.data["id"]
+    reservation_id = booking_response.data["seats"][0]["id"]
+
+    response = _auth_client(other_passenger).post(
+        reverse(
+            "marketplace-booking-change-seat",
+            kwargs={"pk": booking_id, "reservation_pk": reservation_id},
+        ),
+        {"seat": str(second_seat.id)},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 def test_marketplace_booking_and_payment_endpoints_reject_an_unauthenticated_request() -> None:

@@ -103,10 +103,20 @@ def _booking_request_hash(
     passenger_count: int | None = None,
     from_stop: Stop | None = None,
     to_stop: Stop | None = None,
+    traveler: TravelerInput | None = None,
+    travelers: list[TravelerInput] | None = None,
 ) -> str:
     """Covers the open-seating fields too, so a replay under one
     Idempotency-Key with a *different* passenger count is caught as a
-    conflict rather than quietly returning the first booking."""
+    conflict rather than quietly returning the first booking.
+
+    `traveler`/`travelers` are included as of docs/specs/22-marketplace.md
+    slice 3 — before this, a retried key with the same trip/seats/
+    passenger_count but *different* traveler names would have replayed
+    the first attempt's booking, silently keeping the old names. Each
+    seat's own nested traveler is already covered by `seats` itself
+    (each entry there is the raw request dict, traveler key included);
+    the two new params cover the top-level shapes."""
     return hash_request(
         {
             "trip": str(trip.id),
@@ -116,12 +126,15 @@ def _booking_request_hash(
                     "seat": str(seat_request["seat"].id),
                     "from_stop": str(seat_request["from_stop"].id),
                     "to_stop": str(seat_request["to_stop"].id),
+                    "traveler": seat_request.get("traveler"),
                 }
                 for seat_request in seats
             ],
             "passenger_count": passenger_count,
             "from_stop": None if from_stop is None else str(from_stop.id),
             "to_stop": None if to_stop is None else str(to_stop.id),
+            "traveler": traveler,
+            "travelers": travelers,
         }
     )
 
@@ -217,6 +230,7 @@ def create_booking(
     from_stop: Stop | None = None,
     to_stop: Stop | None = None,
     traveler: TravelerInput | None = None,
+    travelers: list[TravelerInput] | None = None,
     idempotency_key: str,
 ) -> Booking:
     """The transaction described in the spec's §3: resolves each seat's
@@ -259,6 +273,19 @@ def create_booking(
     takes the single top-level `traveler` as one lead traveler on the
     `Booking` itself (`seat_reservation=None`); true seats-mode takes a
     `traveler` per seat, tied to that seat's own `SeatReservation`.
+
+    `travelers` (plural, slice 3) is a fourth, later-added shape:
+    `len(travelers)` named passengers with **no** seat choice at all,
+    even on a trip that would otherwise require one (`seats` empty,
+    `is_quick_book(trip)` False). Only `apps.marketplace` sends it — see
+    `apps.marketplace.views.MarketplaceBookingCreateSerializer` — and it
+    is handled by generalizing quick-book's own auto-allocation
+    (`_allocate_seats`) to run whenever `travelers` is given instead of
+    only when `is_quick_book(trip)` is true, then threading each entry
+    onto its allocated seat exactly like an explicit `seats[].traveler`
+    would be. `traveler` and `travelers` are mutually exclusive in
+    practice (only one caller ever sends either), but nothing here
+    enforces that — the serializer layer does.
     """
     open_seating = trip.booking_mode == Business.BookingMode.OPEN_SEATING
     seats = seats or []
@@ -269,6 +296,8 @@ def create_booking(
         passenger_count=passenger_count,
         from_stop=from_stop,
         to_stop=to_stop,
+        traveler=traveler,
+        travelers=travelers,
     )
     client_id = str(trip.client_id)
 
@@ -318,7 +347,15 @@ def create_booking(
                     to_stop=to_stop,
                 )
                 total_amount: Decimal = booking.total_amount
-                if traveler is not None:
+                if travelers is not None:
+                    for lead_traveler in travelers:
+                        _create_traveler(
+                            client=trip.client,
+                            booking=booking,
+                            seat_reservation=None,
+                            data=lead_traveler,
+                        )
+                elif traveler is not None:
                     _create_traveler(
                         client=trip.client, booking=booking, seat_reservation=None, data=traveler
                     )
@@ -339,8 +376,18 @@ def create_booking(
                 return booking
 
             quick_book = is_quick_book(trip)
-            if quick_book:
-                assert passenger_count is not None
+            # `travelers` given with no explicit `seats` means auto-
+            # allocate regardless of `is_quick_book` — the marketplace
+            # path (docs/specs/22-marketplace.md slice 3), which applies
+            # even on a trip whose Business would otherwise require a
+            # chosen seat. `quick_book` keeps its own, narrower meaning
+            # (the operator's own `seat_selection_enabled=False` policy)
+            # for the pre-existing, `traveler`-singular/no-traveler-at-all
+            # callers below.
+            auto_assign = not seats and travelers is not None
+            if quick_book or auto_assign:
+                count = len(travelers) if travelers is not None else passenger_count
+                assert count is not None
                 assert from_stop is not None and to_stop is not None
                 # Allocated here, inside the transaction, rather than by
                 # the caller: the seats a request is given must be free
@@ -350,8 +397,13 @@ def create_booking(
                     trip=trip,
                     from_stop=from_stop,
                     to_stop=to_stop,
-                    passenger_count=passenger_count,
+                    passenger_count=count,
                 )
+                if travelers is not None:
+                    seats = [
+                        {**seat_request, "traveler": seat_traveler}
+                        for seat_request, seat_traveler in zip(seats, travelers, strict=True)
+                    ]
 
             # Purchase-time quote — `as_of` defaults to now inside
             # get_fare, so a fare scheduled for next month does not
@@ -401,11 +453,14 @@ def create_booking(
                     )
             # Quick-book is a "places" purchase like open seating (the
             # passenger said how many, not which seats) even though it
-            # holds real named seats under the hood — so its traveler is
-            # the same single lead-traveler-on-the-booking shape open
-            # seating's own early return already uses above, not a
-            # per-seat one (quick-book's own allocated `seats` carry no
-            # `traveler` key at all, since the passenger never named any).
+            # holds real named seats under the hood — so a caller using
+            # the older, singular `traveler` field gets the same single
+            # lead-traveler-on-the-booking shape open seating's own early
+            # return already uses above, not a per-seat one. Only reached
+            # when `travelers` (plural) was *not* given — that path
+            # already attached one traveler per allocated seat above,
+            # via each seat's own `traveler` key, and `traveler`
+            # (singular) is never also set alongside it in practice.
             if quick_book and traveler is not None:
                 _create_traveler(
                     client=trip.client, booking=booking, seat_reservation=None, data=traveler

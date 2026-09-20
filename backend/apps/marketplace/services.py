@@ -18,6 +18,7 @@ from apps.identity.models import User
 from apps.network.models import Stop
 from apps.network.services import find_route_stop_matches_across_clients
 from apps.scheduling.models import Trip
+from apps.seating.services import get_bookability
 
 
 @contextmanager
@@ -82,6 +83,9 @@ def search_trips_across_clients(
                         )
                     except FareNotConfigured:
                         continue
+                    bookability = get_bookability(
+                        trip=trip, from_stop=match.from_stop, to_stop=match.to_stop
+                    )
                 results.append(
                     {
                         "trip": trip,
@@ -89,6 +93,7 @@ def search_trips_across_clients(
                         "to_stop": match.to_stop,
                         "stops_between": match.stops_between,
                         "fare": {"amount": quote.amount, "currency": quote.currency},
+                        "capacity_remaining": bookability.capacity_remaining,
                     }
                 )
     return results

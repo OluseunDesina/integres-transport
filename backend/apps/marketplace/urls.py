@@ -29,6 +29,11 @@ urlpatterns = [
         name="marketplace-booking-create",
     ),
     path(
+        "marketplace/bookings/<uuid:pk>/reservations/<uuid:reservation_pk>/change-seat/",
+        views.MarketplaceBookingChangeSeatView.as_view(),
+        name="marketplace-booking-change-seat",
+    ),
+    path(
         "marketplace/payments/",
         views.MarketplacePaymentIntentCreateView.as_view(),
         name="marketplace-payment-create",
